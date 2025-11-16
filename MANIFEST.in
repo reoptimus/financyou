@@ -1,0 +1,26 @@
+# Include documentation files
+include README.md
+include LICENSE
+include requirements.txt
+
+# Include package README files
+recursive-include time_series_slicer *.md
+recursive-include investment_calculator *.md
+
+# Include example files
+recursive-include examples *.py
+recursive-include investment_calculator/examples *.py
+
+# Exclude test files from distribution
+recursive-exclude tests *
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+
+# Exclude legacy files from distribution
+recursive-exclude legacy *
+
+# Exclude development files
+exclude .gitignore
+exclude .git*
+exclude *.yml
+exclude *.yaml
