@@ -132,3 +132,16 @@ dmypy.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Documentation builds
+docs/_build/
+docs/_static/
+docs/_templates/
+
+# Data files (if needed, uncomment the following)
+# *.csv
+# *.xlsx
+# *.xls
+
+# Jupyter notebooks (if you want to ignore them)
+# *.ipynb
