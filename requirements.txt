@@ -2,3 +2,9 @@
 pandas>=1.0.0
 numpy>=1.18.0
 scipy>=1.7.0
+
+# For Excel file reading (EIOPA curves)
+openpyxl>=3.0.0
+
+# For visualization (optional but recommended)
+matplotlib>=3.0.0
