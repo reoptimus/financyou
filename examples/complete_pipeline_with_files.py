@@ -67,7 +67,7 @@ def load_json_config(filename):
 def save_results(results, output_dir='outputs'):
     """Save results to files."""
     output_path = Path(__file__).parent.parent / output_dir
-    output_path.mkdir(exist_ok=True)
+    output_path.mkdir(parents=True, exist_ok=True)
 
     # Save HTML report
     if 'report' in results and results['report'].get('html'):
