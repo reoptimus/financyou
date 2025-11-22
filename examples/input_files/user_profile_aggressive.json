@@ -1,0 +1,61 @@
+{
+  "_comment": "Aggressive Investor Profile",
+  "_description": "Young investor (28) with high risk tolerance and long time horizon",
+
+  "user_profile": {
+    "personal_info": {
+      "age": 28,
+      "retirement_age": 60,
+      "life_expectancy": 90,
+      "country": "US",
+      "currency": "USD"
+    },
+
+    "financial_situation": {
+      "current_savings": 25000,
+      "annual_income": 85000,
+      "annual_expenses": 55000,
+      "debt": {
+        "mortgage": 0,
+        "student_loans": 35000,
+        "other": 0
+      }
+    },
+
+    "investment_preferences": {
+      "risk_tolerance": "aggressive",
+      "investment_goal": "wealth",
+      "time_horizon": 32,
+      "esg_preferences": false,
+      "liquidity_needs": 0.05
+    },
+
+    "constraints": {
+      "max_equity_allocation": 0.95,
+      "min_bond_allocation": 0.05,
+      "exclude_sectors": [],
+      "rebalancing_frequency": "annual"
+    }
+  },
+
+  "contribution_schedule": [
+    {
+      "_comment": "First 15 years - building foundation",
+      "start_year": 0,
+      "end_year": 15,
+      "monthly_amount": 750,
+      "annual_increase": 0.04,
+      "account_type": "tax_free"
+    },
+    {
+      "_comment": "Next 17 years - peak earning years",
+      "start_year": 15,
+      "end_year": 32,
+      "monthly_amount": 1500,
+      "annual_increase": 0.03,
+      "account_type": "tax_deferred"
+    }
+  ],
+
+  "withdrawal_schedule": []
+}

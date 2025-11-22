@@ -1,0 +1,33 @@
+{
+  "_comment": "Portfolio Optimization Configuration",
+  "_description": "Controls how the portfolio is optimized",
+
+  "optimization_objective": "max_sharpe",
+  "_available_objectives": [
+    "max_sharpe",
+    "min_volatility",
+    "max_return",
+    "target_return",
+    "risk_parity",
+    "equal_weight"
+  ],
+
+  "optimization_params": {
+    "target_return": 0.08,
+    "risk_aversion": 5.0,
+    "confidence_level": 0.95,
+    "min_weight": 0.0,
+    "max_weight": 1.0,
+
+    "transaction_costs": {
+      "stocks": 0.001,
+      "bonds": 0.0005,
+      "real_estate": 0.002
+    },
+
+    "rebalancing_threshold": 0.05
+  },
+
+  "goal_amount": 2000000,
+  "_goal_description": "Target wealth for retirement (e.g., $2 million)"
+}
