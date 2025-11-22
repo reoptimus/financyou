@@ -2,7 +2,7 @@
 FinancYou Interactive Dashboard
 
 A Streamlit web application for financial planning and portfolio optimization.
-Provides an interactive interface to the FinancYou modular system.
+Enhanced version inspired by R Shiny interface with comprehensive sections.
 """
 
 import streamlit as st
@@ -11,6 +11,8 @@ import numpy as np
 import json
 from pathlib import Path
 import sys
+import plotly.express as px
+import plotly.graph_objects as go
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
