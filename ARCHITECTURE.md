@@ -306,6 +306,11 @@ FinancYou is a comprehensive financial planning and investment optimization syst
         'by_account_type': dict        # Sliced by account type
     },
 
+    'time_series_slicer': TimeSeriesSlicer,  # General-purpose time series slicing
+                                             # Provides: slice_by_time(), slice_by_index(),
+                                             #          slice_by_window(), split_by_ratio(),
+                                             #          slice_by_value()
+
     'validation_warnings': list,       # Any issues found during validation
 
     'summary_statistics': {
@@ -320,9 +325,12 @@ FinancYou is a comprehensive financial planning and investment optimization syst
 **Key Features**:
 - Input validation and sanitization
 - Risk tolerance assessment
-- Time series slicing (by period, goal, account type)
+- **Dual slicing capabilities**:
+  - Domain-specific: By life stage, goal, account type
+  - General-purpose: Time range, index, window, ratio, value-based
 - Glide path generation (age-based allocation)
 - Integration with web UI API
+- Integration with `time_series_slicer` library for advanced operations
 
 **Dependencies**: Module 2, Pandas, time_series_slicer
 
