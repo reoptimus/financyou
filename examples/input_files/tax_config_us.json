@@ -1,0 +1,27 @@
+{
+  "_comment": "US Tax Configuration",
+  "_description": "Tax rates and account allocation for US investors",
+
+  "jurisdiction": "US",
+
+  "investment_allocation": {
+    "_comment": "How assets are distributed across account types",
+    "stocks": {
+      "taxable": 0.60,
+      "tax_deferred": 0.30,
+      "tax_free": 0.10
+    },
+    "bonds": {
+      "taxable": 0.40,
+      "tax_deferred": 0.50,
+      "tax_free": 0.10
+    },
+    "real_estate": {
+      "taxable": 0.70,
+      "tax_deferred": 0.20,
+      "tax_free": 0.10
+    }
+  },
+
+  "_note": "Tax rates are automatically loaded from preset for jurisdiction"
+}

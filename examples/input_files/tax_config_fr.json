@@ -1,0 +1,27 @@
+{
+  "_comment": "French Tax Configuration",
+  "_description": "Tax rates and account allocation for French investors (PEA, etc.)",
+
+  "jurisdiction": "FR",
+
+  "investment_allocation": {
+    "_comment": "Asset allocation across French account types",
+    "stocks": {
+      "taxable": 0.50,
+      "tax_deferred": 0.20,
+      "tax_free": 0.30
+    },
+    "bonds": {
+      "taxable": 0.60,
+      "tax_deferred": 0.30,
+      "tax_free": 0.10
+    },
+    "real_estate": {
+      "taxable": 0.80,
+      "tax_deferred": 0.10,
+      "tax_free": 0.10
+    }
+  },
+
+  "_note": "French tax rates (PFU 30% + prélèvements sociaux 17.2%) loaded from preset"
+}

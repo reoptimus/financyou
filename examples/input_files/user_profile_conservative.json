@@ -1,0 +1,53 @@
+{
+  "_comment": "Conservative Investor Profile",
+  "_description": "Older investor (55) with lower risk tolerance approaching retirement",
+
+  "user_profile": {
+    "personal_info": {
+      "age": 55,
+      "retirement_age": 65,
+      "life_expectancy": 90,
+      "country": "US",
+      "currency": "USD"
+    },
+
+    "financial_situation": {
+      "current_savings": 500000,
+      "annual_income": 120000,
+      "annual_expenses": 80000,
+      "debt": {
+        "mortgage": 150000,
+        "student_loans": 0,
+        "other": 0
+      }
+    },
+
+    "investment_preferences": {
+      "risk_tolerance": "conservative",
+      "investment_goal": "retirement",
+      "time_horizon": 10,
+      "esg_preferences": true,
+      "liquidity_needs": 0.15
+    },
+
+    "constraints": {
+      "max_equity_allocation": 0.50,
+      "min_bond_allocation": 0.40,
+      "exclude_sectors": [],
+      "rebalancing_frequency": "quarterly"
+    }
+  },
+
+  "contribution_schedule": [
+    {
+      "_comment": "Final 10 years before retirement - maximizing contributions",
+      "start_year": 0,
+      "end_year": 10,
+      "monthly_amount": 2000,
+      "annual_increase": 0.02,
+      "account_type": "tax_deferred"
+    }
+  ],
+
+  "withdrawal_schedule": []
+}

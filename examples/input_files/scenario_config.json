@@ -1,0 +1,27 @@
+{
+  "_comment": "Economic Scenario Generator Configuration",
+  "_description": "This file controls how economic scenarios are generated",
+
+  "num_scenarios": 1000,
+  "time_horizon": 30,
+  "timestep": 1.0,
+  "use_stochastic": false,
+  "currency": "USD",
+  "calibration_date": "2025-01-01",
+
+  "economic_params": {
+    "_comment": "Override default economic assumptions",
+    "inflation_mean": 0.025,
+    "inflation_volatility": 0.015,
+    "interest_mean": 0.03,
+    "interest_volatility": 0.02,
+    "equity_drift": 0.10,
+    "equity_volatility": 0.18,
+    "bond_return_mean": 0.05,
+    "bond_return_std": 0.07,
+    "real_estate_drift": 0.08,
+    "real_estate_volatility": 0.12,
+    "gdp_growth_mean": 0.025,
+    "gdp_growth_std": 0.02
+  }
+}
