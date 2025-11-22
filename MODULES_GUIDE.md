@@ -260,11 +260,12 @@ results = {
         'recommended_allocation': {...},
         'glide_path': pd.DataFrame
     },
-    'sliced_plans': {
+    'sliced_plans': {                      # Domain-specific slicing
         'by_life_stage': {...},
         'by_goal': {...},
         'by_account_type': {...}
     },
+    'time_series_slicer': TimeSeriesSlicer, # General-purpose slicing (NEW!)
     'validation_warnings': [...],
     'summary_statistics': {...}
 }
@@ -286,6 +287,35 @@ time_series = results['investment_time_series']
 risk_profile = results['risk_profile']
 warnings = results['validation_warnings']
 
+# DOMAIN-SPECIFIC SLICING (Investment planning-specific)
+sliced_plans = results['sliced_plans']
+
+# Get accumulation phase data
+accumulation_data = sliced_plans['by_life_stage']['accumulation']
+
+# Get retirement contributions only
+retirement_plan = sliced_plans['by_goal']['retirement']
+
+# Get tax-deferred account contributions
+tax_deferred = sliced_plans['by_account_type']['tax_deferred']
+
+# GENERAL TIME SERIES SLICING (Generic time series operations)
+slicer = results['time_series_slicer']
+
+# Slice by index (first 10 years)
+first_10_years = slicer.slice_by_index(0, 10)
+
+# Slice by value (contributions > $5000)
+large_contributions = slicer.slice_by_value('contribution', min_value=5000)
+
+# Rolling windows (5-year windows)
+for window in slicer.slice_by_window(window_size=5, overlap=False):
+    avg_contribution = window['contribution'].mean()
+    print(f"5-year average contribution: ${avg_contribution:,.0f}")
+
+# Train/test split (70/30)
+train_data, test_data = slicer.split_by_ratio([0.7, 0.3])
+
 # Quick usage
 simple_config = user_profile.create_simple_profile(
     age=35,
@@ -299,10 +329,12 @@ results = manager.process(simple_config)
 
 **Key Features**:
 - Input validation and sanitization
-- Life stage identification
-- Risk profiling and glide path
-- Time series slicing
+- Life stage identification (accumulation, transition, distribution)
+- Risk profiling and glide path generation
+- **Domain-specific slicing**: By life stage, goal, and account type
+- **General time series slicing**: Index, window, ratio, and value-based slicing
 - Default schedules for contributions/withdrawals
+- Integration with `time_series_slicer` library for advanced operations
 
 ---
 

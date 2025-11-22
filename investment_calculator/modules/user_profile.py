@@ -63,18 +63,36 @@ OUTPUT STRUCTURE:
     'investment_time_series': pd.DataFrame,
     'life_stages': dict,
     'risk_profile': dict,
-    'sliced_plans': dict,
+    'sliced_plans': dict,              # Domain-specific slicing
+    'time_series_slicer': TimeSeriesSlicer,  # General-purpose time series slicing
     'validation_warnings': list,
     'summary_statistics': dict
 }
+
+SLICING CAPABILITIES:
+This module provides two types of slicing:
+
+1. DOMAIN-SPECIFIC SLICING (sliced_plans):
+   - By life stage (accumulation, transition, distribution)
+   - By goal/purpose (retirement, education, home purchase, etc.)
+   - By account type (taxable, tax-deferred, tax-free)
+
+2. GENERAL TIME SERIES SLICING (time_series_slicer):
+   - By time range (start/end dates)
+   - By index (row numbers)
+   - By window (rolling/sliding windows)
+   - By ratio (train/test splitting)
+   - By value (filter by contribution/withdrawal amounts)
+
+Both are available in the output for maximum flexibility.
 """
 
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Iterator
 from dataclasses import dataclass, field
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Import from existing modules
 from investment_calculator.personal_variables import (
@@ -83,6 +101,9 @@ from investment_calculator.personal_variables import (
     RiskTolerance,
     InvestmentGoal
 )
+
+# Import time series slicer for general-purpose slicing
+from time_series_slicer import TimeSeriesSlicer
 
 
 class LifeStage(Enum):
@@ -168,12 +189,20 @@ class UserProfileManager:
             validated_profile
         )
 
+        # Step 7: Create general-purpose time series slicer
+        # This provides additional slicing capabilities beyond domain-specific slicing
+        time_series_slicer = TimeSeriesSlicer(
+            investment_time_series,
+            time_column='period'  # Use 'period' column for time-based operations
+        )
+
         return {
             'validated_profile': validated_profile,
             'investment_time_series': investment_time_series,
             'life_stages': life_stages,
             'risk_profile': risk_profile,
             'sliced_plans': sliced_plans,
+            'time_series_slicer': time_series_slicer,  # General-purpose slicing
             'validation_warnings': warnings,
             'summary_statistics': summary_stats
         }
