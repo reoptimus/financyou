@@ -179,6 +179,7 @@ Output (HTML report + charts + JSON)
 | **[COMPLETE_GUIDE.md](COMPLETE_GUIDE.md)** | **START HERE** - Complete end-to-end guide |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Technical architecture details |
 | [MODULES_GUIDE.md](MODULES_GUIDE.md) | Per-module API reference |
+| [REOPTIMUS_THEORY.md](REOPTIMUS_THEORY.md) | Mathematical foundations and optimization theory |
 | [examples/input_files/README.md](examples/input_files/README.md) | JSON configuration guide |
 
 ---
@@ -457,5 +458,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - 📚 [Complete Guide](COMPLETE_GUIDE.md) - Start here!
 - 🏗️ [Architecture](ARCHITECTURE.md) - Technical details
 - 📖 [Modules Guide](MODULES_GUIDE.md) - API reference
+- 🧮 [Réoptimus Theory](REOPTIMUS_THEORY.md) - Mathematical foundations
 - 💻 [Examples](examples/) - Runnable code
 - ⚙️ [Config Files](examples/input_files/) - JSON configs
