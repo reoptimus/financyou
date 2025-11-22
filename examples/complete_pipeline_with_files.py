@@ -45,13 +45,23 @@ from investment_calculator.modules import (
 )
 
 
+def remove_comments(obj):
+    """Recursively remove fields starting with underscore from dict/list structures."""
+    if isinstance(obj, dict):
+        return {k: remove_comments(v) for k, v in obj.items() if not k.startswith('_')}
+    elif isinstance(obj, list):
+        return [remove_comments(item) for item in obj]
+    else:
+        return obj
+
+
 def load_json_config(filename):
     """Load JSON configuration file."""
     filepath = Path(__file__).parent / 'input_files' / filename
     with open(filepath, 'r') as f:
         config = json.load(f)
-    # Remove comment fields
-    return {k: v for k, v in config.items() if not k.startswith('_')}
+    # Remove comment fields recursively
+    return remove_comments(config)
 
 
 def save_results(results, output_dir='outputs'):
@@ -183,8 +193,14 @@ def main():
 
     print(f"\nAllocation across account types:")
     for asset, allocation in tax_config_data['investment_allocation'].items():
+        # Skip comment fields
+        if asset.startswith('_') or not isinstance(allocation, dict):
+            continue
         print(f"  {asset}:")
         for account_type, pct in allocation.items():
+            # Skip comment fields in nested dicts
+            if account_type.startswith('_') or not isinstance(pct, (int, float)):
+                continue
             print(f"    {account_type}: {pct:.0%}")
 
     # ========================================================================
