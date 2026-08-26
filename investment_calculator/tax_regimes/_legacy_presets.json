@@ -1,0 +1,93 @@
+{
+  "_comment": "GEL DE L'ANCIEN CODE — NE PAS MODIFIER, NE PAS ENRICHIR. Ces valeurs sont l'extraction fidele du dictionnaire qui etait code en dur dans tax_engine.TaxConfigPreset. Elles n'ont jamais ete verifiees contre une source officielle et comportent des erreurs connues (double comptage du prelevement forfaitaire et des prelevements sociaux en France, IFI reduit a un taux moyen, aucun bareme progressif). Elles ne sont conservees que pour que le comportement numerique reste identique pendant la transition. Le nouveau contrat est tax_regimes/schema.json ; ce fichier disparait a la fin de l'etape 1.A. Une valeur nulle de contribution_limit signifie 'aucune limite' et redevient float('inf') a la lecture, comme dans l'ancien code.",
+  "_status": "frozen-legacy",
+  "presets": {
+    "US": {
+      "jurisdiction": "US",
+      "account_types": {
+        "taxable": {
+          "income_tax_rate": 0.25,
+          "capital_gains_rate": 0.15,
+          "dividend_tax_rate": 0.15,
+          "interest_tax_rate": 0.25,
+          "state_tax": 0.05
+        },
+        "tax_deferred": {
+          "contribution_deduction": true,
+          "withdrawal_tax_rate": 0.25,
+          "early_withdrawal_penalty": 0.1,
+          "age_limit": 59.5
+        },
+        "tax_free": {
+          "contribution_limit": 6500,
+          "age_restrictions": {
+            "min_age_5_years": true
+          },
+          "early_withdrawal_penalty": 0.1
+        }
+      },
+      "social_charges": 0.0765,
+      "wealth_tax": {
+        "enabled": false,
+        "threshold": 0,
+        "rate": 0.0
+      }
+    },
+    "FR": {
+      "jurisdiction": "FR",
+      "account_types": {
+        "taxable": {
+          "income_tax_rate": 0.3,
+          "capital_gains_rate": 0.3,
+          "dividend_tax_rate": 0.3,
+          "interest_tax_rate": 0.3
+        },
+        "tax_deferred": {
+          "contribution_deduction": false,
+          "withdrawal_tax_rate": 0.3,
+          "early_withdrawal_penalty": 0.0
+        },
+        "tax_free": {
+          "contribution_limit": null,
+          "age_restrictions": {
+            "min_holding_5_years": true
+          },
+          "early_withdrawal_penalty": 0.225
+        }
+      },
+      "social_charges": 0.172,
+      "wealth_tax": {
+        "enabled": true,
+        "threshold": 1300000,
+        "rate": 0.005
+      }
+    },
+    "UK": {
+      "jurisdiction": "UK",
+      "account_types": {
+        "taxable": {
+          "income_tax_rate": 0.4,
+          "capital_gains_rate": 0.2,
+          "dividend_tax_rate": 0.3375,
+          "interest_tax_rate": 0.4
+        },
+        "tax_deferred": {
+          "contribution_deduction": true,
+          "withdrawal_tax_rate": 0.4,
+          "early_withdrawal_penalty": 0.0
+        },
+        "tax_free": {
+          "contribution_limit": 20000,
+          "age_restrictions": {},
+          "early_withdrawal_penalty": 0.0
+        }
+      },
+      "social_charges": 0.12,
+      "wealth_tax": {
+        "enabled": false,
+        "threshold": 0,
+        "rate": 0.0
+      }
+    }
+  }
+}

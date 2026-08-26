@@ -1,0 +1,281 @@
+{
+  "$schema": "./schema.json",
+  "schema_version": "0.1",
+  "id": "fr-2026",
+  "country": { "code": "FR", "name": "France", "locale": "fr-FR" },
+  "fiscal_year": 2026,
+  "currency": "EUR",
+
+  "status": "draft",
+  "validation": {
+    "validated_by": null,
+    "validated_on": null,
+    "golden_cases": null,
+    "reviewed_by_professional": false
+  },
+
+  "sources": [
+    {
+      "label": "Service-public.fr — Impôt sur le revenu : tranches et taux d'imposition 2026",
+      "url": "https://www.service-public.gouv.fr/particuliers/actualites/A18045",
+      "consulted_on": "2026-08-25",
+      "covers": ["income_tax.brackets"]
+    },
+    {
+      "label": "À COMPLÉTER — BOFiP, référence par article pour chaque enveloppe",
+      "covers": ["wrappers", "capital_gains", "wealth_tax"]
+    }
+  ],
+
+  "known_gaps": [
+    "STATUT BROUILLON : aucune valeur de ce fichier n'a encore été confrontée à un cas d'or. Ne pas utiliser en production (le chargeur le refuse par défaut).",
+    "Plafond du quotient familial par demi-part non renseigné : à établir en 1.A.",
+    "Contribution exceptionnelle sur les hauts revenus et contribution différentielle non modélisées.",
+    "PER : le plafond de déduction dépend des revenus professionnels de l'année précédente, il n'est pas modélisable par une constante.",
+    "Assurance-vie : le seuil de 150 000 € porte sur les primes versées nettes de rachats, notion non encore représentée dans le moteur.",
+    "PEA-PME et PEA jeunes non modélisés.",
+    "Revenus fonciers : régimes micro-foncier et réel, déficit foncier, dispositifs de défiscalisation immobilière non modélisés.",
+    "Prélèvement forfaitaire non libératoire acompte et sa régularisation non modélisés (sans effet sur un résultat annuel, mais sur la trésorerie oui).",
+    "Barème de l'IFI à vérifier pour le millésime 2026."
+  ],
+
+  "social_contributions": {
+    "investment_income": {
+      "label": "Prélèvements sociaux sur les revenus du capital",
+      "rate": 0.172,
+      "applies_to": ["capital_gains", "dividends", "interest", "rental_income"],
+      "deductible_share": 0.068
+    }
+  },
+
+  "income_tax": {
+    "label": "Impôt sur le revenu",
+    "mode": "progressive",
+    "brackets": [
+      { "lower": 0, "upper": 11600, "rate": 0.0 },
+      { "lower": 11600, "upper": 29579, "rate": 0.11 },
+      { "lower": 29579, "upper": 84577, "rate": 0.30 },
+      { "lower": 84577, "upper": 181917, "rate": 0.41 },
+      { "lower": 181917, "upper": null, "rate": 0.45 }
+    ],
+    "household_quotient": {
+      "enabled": true,
+      "shares_first_adult": 1.0,
+      "shares_second_adult": 1.0,
+      "shares_per_dependent": [0.5, 0.5, 1.0],
+      "cap_per_half_share": null
+    }
+  },
+
+  "flat_tax": {
+    "enabled": true,
+    "label": "Prélèvement forfaitaire unique",
+    "income_tax_rate": 0.128,
+    "social_rate": 0.172,
+    "applies_to": ["capital_gains", "dividends", "interest"],
+    "progressive_option": true
+  },
+
+  "wrappers": [
+    {
+      "id": "cto",
+      "label": "Compte-titres ordinaire",
+      "description": "Aucune contrainte de versement ni d'actif éligible ; imposition des gains à leur réalisation.",
+      "tax_treatment": "taxable",
+      "contribution_limit": null,
+      "contribution_deductible": false,
+      "eligible_assets": ["equity", "bond", "fund", "etf", "money_market"],
+      "growth_taxed_annually": false,
+      "withdrawal_rules": [
+        {
+          "label": "Prélèvement forfaitaire unique, sauf option pour le barème",
+          "income_tax_rate": "flat_tax",
+          "social_rate": "standard",
+          "taxable_base": "gain_only"
+        }
+      ]
+    },
+    {
+      "id": "pea",
+      "label": "Plan d'épargne en actions",
+      "description": "Capitalisation en franchise d'impôt sur le revenu ; exonération d'impôt sur le revenu au-delà de cinq ans de détention, les prélèvements sociaux restant dus.",
+      "tax_treatment": "conditional",
+      "contribution_limit": 150000,
+      "contribution_limit_period": "lifetime",
+      "contribution_deductible": false,
+      "eligible_assets": ["equity_eu", "fund_eu", "etf_eu"],
+      "growth_taxed_annually": false,
+      "withdrawal_rules": [
+        {
+          "label": "Retrait après cinq ans",
+          "when": { "holding_years": { "gte": 5 } },
+          "income_tax_rate": 0.0,
+          "social_rate": "standard",
+          "taxable_base": "proportional_gain"
+        },
+        {
+          "label": "Retrait avant cinq ans",
+          "income_tax_rate": 0.128,
+          "social_rate": "standard",
+          "taxable_base": "proportional_gain"
+        }
+      ]
+    },
+    {
+      "id": "assurance_vie",
+      "label": "Assurance-vie",
+      "description": "Capitalisation en franchise ; au-delà de huit ans, abattement annuel sur les gains puis taux réduit selon l'encours de primes versées.",
+      "tax_treatment": "conditional",
+      "contribution_limit": null,
+      "contribution_deductible": false,
+      "eligible_assets": ["equity", "bond", "fund", "etf", "euro_fund", "real_estate_fund"],
+      "growth_taxed_annually": false,
+      "withdrawal_rules": [
+        {
+          "label": "Rachat après huit ans, primes versées inférieures au seuil",
+          "when": { "holding_years": { "gte": 8 }, "premiums_paid": { "lte": 150000 } },
+          "income_tax_rate": 0.075,
+          "social_rate": "standard",
+          "allowance": {
+            "amount_single": 4600,
+            "amount_couple": 9200,
+            "period": "annual",
+            "against": "income_tax"
+          },
+          "taxable_base": "proportional_gain"
+        },
+        {
+          "label": "Rachat après huit ans, part des primes au-delà du seuil",
+          "when": { "holding_years": { "gte": 8 } },
+          "income_tax_rate": 0.128,
+          "social_rate": "standard",
+          "allowance": {
+            "amount_single": 4600,
+            "amount_couple": 9200,
+            "period": "annual",
+            "against": "income_tax"
+          },
+          "taxable_base": "proportional_gain"
+        },
+        {
+          "label": "Rachat avant huit ans",
+          "income_tax_rate": 0.128,
+          "social_rate": "standard",
+          "taxable_base": "proportional_gain"
+        }
+      ]
+    },
+    {
+      "id": "per",
+      "label": "Plan d'épargne retraite",
+      "description": "Versements déductibles du revenu imposable dans la limite d'un plafond ; imposition à la sortie.",
+      "tax_treatment": "tax_deferred",
+      "contribution_limit": null,
+      "contribution_deductible": true,
+      "contribution_deduction_cap": null,
+      "eligible_assets": ["equity", "bond", "fund", "etf", "euro_fund"],
+      "growth_taxed_annually": false,
+      "withdrawal_rules": [
+        {
+          "label": "Sortie en capital à la retraite, versements déduits à l'entrée",
+          "when": { "exit_form": "lump_sum" },
+          "income_tax_rate": "progressive",
+          "social_rate": "standard",
+          "taxable_base": "full_withdrawal"
+        },
+        {
+          "label": "Sortie en rente",
+          "income_tax_rate": "progressive",
+          "social_rate": "standard",
+          "taxable_base": "full_withdrawal"
+        }
+      ]
+    },
+    {
+      "id": "livret_a",
+      "label": "Livret A",
+      "description": "Exonéré d'impôt sur le revenu et de prélèvements sociaux.",
+      "tax_treatment": "tax_free",
+      "contribution_limit": 22950,
+      "contribution_limit_period": "lifetime",
+      "contribution_deductible": false,
+      "eligible_assets": ["money_market"],
+      "growth_taxed_annually": false,
+      "withdrawal_rules": [
+        {
+          "label": "Retrait, exonération totale",
+          "income_tax_rate": 0.0,
+          "social_rate": "none",
+          "taxable_base": "gain_only"
+        }
+      ]
+    },
+    {
+      "id": "immobilier_direct",
+      "label": "Immobilier détenu en direct",
+      "description": "Revenus fonciers imposés au barème ; plus-values soumises aux abattements pour durée de détention.",
+      "tax_treatment": "taxable",
+      "contribution_limit": null,
+      "contribution_deductible": false,
+      "eligible_assets": ["real_estate"],
+      "growth_taxed_annually": true,
+      "withdrawal_rules": [
+        {
+          "label": "Cession, plus-value après abattements",
+          "income_tax_rate": 0.19,
+          "social_rate": "standard",
+          "taxable_base": "gain_only"
+        }
+      ]
+    }
+  ],
+
+  "capital_gains": {
+    "real_estate": {
+      "primary_residence_exempt": true,
+      "holding_allowances": [
+        {
+          "against": "income_tax",
+          "full_exemption_after_years": 22,
+          "schedule": [
+            { "from_year": 6, "to_year": 21, "rate_per_year": 0.06 },
+            { "from_year": 22, "to_year": 22, "rate_per_year": 0.04 }
+          ]
+        },
+        {
+          "against": "social_contributions",
+          "full_exemption_after_years": 30,
+          "schedule": [
+            { "from_year": 6, "to_year": 21, "rate_per_year": 0.0165 },
+            { "from_year": 22, "to_year": 22, "rate_per_year": 0.016 },
+            { "from_year": 23, "to_year": 30, "rate_per_year": 0.09 }
+          ]
+        }
+      ],
+      "surtax_brackets": [
+        { "lower": 0, "upper": 50000, "rate": 0.0 },
+        { "lower": 50000, "upper": 100000, "rate": 0.02 },
+        { "lower": 100000, "upper": 150000, "rate": 0.03 },
+        { "lower": 150000, "upper": 200000, "rate": 0.04 },
+        { "lower": 200000, "upper": 250000, "rate": 0.05 },
+        { "lower": 250000, "upper": null, "rate": 0.06 }
+      ]
+    }
+  },
+
+  "wealth_tax": {
+    "enabled": true,
+    "label": "Impôt sur la fortune immobilière",
+    "base": ["real_estate"],
+    "threshold": 1300000,
+    "brackets": [
+      { "lower": 0, "upper": 800000, "rate": 0.0 },
+      { "lower": 800000, "upper": 1300000, "rate": 0.005 },
+      { "lower": 1300000, "upper": 2570000, "rate": 0.007 },
+      { "lower": 2570000, "upper": 5000000, "rate": 0.01 },
+      { "lower": 5000000, "upper": 10000000, "rate": 0.0125 },
+      { "lower": 10000000, "upper": null, "rate": 0.015 }
+    ],
+    "primary_residence_allowance": 0.30
+  }
+}
