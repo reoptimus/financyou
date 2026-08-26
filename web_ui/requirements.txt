@@ -1,6 +1,5 @@
-streamlit>=1.28.0
-pandas>=1.5.0
-numpy>=1.24.0
-matplotlib>=3.7.0
-scipy>=1.10.0
-plotly>=5.17.0
+# Fichier conserve pour compatibilite (deploiements Streamlit Cloud, scripts
+# existants). Les dependances de l'interface web sont desormais declarees a la
+# racine du depot dans requirements.txt et dans l'extra "web" de pyproject.toml.
+# Ne rien ajouter ici : ce fichier se contente de rediriger vers la racine.
+-r ../requirements.txt

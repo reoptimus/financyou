@@ -1,26 +1,39 @@
-# Include documentation files
+# Contenu additionnel embarque dans la distribution source (sdist).
+# Les modules Python sont selectionnes par pyproject.toml
+# ([tool.setuptools.packages.find]) ; ce fichier ne gere que les annexes.
+
+# Documentation et licence a la racine
 include README.md
 include LICENSE
 include requirements.txt
+include requirements-dev.txt
+include pyproject.toml
 
-# Include package README files
+# READMEs internes aux paquets
 recursive-include time_series_slicer *.md
 recursive-include investment_calculator *.md
 
-# Include example files
-recursive-include examples *.py
+# Referentiels de donnees du moteur (baremes fiscaux, parametres)
+recursive-include investment_calculator *.json
+
+# Exemples livres avec le paquet investment_calculator
 recursive-include investment_calculator/examples *.py
 
-# Exclude test files from distribution
+# --- Exclusions ---
+# Tests, exemples racine, code legacy et interface web ne sont pas distribues
 recursive-exclude tests *
+recursive-exclude examples *
+recursive-exclude legacy *
+recursive-exclude web_ui *
+recursive-exclude docs *
+
+# Caches, artefacts et fichiers de developpement
 recursive-exclude * __pycache__
 recursive-exclude * *.py[co]
-
-# Exclude legacy files from distribution
-recursive-exclude legacy *
-
-# Exclude development files
+recursive-exclude * *.xlsx
+recursive-exclude * *.Rda
 exclude .gitignore
-exclude .git*
-exclude *.yml
-exclude *.yaml
+exclude .dockerignore
+exclude Dockerfile
+exclude docker-compose.yml
+exclude UI.R

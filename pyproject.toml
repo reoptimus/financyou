@@ -1,0 +1,94 @@
+# Configuration de packaging FinancYou (PEP 621).
+# Le nom de distribution est "financyou" ; les paquets importables restent
+# `investment_calculator` et `time_series_slicer`.
+# Les configurations des outils de qualite vivent dans des fichiers dedies :
+# ruff.toml et mypy.ini. Ne rien ajouter ici pour ces outils.
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "financyou"
+version = "0.2.0"
+description = "FinancYou - plateforme de planification financiere et d'optimisation de portefeuille (scenarios economiques, fiscalite, ESG)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "FinancYou Team" }]
+keywords = [
+    "finance",
+    "investissement",
+    "portefeuille",
+    "optimisation",
+    "fiscalite",
+    "esg",
+    "series-temporelles",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: French",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Scientific/Engineering",
+]
+
+# Dependances d'execution du moteur financier (bornes hautes sur la version
+# majeure pour eviter les ruptures d'API en amont).
+dependencies = [
+    "pandas>=2.1,<4",
+    "numpy>=1.26,<3",
+    "scipy>=1.11,<2",
+    "openpyxl>=3.1,<4",
+    "matplotlib>=3.8,<4",
+    # Validation des regimes fiscaux, donnees d'entree JSON du modele
+    # (voir docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md).
+    "jsonschema>=4.20,<5",
+]
+
+[project.optional-dependencies]
+# Interface web Streamlit.
+web = [
+    "streamlit>=1.28,<2",
+    "plotly>=5.17,<7",
+]
+# Outillage de test et de qualite.
+dev = [
+    "pytest>=8.0,<10",
+    "pytest-cov>=4.1,<8",
+    "ruff>=0.6,<1",
+    "mypy>=1.10,<2",
+    "types-openpyxl>=3.1",
+    "types-requests>=2.31",
+]
+
+[project.urls]
+Homepage = "https://github.com/reoptimus/financyou"
+Source = "https://github.com/reoptimus/financyou"
+"Bug Reports" = "https://github.com/reoptimus/financyou/issues"
+
+[tool.setuptools]
+zip-safe = false
+
+# Detection automatique des paquets : on embarque le moteur et le slicer,
+# on exclut les tests, exemples, code legacy et l'interface web (non importable
+# comme paquet, elle est livree via l'image Docker).
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["investment_calculator*", "time_series_slicer*"]
+exclude = ["tests*", "examples*", "legacy*", "web_ui*", "docs*"]
+
+# Donnees embarquees dans la distribution : les referentiels JSON du moteur,
+# y compris le futur repertoire investment_calculator/tax_regimes/.
+[tool.setuptools.package-data]
+investment_calculator = [
+    "*.json",
+    "**/*.json",
+    "tax_regimes/*.json",
+]
