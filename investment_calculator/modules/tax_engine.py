@@ -1,7 +1,8 @@
 """
 Module 2: Tax-Integrated Scenario Engine (GSE+)
 
-This module applies tax treatment to economic scenarios based on account types and jurisdiction rules.
+This module applies tax treatment to economic scenarios based on account types
+and jurisdiction rules.
 
 INPUT STRUCTURE:
 {
@@ -67,11 +68,22 @@ OUTPUT STRUCTURE:
 }
 """
 
-import numpy as np
-import pandas as pd
-from typing import Dict, Optional, List, Tuple
-from enum import Enum
+import copy
+import json
+import logging
+import time
+import warnings
 from dataclasses import dataclass
+from enum import Enum
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, ClassVar
+
+import pandas as pd
+
+# Journalisation : logger nommé d'après le module, il hérite donc de la
+# configuration posée par investment_calculator.logging_config.configure_logging().
+logger = logging.getLogger(__name__)
 
 
 class AccountType(Enum):
@@ -92,109 +104,85 @@ class TaxJurisdiction(Enum):
 
 @dataclass
 class TaxConfigPreset:
-    """Pre-configured tax settings for major jurisdictions"""
+    """
+    Accès aux anciennes configurations fiscales par juridiction.
+
+    .. deprecated::
+        Cette classe ne survit que le temps de la transition. Les valeurs
+        qu'elle sert proviennent désormais de
+        ``investment_calculator/tax_regimes/_legacy_presets.json``, un fichier
+        gelé qui reproduit à l'identique le dictionnaire autrefois codé en dur
+        ici — erreurs comprises, notamment le double comptage du prélèvement
+        forfaitaire et des prélèvements sociaux en France.
+
+        Le contrat cible est :mod:`investment_calculator.tax_regime` : la
+        fiscalité est une donnée d'entrée, décrite par pays et par millésime
+        dans ``tax_regimes/*.json`` et validée par ``tax_regimes/schema.json``.
+        Voir ``docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md``.
+
+        Cette classe et son fichier de données disparaissent à la fin de
+        l'étape 1.A, lorsque le moteur consommera directement les régimes.
+    """
+
+    #: Emplacement des valeurs héritées, gelées hors du code.
+    LEGACY_DATA_PATH: ClassVar[Path] = (
+        Path(__file__).resolve().parent.parent / "tax_regimes" / "_legacy_presets.json"
+    )
 
     @staticmethod
-    def get_preset(jurisdiction: str) -> Dict:
+    @lru_cache(maxsize=1)
+    def _load_legacy_presets() -> dict[str, dict[str, Any]]:
+        """Lire une fois pour toutes le fichier de valeurs héritées."""
+        path = TaxConfigPreset.LEGACY_DATA_PATH
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            raise FileNotFoundError(
+                f"Fichier de configurations fiscales héritées introuvable : {path}. "
+                f"Il fait partie des données du paquet et doit être installé avec lui."
+            ) from exc
+
+        # `json.loads` renvoie Any : on annote la variable intermédiaire pour que
+        # le type de retour soit vérifié plutôt que propagé en Any.
+        presets: dict[str, dict[str, Any]] = raw["presets"]
+        # L'infini n'est pas représentable en JSON strict : il est stocké à null
+        # et restauré ici, pour que le comportement reste celui de l'ancien code.
+        for preset in presets.values():
+            tax_free = preset.get("account_types", {}).get("tax_free", {})
+            if tax_free.get("contribution_limit", 0) is None:
+                tax_free["contribution_limit"] = float("inf")
+        return presets
+
+    @staticmethod
+    def get_preset(jurisdiction: str) -> dict:
         """
-        Get preset tax configuration for a jurisdiction.
+        Configuration fiscale héritée pour une juridiction.
+
+        .. deprecated::
+            Utilisez :func:`investment_calculator.tax_regime.load_regime`.
 
         Args:
-            jurisdiction: Country code
+            jurisdiction: code pays, par exemple ``"FR"``.
 
         Returns:
-            Tax configuration dictionary
+            Le dictionnaire de configuration, dans sa forme historique.
+
+        Raises:
+            ValueError: la juridiction n'a pas de configuration héritée.
         """
-        presets = {
-            'US': {
-                'jurisdiction': 'US',
-                'account_types': {
-                    'taxable': {
-                        'income_tax_rate': 0.25,
-                        'capital_gains_rate': 0.15,
-                        'dividend_tax_rate': 0.15,
-                        'interest_tax_rate': 0.25,
-                        'state_tax': 0.05
-                    },
-                    'tax_deferred': {
-                        'contribution_deduction': True,
-                        'withdrawal_tax_rate': 0.25,
-                        'early_withdrawal_penalty': 0.10,
-                        'age_limit': 59.5
-                    },
-                    'tax_free': {
-                        'contribution_limit': 6500,
-                        'age_restrictions': {'min_age_5_years': True},
-                        'early_withdrawal_penalty': 0.10
-                    }
-                },
-                'social_charges': 0.0765,  # Social Security + Medicare
-                'wealth_tax': {
-                    'enabled': False,
-                    'threshold': 0,
-                    'rate': 0.0
-                }
-            },
-            'FR': {
-                'jurisdiction': 'FR',
-                'account_types': {
-                    'taxable': {
-                        'income_tax_rate': 0.30,
-                        'capital_gains_rate': 0.30,  # PFU (flat tax)
-                        'dividend_tax_rate': 0.30,
-                        'interest_tax_rate': 0.30
-                    },
-                    'tax_deferred': {
-                        'contribution_deduction': False,
-                        'withdrawal_tax_rate': 0.30,
-                        'early_withdrawal_penalty': 0.0
-                    },
-                    'tax_free': {
-                        'contribution_limit': float('inf'),  # PEA has no annual limit
-                        'age_restrictions': {'min_holding_5_years': True},
-                        'early_withdrawal_penalty': 0.225
-                    }
-                },
-                'social_charges': 0.172,  # Prélèvements sociaux
-                'wealth_tax': {
-                    'enabled': True,
-                    'threshold': 1_300_000,
-                    'rate': 0.005  # Simplified average IFI rate
-                }
-            },
-            'UK': {
-                'jurisdiction': 'UK',
-                'account_types': {
-                    'taxable': {
-                        'income_tax_rate': 0.40,
-                        'capital_gains_rate': 0.20,
-                        'dividend_tax_rate': 0.3375,
-                        'interest_tax_rate': 0.40
-                    },
-                    'tax_deferred': {
-                        'contribution_deduction': True,
-                        'withdrawal_tax_rate': 0.40,
-                        'early_withdrawal_penalty': 0.0
-                    },
-                    'tax_free': {
-                        'contribution_limit': 20000,  # ISA limit
-                        'age_restrictions': {},
-                        'early_withdrawal_penalty': 0.0
-                    }
-                },
-                'social_charges': 0.12,  # National Insurance
-                'wealth_tax': {
-                    'enabled': False,
-                    'threshold': 0,
-                    'rate': 0.0
-                }
-            }
-        }
-
+        warnings.warn(
+            "TaxConfigPreset.get_preset est obsolète : la fiscalité est une donnée "
+            "d'entrée du modèle. Utilisez investment_calculator.tax_regime.load_regime, "
+            "qui charge un régime validé par pays et par millésime.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        presets = TaxConfigPreset._load_legacy_presets()
         if jurisdiction not in presets:
-            raise ValueError(f"Unknown jurisdiction: {jurisdiction}. Supported: {list(presets.keys())}")
-
-        return presets[jurisdiction]
+            raise ValueError(
+                f"Unknown jurisdiction: {jurisdiction}. Supported: {list(presets.keys())}"
+            )
+        return copy.deepcopy(presets[jurisdiction])
 
 
 class TaxEngine:
@@ -219,11 +207,11 @@ class TaxEngine:
         ... })
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the Tax Engine."""
         pass
 
-    def apply_taxes(self, config: Dict) -> Dict:
+    def apply_taxes(self, config: dict) -> dict:
         """
         Apply tax treatment to economic scenarios.
 
@@ -233,12 +221,20 @@ class TaxEngine:
         Returns:
             Dictionary with after-tax scenarios, tax tables, account balances, insights
         """
+        # Chronomètre pour tracer la durée du traitement fiscal.
+        start_time = time.perf_counter()
+
         # Validate configuration
         validated_config = self._validate_config(config)
 
         scenarios_df = validated_config['scenarios']
         tax_config = validated_config['tax_config']
         allocation = validated_config['investment_allocation']
+
+        logger.info(
+            "Début de l'application du régime fiscal sur %d lignes de scénarios",
+            len(scenarios_df),
+        )
 
         # Calculate after-tax returns for each account type
         after_tax_scenarios = self._calculate_after_tax_scenarios(
@@ -260,6 +256,12 @@ class TaxEngine:
             tax_tables, account_balances, tax_config
         )
 
+        logger.info(
+            "Fin de l'application du régime fiscal en %.3f s : %d lignes après impôt",
+            time.perf_counter() - start_time,
+            len(after_tax_scenarios),
+        )
+
         return {
             'after_tax_scenarios': after_tax_scenarios,
             'tax_tables': tax_tables,
@@ -267,7 +269,7 @@ class TaxEngine:
             'optimization_insights': insights
         }
 
-    def _validate_config(self, config: Dict) -> Dict:
+    def _validate_config(self, config: dict) -> dict:
         """
         Validate and complete configuration.
 
@@ -297,8 +299,8 @@ class TaxEngine:
     def _calculate_after_tax_scenarios(
         self,
         scenarios_df: pd.DataFrame,
-        tax_config: Dict,
-        allocation: Dict
+        tax_config: dict,
+        allocation: dict
     ) -> pd.DataFrame:
         """
         Calculate after-tax returns for all scenarios.
@@ -316,13 +318,14 @@ class TaxEngine:
 
         # Get tax rates for different account types
         taxable_config = tax_config['account_types']['taxable']
-        tax_deferred_config = tax_config['account_types']['tax_deferred']
         social_charges = tax_config['social_charges']
 
         # Calculate after-tax returns for each asset class
 
         # 1. STOCKS
-        stock_allocation = allocation.get('stocks', {'taxable': 1.0, 'tax_deferred': 0.0, 'tax_free': 0.0})
+        stock_allocation = allocation.get(
+            'stocks', {'taxable': 1.0, 'tax_deferred': 0.0, 'tax_free': 0.0}
+        )
 
         # Taxable: dividends taxed annually, capital gains deferred
         dividend_yield = 0.02
@@ -331,7 +334,11 @@ class TaxEngine:
 
         # Weighted after-tax stock return
         stock_after_tax = (
-            scenarios_df['stock_return'] * stock_allocation['taxable'] * (1 - stock_taxable_drag / scenarios_df['stock_return'].clip(lower=0.01)) +
+            scenarios_df['stock_return'] * stock_allocation['taxable']
+            * (
+                1 - stock_taxable_drag
+                / scenarios_df['stock_return'].clip(lower=0.01)
+            ) +
             scenarios_df['stock_return'] * stock_allocation['tax_deferred'] +  # No annual tax
             scenarios_df['stock_return'] * stock_allocation['tax_free']  # No tax
         )
@@ -339,7 +346,9 @@ class TaxEngine:
         result_df['stock_return_after_tax'] = stock_after_tax
 
         # 2. BONDS
-        bond_allocation = allocation.get('bonds', {'taxable': 1.0, 'tax_deferred': 0.0, 'tax_free': 0.0})
+        bond_allocation = allocation.get(
+            'bonds', {'taxable': 1.0, 'tax_deferred': 0.0, 'tax_free': 0.0}
+        )
 
         # Taxable: interest taxed as ordinary income
         interest_tax = taxable_config['interest_tax_rate'] + social_charges
@@ -353,7 +362,9 @@ class TaxEngine:
         result_df['bond_return_after_tax'] = bond_after_tax
 
         # 3. REAL ESTATE
-        re_allocation = allocation.get('real_estate', {'taxable': 1.0, 'tax_deferred': 0.0, 'tax_free': 0.0})
+        re_allocation = allocation.get(
+            'real_estate', {'taxable': 1.0, 'tax_deferred': 0.0, 'tax_free': 0.0}
+        )
 
         # Taxable: rental income (40%) + appreciation (60%)
         rental_portion = 0.4
@@ -392,9 +403,9 @@ class TaxEngine:
         self,
         pre_tax_df: pd.DataFrame,
         after_tax_df: pd.DataFrame,
-        tax_config: Dict,
-        allocation: Dict
-    ) -> Dict[str, pd.DataFrame]:
+        tax_config: dict,
+        allocation: dict
+    ) -> dict[str, pd.DataFrame]:
         """
         Calculate detailed tax tables.
 
@@ -494,9 +505,9 @@ class TaxEngine:
     def _simulate_account_balances(
         self,
         after_tax_df: pd.DataFrame,
-        allocation: Dict,
-        tax_config: Dict
-    ) -> Dict[str, pd.DataFrame]:
+        allocation: dict,
+        tax_config: dict
+    ) -> dict[str, pd.DataFrame]:
         """
         Simulate account balances over time.
 
@@ -534,10 +545,10 @@ class TaxEngine:
 
     def _generate_optimization_insights(
         self,
-        tax_tables: Dict,
-        account_balances: Dict,
-        tax_config: Dict
-    ) -> Dict:
+        tax_tables: dict,
+        account_balances: dict,
+        tax_config: dict
+    ) -> dict:
         """
         Generate tax optimization insights.
 
@@ -551,7 +562,7 @@ class TaxEngine:
         """
         # Tax loss harvesting opportunities
         # (simplified - would analyze negative returns)
-        tlh_opportunities = []
+        tlh_opportunities: list = []
 
         # Optimal withdrawal sequence
         # Rule: withdraw from taxable first, then tax-deferred, then tax-free
@@ -579,8 +590,8 @@ class TaxEngine:
 def apply_taxes_simple(
     scenarios_df: pd.DataFrame,
     jurisdiction: str = 'US',
-    allocation: Optional[Dict] = None
-) -> Dict:
+    allocation: dict | None = None
+) -> dict:
     """
     Apply taxes with simple configuration.
 

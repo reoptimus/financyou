@@ -1,0 +1,449 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/reoptimus/financyou/schemas/tax_regime-0.1.json",
+  "title": "Régime fiscal FinancYou",
+  "description": "Décrit LA FISCALITÉ d'un pays pour un millésime donné. Ce document est une DONNÉE D'ENTRÉE du modèle : le moteur de calcul ne doit contenir aucun taux, seuil ou abattement en dur. Voir docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md. Ce document ne décrit PAS les hypothèses de marché (rendement du dividende, part de loyer dans le rendement immobilier, primes de risque) : celles-ci relèvent du générateur de scénarios, pas de la fiscalité.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "country",
+    "fiscal_year",
+    "currency",
+    "status",
+    "social_contributions",
+    "income_tax",
+    "wrappers"
+  ],
+  "additionalProperties": false,
+
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Référence facultative vers ce schéma, pour la complétion dans les éditeurs."
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$",
+      "description": "Version du présent schéma à laquelle le document se conforme."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z]{2}-\\d{4}$",
+      "description": "Identifiant du régime : code pays ISO 3166-1 alpha-2 en minuscules, tiret, millésime. Exemple : fr-2026."
+    },
+    "country": {
+      "type": "object",
+      "required": ["code", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}$",
+          "description": "Code pays ISO 3166-1 alpha-2."
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "locale": {
+          "type": "string",
+          "description": "Étiquette de langue BCP 47 utilisée pour présenter ce régime à l'utilisateur, par exemple fr-FR."
+        }
+      }
+    },
+    "fiscal_year": {
+      "type": "integer",
+      "minimum": 1990,
+      "maximum": 2100,
+      "description": "Millésime. Un régime n'est jamais modifié en place : une nouvelle année donne un nouveau fichier, ce qui rend les résultats passés reproductibles."
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "description": "Devise ISO 4217 dans laquelle tous les montants du document sont exprimés."
+    },
+
+    "status": {
+      "enum": ["draft", "validated", "deprecated"],
+      "description": "draft : jamais confronté à des cas d'or, interdit en production. validated : chaque règle est couverte par un cas d'or vérifié. deprecated : millésime remplacé, conservé pour la reproductibilité."
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "validated_by": {
+          "type": ["string", "null"],
+          "description": "Personne ayant validé le régime. Un agent ne peut pas se porter garant d'un taux : ce champ nomme un humain."
+        },
+        "validated_on": { "type": ["string", "null"], "format": "date" },
+        "golden_cases": {
+          "type": ["string", "null"],
+          "description": "Chemin du fichier de cas d'or couvrant ce régime."
+        },
+        "reviewed_by_professional": {
+          "type": "boolean",
+          "description": "Vrai si un fiscaliste a relu le régime."
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "description": "Références officielles ayant servi à établir chaque valeur. Un régime validé sans source n'est pas validé.",
+      "items": {
+        "type": "object",
+        "required": ["label"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": "string" },
+          "url": { "type": "string" },
+          "consulted_on": { "type": "string", "format": "date" },
+          "covers": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Champs du document que cette source justifie."
+          }
+        }
+      }
+    },
+    "known_gaps": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Ce que ce régime ne modélise pas encore, énoncé explicitement. Préférable au silence : une lacune connue est arbitrable, une lacune invisible ne l'est pas."
+    },
+
+    "social_contributions": {
+      "type": "object",
+      "description": "Contributions sociales sur les revenus du capital, distinctes de l'impôt sur le revenu.",
+      "required": ["investment_income"],
+      "additionalProperties": false,
+      "properties": {
+        "investment_income": { "$ref": "#/$defs/socialContribution" },
+        "earned_income": { "$ref": "#/$defs/socialContribution" }
+      }
+    },
+
+    "income_tax": {
+      "type": "object",
+      "required": ["mode"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string" },
+        "mode": {
+          "enum": ["progressive", "flat", "none"],
+          "description": "progressive : barème par tranches. flat : taux unique. none : pas d'impôt sur le revenu."
+        },
+        "brackets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/bracket" },
+          "description": "Tranches ordonnées par seuil croissant. Requis si mode = progressive."
+        },
+        "flat_rate": {
+          "$ref": "#/$defs/rate",
+          "description": "Requis si mode = flat."
+        },
+        "household_quotient": {
+          "type": "object",
+          "description": "Division du revenu imposable par un nombre de parts avant application du barème.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "shares_first_adult": { "type": "number", "minimum": 0 },
+            "shares_second_adult": { "type": "number", "minimum": 0 },
+            "shares_per_dependent": {
+              "type": "array",
+              "items": { "type": "number", "minimum": 0 },
+              "description": "Parts accordées au premier, deuxième, troisième dépendant, etc. La dernière valeur s'applique à tous les suivants."
+            },
+            "cap_per_half_share": {
+              "type": ["number", "null"],
+              "minimum": 0,
+              "description": "Plafonnement de l'avantage procuré par chaque demi-part."
+            }
+          }
+        },
+        "surtaxes": {
+          "type": "array",
+          "description": "Contributions additionnelles assises sur le revenu (par exemple contribution sur les hauts revenus).",
+          "items": {
+            "type": "object",
+            "required": ["label", "brackets"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string" },
+              "brackets": { "type": "array", "items": { "$ref": "#/$defs/bracket" } }
+            }
+          }
+        }
+      }
+    },
+
+    "flat_tax": {
+      "type": "object",
+      "description": "Prélèvement forfaitaire libératoire ou unique applicable aux revenus du capital, avec option possible pour le barème.",
+      "required": ["enabled"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "label": { "type": "string" },
+        "income_tax_rate": { "$ref": "#/$defs/rate" },
+        "social_rate": {
+          "$ref": "#/$defs/rate",
+          "description": "Part sociale du prélèvement. IMPORTANT : le taux global affiché au public est income_tax_rate + social_rate. Ne jamais additionner social_contributions.investment_income par-dessus, sous peine de double comptage."
+        },
+        "applies_to": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/incomeCategory" }
+        },
+        "progressive_option": {
+          "type": "boolean",
+          "description": "Vrai si le contribuable peut renoncer au forfait pour être imposé au barème."
+        }
+      }
+    },
+
+    "wrappers": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Enveloppes de détention. C'est l'unité de modélisation : un actif n'est pas taxé en soi, il est taxé au sein d'une enveloppe.",
+      "items": { "$ref": "#/$defs/wrapper" }
+    },
+
+    "capital_gains": {
+      "type": "object",
+      "description": "Règles de plus-value spécifiques à une nature d'actif, lorsqu'elles diffèrent du traitement de l'enveloppe.",
+      "additionalProperties": false,
+      "properties": {
+        "real_estate": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "primary_residence_exempt": { "type": "boolean" },
+            "holding_allowances": {
+              "type": "array",
+              "description": "Abattements pour durée de détention, applicables séparément à l'impôt sur le revenu et aux prélèvements sociaux.",
+              "items": {
+                "type": "object",
+                "required": ["against", "schedule"],
+                "additionalProperties": false,
+                "properties": {
+                  "against": { "enum": ["income_tax", "social_contributions"] },
+                  "full_exemption_after_years": { "type": "integer", "minimum": 0 },
+                  "schedule": {
+                    "type": "array",
+                    "description": "Taux d'abattement par tranche d'années de détention.",
+                    "items": {
+                      "type": "object",
+                      "required": ["from_year", "to_year", "rate_per_year"],
+                      "additionalProperties": false,
+                      "properties": {
+                        "from_year": { "type": "integer", "minimum": 0 },
+                        "to_year": { "type": "integer", "minimum": 0 },
+                        "rate_per_year": { "$ref": "#/$defs/rate" }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "surtax_brackets": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/bracket" },
+              "description": "Surtaxe sur les plus-values immobilières élevées."
+            }
+          }
+        }
+      }
+    },
+
+    "wealth_tax": {
+      "type": "object",
+      "required": ["enabled"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "label": { "type": "string" },
+        "base": {
+          "type": "array",
+          "items": { "enum": ["real_estate", "financial_assets", "all_assets"] },
+          "description": "Assiette de l'impôt sur la fortune."
+        },
+        "threshold": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Patrimoine net taxable à partir duquel l'impôt est dû."
+        },
+        "brackets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/bracket" },
+          "description": "Barème. À préférer à un taux moyen forfaitaire, qui donne des résultats faux aux extrémités."
+        },
+        "primary_residence_allowance": { "$ref": "#/$defs/rate" }
+      }
+    },
+
+    "inheritance": {
+      "type": "object",
+      "description": "Réservé à une extension ultérieure. Aucun calcul n'en dépend aujourd'hui.",
+      "additionalProperties": true
+    }
+  },
+
+  "$defs": {
+    "rate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Taux exprimé en fraction, jamais en pourcentage. 17,2 % s'écrit 0.172."
+    },
+
+    "incomeCategory": {
+      "enum": [
+        "capital_gains",
+        "dividends",
+        "interest",
+        "rental_income",
+        "earned_income",
+        "pension_income"
+      ]
+    },
+
+    "bracket": {
+      "type": "object",
+      "required": ["upper", "rate"],
+      "additionalProperties": false,
+      "properties": {
+        "lower": { "type": "number", "minimum": 0, "default": 0 },
+        "upper": {
+          "type": ["number", "null"],
+          "description": "Borne supérieure incluse ; null pour la dernière tranche, non bornée."
+        },
+        "rate": { "$ref": "#/$defs/rate" }
+      }
+    },
+
+    "socialContribution": {
+      "type": "object",
+      "required": ["rate"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string" },
+        "rate": { "$ref": "#/$defs/rate" },
+        "applies_to": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/incomeCategory" }
+        },
+        "deductible_share": {
+          "$ref": "#/$defs/rate",
+          "description": "Fraction de la contribution déductible du revenu imposable."
+        }
+      }
+    },
+
+    "wrapper": {
+      "type": "object",
+      "required": ["id", "label", "tax_treatment"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$",
+          "description": "Identifiant stable de l'enveloppe, propre au pays : cto, pea, assurance_vie, per, isa, roth_ira..."
+        },
+        "label": { "type": "string" },
+        "description": { "type": "string" },
+        "tax_treatment": {
+          "enum": ["taxable", "tax_deferred", "tax_free", "conditional"],
+          "description": "taxable : imposé au fil de l'eau. tax_deferred : imposé à la sortie. tax_free : exonéré d'impôt sur le revenu. conditional : dépend des règles de withdrawal."
+        },
+        "contribution_limit": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Plafond de versement cumulé. null si aucun plafond. N'utilisez jamais l'infini : une absence de plafond s'écrit null."
+        },
+        "contribution_limit_period": {
+          "enum": ["lifetime", "annual"],
+          "description": "Le plafond porte-t-il sur les versements cumulés ou sur une année."
+        },
+        "contribution_deductible": {
+          "type": "boolean",
+          "description": "Les versements réduisent-ils le revenu imposable de l'année."
+        },
+        "contribution_deduction_cap": { "type": ["number", "null"], "minimum": 0 },
+        "eligible_assets": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Classes d'actifs autorisées dans l'enveloppe. Contrainte transmise à l'optimiseur : un PEA ne peut pas détenir d'obligations d'État hors UE."
+        },
+        "growth_taxed_annually": {
+          "type": "boolean",
+          "description": "Vrai si les gains sont imposés chaque année, faux s'ils sont capitalisés en franchise jusqu'au retrait."
+        },
+        "withdrawal_rules": {
+          "type": "array",
+          "description": "Règles évaluées dans l'ordre ; la première dont la condition est satisfaite s'applique. Prévoyez toujours une règle finale sans condition.",
+          "items": {
+            "type": "object",
+            "required": ["income_tax_rate"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string" },
+              "when": { "$ref": "#/$defs/condition" },
+              "income_tax_rate": {
+                "oneOf": [
+                  { "$ref": "#/$defs/rate" },
+                  { "enum": ["progressive", "flat_tax"] }
+                ],
+                "description": "Taux applicable, ou renvoi au barème (progressive) ou au prélèvement forfaitaire (flat_tax) du régime."
+              },
+              "social_rate": {
+                "oneOf": [
+                  { "$ref": "#/$defs/rate" },
+                  { "enum": ["standard", "none"] }
+                ]
+              },
+              "penalty_rate": { "$ref": "#/$defs/rate" },
+              "allowance": {
+                "type": "object",
+                "description": "Abattement appliqué à l'assiette avant imposition.",
+                "additionalProperties": false,
+                "properties": {
+                  "amount_single": { "type": "number", "minimum": 0 },
+                  "amount_couple": { "type": "number", "minimum": 0 },
+                  "period": { "enum": ["annual", "lifetime"] },
+                  "against": { "enum": ["income_tax", "social_contributions", "both"] }
+                }
+              },
+              "taxable_base": {
+                "enum": ["gain_only", "full_withdrawal", "proportional_gain"],
+                "description": "Sur quoi porte l'impôt : le seul gain, la totalité du retrait, ou la quote-part de gain contenue dans le retrait."
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "condition": {
+      "type": "object",
+      "description": "Condition d'application d'une règle de retrait. Tous les critères présents doivent être satisfaits simultanément.",
+      "additionalProperties": false,
+      "properties": {
+        "holding_years": { "$ref": "#/$defs/numericCondition" },
+        "age": { "$ref": "#/$defs/numericCondition" },
+        "premiums_paid": { "$ref": "#/$defs/numericCondition" },
+        "account_value": { "$ref": "#/$defs/numericCondition" },
+        "exit_form": { "enum": ["lump_sum", "annuity", "any"] }
+      }
+    },
+
+    "numericCondition": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "lt": { "type": "number" },
+        "lte": { "type": "number" },
+        "gt": { "type": "number" },
+        "gte": { "type": "number" }
+      }
+    }
+  }
+}

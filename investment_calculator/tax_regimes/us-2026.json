@@ -1,0 +1,133 @@
+{
+  "$schema": "./schema.json",
+  "schema_version": "0.1",
+  "id": "us-2026",
+  "country": { "code": "US", "name": "United States", "locale": "en-US" },
+  "fiscal_year": 2026,
+  "currency": "USD",
+
+  "status": "draft",
+  "validation": {
+    "validated_by": null,
+    "validated_on": null,
+    "golden_cases": null,
+    "reviewed_by_professional": false
+  },
+
+  "sources": [
+    {
+      "label": "AUCUNE — portage mécanique des constantes qui figuraient en dur dans tax_engine.TaxConfigPreset",
+      "covers": ["income_tax", "flat_tax", "wrappers", "social_contributions"]
+    }
+  ],
+
+  "known_gaps": [
+    "STATUT BROUILLON : valeurs reprises telles quelles de l'ancien code, jamais vérifiées contre une source officielle. Le chargeur refuse ce régime en production.",
+    "Le barème fédéral réel n'est pas modélisé : l'ancien code utilisait un taux moyen unique de 25 %, converti ici en tranche unique. À remplacer par le barème IRS et le statut de déclaration (single, married filing jointly, head of household).",
+    "Fiscalité d'État réduite à un taux moyen de 5 %, alors qu'elle varie de 0 % à plus de 13 % selon l'État de résidence.",
+    "Plus-values à court terme et à long terme non distinguées.",
+    "Net Investment Income Tax de 3,8 % non modélisé.",
+    "Plafonds de versement 401(k), IRA et Roth IRA à actualiser et à indexer.",
+    "Required Minimum Distributions non modélisées."
+  ],
+
+  "social_contributions": {
+    "investment_income": {
+      "label": "Payroll taxes (approximation reprise de l'ancien code)",
+      "rate": 0.0765,
+      "applies_to": ["earned_income"]
+    }
+  },
+
+  "income_tax": {
+    "label": "Federal and state income tax (taux moyen approché)",
+    "mode": "progressive",
+    "brackets": [
+      { "lower": 0, "upper": null, "rate": 0.30 }
+    ],
+    "household_quotient": { "enabled": false }
+  },
+
+  "flat_tax": {
+    "enabled": true,
+    "label": "Long-term capital gains and qualified dividends (taux moyen approché)",
+    "income_tax_rate": 0.15,
+    "social_rate": 0.0,
+    "applies_to": ["capital_gains", "dividends"],
+    "progressive_option": false
+  },
+
+  "wrappers": [
+    {
+      "id": "brokerage",
+      "label": "Taxable brokerage account",
+      "tax_treatment": "taxable",
+      "contribution_limit": null,
+      "contribution_deductible": false,
+      "eligible_assets": ["equity", "bond", "fund", "etf", "money_market"],
+      "growth_taxed_annually": false,
+      "withdrawal_rules": [
+        {
+          "label": "Long-term capital gains",
+          "income_tax_rate": "flat_tax",
+          "social_rate": "none",
+          "taxable_base": "gain_only"
+        }
+      ]
+    },
+    {
+      "id": "traditional_401k",
+      "label": "Traditional 401(k) / IRA",
+      "tax_treatment": "tax_deferred",
+      "contribution_limit": 23000,
+      "contribution_limit_period": "annual",
+      "contribution_deductible": true,
+      "eligible_assets": ["equity", "bond", "fund", "etf", "money_market"],
+      "growth_taxed_annually": false,
+      "withdrawal_rules": [
+        {
+          "label": "Qualified withdrawal after age 59 and a half",
+          "when": { "age": { "gte": 59.5 } },
+          "income_tax_rate": "progressive",
+          "social_rate": "none",
+          "taxable_base": "full_withdrawal"
+        },
+        {
+          "label": "Early withdrawal penalty",
+          "income_tax_rate": "progressive",
+          "social_rate": "none",
+          "penalty_rate": 0.10,
+          "taxable_base": "full_withdrawal"
+        }
+      ]
+    },
+    {
+      "id": "roth_ira",
+      "label": "Roth IRA",
+      "tax_treatment": "tax_free",
+      "contribution_limit": 7000,
+      "contribution_limit_period": "annual",
+      "contribution_deductible": false,
+      "eligible_assets": ["equity", "bond", "fund", "etf", "money_market"],
+      "growth_taxed_annually": false,
+      "withdrawal_rules": [
+        {
+          "label": "Qualified distribution",
+          "when": { "age": { "gte": 59.5 }, "holding_years": { "gte": 5 } },
+          "income_tax_rate": 0.0,
+          "social_rate": "none",
+          "taxable_base": "gain_only"
+        },
+        {
+          "label": "Non-qualified distribution of earnings",
+          "income_tax_rate": "progressive",
+          "social_rate": "none",
+          "penalty_rate": 0.10,
+          "taxable_base": "proportional_gain"
+        }
+      ]
+    }
+  ],
+
+  "wealth_tax": { "enabled": false }
+}
