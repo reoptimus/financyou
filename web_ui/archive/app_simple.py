@@ -5,26 +5,23 @@ A Streamlit web application for financial planning and portfolio optimization.
 Enhanced version inspired by R Shiny interface with comprehensive sections.
 """
 
-import streamlit as st
-import pandas as pd
-import numpy as np
 import json
-from pathlib import Path
 import sys
-import plotly.express as px
-import plotly.graph_objects as go
+from pathlib import Path
+
+import pandas as pd
+import streamlit as st
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from investment_calculator.modules import (
+    optimizer,
+    reporting,
     scenario_generator,
     tax_engine,
     user_profile,
-    optimizer,
-    reporting
 )
-
 
 # Page configuration
 st.set_page_config(
@@ -81,10 +78,14 @@ def create_personal_info_form():
 
     with col1:
         age = st.number_input("Current Age", min_value=18, max_value=100, value=35, step=1)
-        retirement_age = st.number_input("Retirement Age", min_value=age, max_value=100, value=65, step=1)
+        retirement_age = st.number_input(
+            "Retirement Age", min_value=age, max_value=100, value=65, step=1
+        )
 
     with col2:
-        life_expectancy = st.number_input("Life Expectancy", min_value=retirement_age, max_value=120, value=90, step=1)
+        life_expectancy = st.number_input(
+            "Life Expectancy", min_value=retirement_age, max_value=120, value=90, step=1
+        )
         country = st.selectbox("Country", ["US", "FR", "UK", "DE", "CA"], index=0)
 
     with col3:
@@ -106,9 +107,13 @@ def create_financial_situation_form():
     col1, col2 = st.columns(2)
 
     with col1:
-        current_savings = st.number_input("Current Savings ($)", min_value=0, value=50000, step=1000)
+        current_savings = st.number_input(
+            "Current Savings ($)", min_value=0, value=50000, step=1000
+        )
         annual_income = st.number_input("Annual Income ($)", min_value=0, value=75000, step=1000)
-        annual_expenses = st.number_input("Annual Expenses ($)", min_value=0, value=55000, step=1000)
+        annual_expenses = st.number_input(
+            "Annual Expenses ($)", min_value=0, value=55000, step=1000
+        )
 
     with col2:
         st.markdown("**Debt**")
@@ -267,7 +272,9 @@ def run_analysis(profile_config, jurisdiction, num_scenarios=100):
         status_text.text("🎲 Generating economic scenarios...")
         scenario_config = {
             'num_scenarios': num_scenarios,
-            'time_horizon': profile_config['user_profile']['investment_preferences']['time_horizon'],
+            'time_horizon': (
+                profile_config['user_profile']['investment_preferences']['time_horizon']
+            ),
             'timestep': 1.0,
             'use_stochastic': False,
             'currency': profile_config['user_profile']['personal_info']['currency']
@@ -408,7 +415,10 @@ def display_overview(results):
 
 def display_portfolio(results):
     """Display portfolio allocation tab."""
-    st.markdown('<div class="sub-header">Optimal Portfolio Allocation</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sub-header">Optimal Portfolio Allocation</div>',
+        unsafe_allow_html=True,
+    )
 
     weights = results['optimization']['optimal_portfolio']['weights']
 
@@ -466,21 +476,28 @@ def main():
     # Header
     st.markdown('<div class="main-header">💰 FinancYou</div>', unsafe_allow_html=True)
     st.markdown(
-        '<p style="text-align: center; font-size: 1.2rem; color: #666;">Comprehensive Financial Planning & Portfolio Optimization</p>',
+        '<p style="text-align: center; font-size: 1.2rem; color: #666;">'
+        'Comprehensive Financial Planning & Portfolio Optimization</p>',
         unsafe_allow_html=True
     )
 
     # Sidebar
     with st.sidebar:
-        st.image("https://via.placeholder.com/300x100/1f77b4/ffffff?text=FinancYou", use_column_width=True)
+        st.image(
+            "https://via.placeholder.com/300x100/1f77b4/ffffff?text=FinancYou",
+            use_column_width=True,
+        )
 
         st.markdown("### Quick Actions")
 
         if st.button("📥 Load Example Profile"):
             # Load example aggressive profile
-            example_path = Path(__file__).parent.parent / 'examples' / 'input_files' / 'user_profile_aggressive.json'
+            example_path = (
+                Path(__file__).parent.parent
+                / 'examples' / 'input_files' / 'user_profile_aggressive.json'
+            )
             if example_path.exists():
-                with open(example_path, 'r') as f:
+                with open(example_path) as f:
                     example_data = json.load(f)
                     st.session_state.profile_config = example_data
                     st.success("Example profile loaded!")
@@ -493,7 +510,10 @@ def main():
 
         st.markdown("---")
         st.markdown("### About")
-        st.info("FinancYou provides comprehensive financial planning with tax-optimized portfolio recommendations.")
+        st.info(
+            "FinancYou provides comprehensive financial planning with "
+            "tax-optimized portfolio recommendations."
+        )
 
     # Main content
     with st.expander("📋 User Profile", expanded=True):
