@@ -4,9 +4,8 @@ Utility Functions
 Helper functions for investment calculations, validation, and data processing.
 """
 
+
 import numpy as np
-import pandas as pd
-from typing import Dict, List, Optional, Union
 
 
 def validate_inputs(
@@ -14,7 +13,7 @@ def validate_inputs(
     investment_horizon: int,
     current_savings: float,
     monthly_contribution: float,
-) -> tuple[bool, List[str]]:
+) -> tuple[bool, list[str]]:
     """
     Validate input parameters for investment calculations.
 
@@ -47,7 +46,7 @@ def validate_inputs(
     return len(errors) == 0, errors
 
 
-def validate_allocation(allocation: Dict[str, float]) -> tuple[bool, List[str]]:
+def validate_allocation(allocation: dict[str, float]) -> tuple[bool, list[str]]:
     """
     Validate asset allocation weights.
 
@@ -82,7 +81,7 @@ def calculate_returns(
     final_value: float,
     years: int,
     contributions: float = 0.0,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Calculate various return metrics.
 
@@ -150,7 +149,11 @@ def calculate_future_value(
     # Future value of annuity
     if contribution_timing == "beginning":
         # Annuity due (beginning of period)
-        fv_annuity = annual_contribution * (((1 + annual_return) ** years - 1) / annual_return) * (1 + annual_return)
+        fv_annuity = (
+            annual_contribution
+            * (((1 + annual_return) ** years - 1) / annual_return)
+            * (1 + annual_return)
+        )
     else:
         # Ordinary annuity (end of period)
         fv_annuity = annual_contribution * (((1 + annual_return) ** years - 1) / annual_return)
@@ -248,7 +251,7 @@ def calculate_compound_growth(
     return values
 
 
-def calculate_drawdown(balance_history: np.ndarray) -> Dict[str, float]:
+def calculate_drawdown(balance_history: np.ndarray) -> dict[str, float]:
     """
     Calculate drawdown statistics.
 
@@ -315,7 +318,7 @@ def calculate_sharpe_ratio(
     if std_excess == 0:
         return 0.0
 
-    return mean_excess / std_excess
+    return float(mean_excess / std_excess)
 
 
 def calculate_sortino_ratio(
@@ -352,9 +355,9 @@ def calculate_sortino_ratio(
 
 
 def rebalance_portfolio(
-    current_values: Dict[str, float],
-    target_allocation: Dict[str, float],
-) -> Dict[str, float]:
+    current_values: dict[str, float],
+    target_allocation: dict[str, float],
+) -> dict[str, float]:
     """
     Calculate trades needed to rebalance portfolio to target allocation.
 
@@ -411,7 +414,7 @@ def format_percentage(value: float, decimals: int = 2) -> str:
     return f"{value * 100:.{decimals}f}%"
 
 
-def normalize_allocation(allocation: Dict[str, float]) -> Dict[str, float]:
+def normalize_allocation(allocation: dict[str, float]) -> dict[str, float]:
     """
     Normalize allocation weights to sum to 1.0.
 

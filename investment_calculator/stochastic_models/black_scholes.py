@@ -23,9 +23,9 @@ Key Features:
 - Antithetic variance reduction
 """
 
-import numpy as np
-from typing import Dict, Optional, Tuple
 import warnings
+
+import numpy as np
 
 
 class BlackScholesEquity:
@@ -91,9 +91,9 @@ class BlackScholesEquity:
     def generate_returns(
         self,
         short_rates: np.ndarray,
-        equity_shocks: Optional[np.ndarray] = None,
-        rate_shocks: Optional[np.ndarray] = None
-    ) -> Dict[str, np.ndarray]:
+        equity_shocks: np.ndarray | None = None,
+        rate_shocks: np.ndarray | None = None
+    ) -> dict[str, np.ndarray]:
         """
         Generate equity return scenarios.
 
@@ -115,7 +115,8 @@ class BlackScholesEquity:
         if n_scenarios != self.n_scenarios or n_steps != self.n_steps:
             warnings.warn(
                 f"Input shape ({n_scenarios}, {n_steps}) differs from initialized "
-                f"({self.n_scenarios}, {self.n_steps}). Using input shape."
+                f"({self.n_scenarios}, {self.n_steps}). Using input shape.",
+                stacklevel=2,
             )
 
         # Generate or use provided equity shocks
@@ -131,7 +132,9 @@ class BlackScholesEquity:
         total_returns = self._calculate_total_returns(short_rates, equity_shocks)
 
         # Calculate dividend returns (constant yield)
-        dividend_returns = np.full((n_scenarios, n_steps), np.log(1 + self.dividend_yield) * self.dt)
+        dividend_returns = np.full(
+            (n_scenarios, n_steps), np.log(1 + self.dividend_yield) * self.dt
+        )
         dividend_returns[:, 0] = 0  # No dividend at t=0
 
         # Price returns = total returns - dividend returns
@@ -268,8 +271,8 @@ class BlackScholesEquity:
     def calculate_percentiles(
         self,
         returns: np.ndarray,
-        percentiles: list = [5, 25, 50, 75, 95]
-    ) -> Dict[int, np.ndarray]:
+        percentiles: list | None = None
+    ) -> dict[int, np.ndarray]:
         """
         Calculate return percentiles across scenarios.
 
@@ -280,6 +283,11 @@ class BlackScholesEquity:
         Returns:
             Dictionary mapping percentile to time series
         """
+        # La valeur par defaut est construite ici et non dans la signature :
+        # une liste litterale en argument par defaut serait partagee entre appels.
+        if percentiles is None:
+            percentiles = [5, 25, 50, 75, 95]
+
         result = {}
         for p in percentiles:
             result[p] = np.percentile(returns, p, axis=0)
@@ -388,10 +396,10 @@ def calculate_sharpe_ratio(
         Sharpe ratio
     """
     excess_returns = returns - risk_free_rate
-    return np.mean(excess_returns) / np.std(excess_returns)
+    return float(np.mean(excess_returns) / np.std(excess_returns))
 
 
-def calculate_maximum_drawdown(prices: np.ndarray) -> Tuple[float, int, int]:
+def calculate_maximum_drawdown(prices: np.ndarray) -> tuple[float, int, int]:
     """
     Calculate maximum drawdown from price series.
 
@@ -414,4 +422,4 @@ def calculate_maximum_drawdown(prices: np.ndarray) -> Tuple[float, int, int]:
     # Find peak
     peak_idx = np.argmax(prices[:max_dd_idx + 1])
 
-    return max_dd, peak_idx, max_dd_idx
+    return float(max_dd), int(peak_idx), int(max_dd_idx)

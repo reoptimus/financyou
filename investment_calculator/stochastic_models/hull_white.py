@@ -19,9 +19,9 @@ References:
   The Review of Financial Studies, 3(4), 573-592.
 """
 
-import numpy as np
-from typing import Tuple, Optional, Dict
 import warnings
+
+import numpy as np
 
 
 class HullWhiteModel:
@@ -141,7 +141,7 @@ class HullWhiteModel:
         lim_low: float = -0.05,
         max_retries: int = 50,
         use_antithetic: bool = True
-    ) -> Dict[str, np.ndarray]:
+    ) -> dict[str, np.ndarray]:
         """
         Generate interest rate scenarios using Hull-White model.
 
@@ -174,7 +174,7 @@ class HullWhiteModel:
 
         # Time indices
         Tp = self.dt
-        tp = 0
+        tp = 0.0
 
         # Generate scenarios
         for i in range(self.n_steps - 1):
@@ -245,7 +245,7 @@ class HullWhiteModel:
         lim_low: float,
         max_retries: int,
         use_antithetic: bool
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Filter out scenarios with explosive interest rates.
 
@@ -274,7 +274,8 @@ class HullWhiteModel:
 
         if n_bad > 0:
             warnings.warn(
-                f"Filtered {n_bad} ({pct_removed:.1f}%) scenarios with explosive rates"
+                f"Filtered {n_bad} ({pct_removed:.1f}%) scenarios with explosive rates",
+                stacklevel=2,
             )
 
         # Remove bad scenarios
@@ -306,17 +307,17 @@ class HullWhiteModel:
         lim_low: float,
         use_antithetic: bool,
         max_attempts: int = 10
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Generate replacement scenarios for filtered explosive paths."""
         n_sim = n_needed // 2 * 2 if use_antithetic else n_needed
 
-        for attempt in range(max_attempts):
+        for _attempt in range(max_attempts):
             rt_new = np.zeros((n_sim, self.n_steps))
             Rt_new = np.zeros((n_sim, self.n_steps))
             rt_new[:, 0] = self.f0t[0]
 
             Tp = self.dt
-            tp = 0
+            tp = 0.0
 
             for i in range(self.n_steps - 1):
                 if use_antithetic:
@@ -362,7 +363,8 @@ class HullWhiteModel:
 
         # If max attempts reached, return what we have
         warnings.warn(
-            f"Could not generate {n_needed} non-explosive scenarios after {max_attempts} attempts"
+            f"Could not generate {n_needed} non-explosive scenarios after {max_attempts} attempts",
+            stacklevel=2,
         )
         return Rt_new[:n_needed], rt_new[:n_needed]
 
@@ -449,8 +451,8 @@ class HullWhiteModel:
 def calibrate_hull_white(
     yield_curve: np.ndarray,
     maturities: np.ndarray,
-    market_swaptions: Optional[np.ndarray] = None
-) -> Tuple[float, float]:
+    market_swaptions: np.ndarray | None = None
+) -> tuple[float, float]:
     """
     Calibrate Hull-White parameters (a, sigma) to market data.
 
@@ -475,7 +477,7 @@ def calibrate_hull_white(
     # Estimate sigma from yield curve volatility
     if len(yield_curve) > 1:
         yield_changes = np.diff(yield_curve)
-        sigma = np.std(yield_changes) * 0.5  # Scale factor
+        sigma = float(np.std(yield_changes)) * 0.5  # Scale factor
         sigma = max(0.005, min(sigma, 0.05))  # Bounds
     else:
         sigma = 0.01

@@ -2,10 +2,11 @@
 Core time series slicing functionality.
 """
 
-from typing import List, Union, Tuple, Optional, Iterator
+from collections.abc import Iterator
 from datetime import datetime, timedelta
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 
 
 class TimeSeriesSlicer:
@@ -17,7 +18,7 @@ class TimeSeriesSlicer:
         time_column: Name of the column containing timestamps (if DataFrame)
     """
 
-    def __init__(self, data: Union[pd.DataFrame, pd.Series], time_column: Optional[str] = None):
+    def __init__(self, data: pd.DataFrame | pd.Series, time_column: str | None = None):
         """
         Initialize the TimeSeriesSlicer.
 
@@ -34,7 +35,9 @@ class TimeSeriesSlicer:
         # Validate input
         if isinstance(data, pd.DataFrame):
             if not isinstance(data.index, pd.DatetimeIndex) and time_column is None:
-                raise ValueError("DataFrame must have DatetimeIndex or time_column must be specified")
+                raise ValueError(
+                    "DataFrame must have DatetimeIndex or time_column must be specified"
+                )
             if time_column and time_column not in data.columns:
                 raise ValueError(f"Column '{time_column}' not found in DataFrame")
         elif isinstance(data, pd.Series):
@@ -45,9 +48,9 @@ class TimeSeriesSlicer:
 
     def slice_by_time(
         self,
-        start: Optional[Union[str, datetime]] = None,
-        end: Optional[Union[str, datetime]] = None
-    ) -> Union[pd.DataFrame, pd.Series]:
+        start: str | datetime | None = None,
+        end: str | datetime | None = None
+    ) -> pd.DataFrame | pd.Series:
         """
         Slice time series by start and end timestamps.
 
@@ -59,7 +62,13 @@ class TimeSeriesSlicer:
             Sliced time series data
         """
         if isinstance(self.data, pd.Series) or isinstance(self.data.index, pd.DatetimeIndex):
-            return self.data.loc[start:end]
+            # `start` et `end` sont des étiquettes temporelles, pas des positions
+            # entières : leur annotation est déjà correcte. On construit la tranche
+            # explicitement car mypy contrôle les bornes d'une tranche littérale
+            # `a:b` contre `SupportsIndex | None`, quel que soit le conteneur indexé.
+            # `x[a:b]` se traduit de toute façon en `x[slice(a, b)]` : l'objet
+            # transmis à pandas est rigoureusement identique.
+            return self.data.loc[slice(start, end)]
         else:
             mask = pd.Series([True] * len(self.data), index=self.data.index)
             if start:
@@ -70,9 +79,9 @@ class TimeSeriesSlicer:
 
     def slice_by_index(
         self,
-        start_idx: Optional[int] = None,
-        end_idx: Optional[int] = None
-    ) -> Union[pd.DataFrame, pd.Series]:
+        start_idx: int | None = None,
+        end_idx: int | None = None
+    ) -> pd.DataFrame | pd.Series:
         """
         Slice time series by integer indices.
 
@@ -87,10 +96,10 @@ class TimeSeriesSlicer:
 
     def slice_by_window(
         self,
-        window_size: Union[int, timedelta],
-        step_size: Optional[Union[int, timedelta]] = None,
+        window_size: int | timedelta,
+        step_size: int | timedelta | None = None,
         overlap: bool = False
-    ) -> Iterator[Union[pd.DataFrame, pd.Series]]:
+    ) -> Iterator[pd.DataFrame | pd.Series]:
         """
         Slice time series into windows of fixed size.
 
@@ -136,10 +145,10 @@ class TimeSeriesSlicer:
 
     def split_by_ratio(
         self,
-        ratios: List[float],
+        ratios: list[float],
         shuffle: bool = False,
-        random_state: Optional[int] = None
-    ) -> List[Union[pd.DataFrame, pd.Series]]:
+        random_state: int | None = None
+    ) -> list[pd.DataFrame | pd.Series]:
         """
         Split time series data by ratio (e.g., train/test split).
 
@@ -175,9 +184,9 @@ class TimeSeriesSlicer:
     def slice_by_value(
         self,
         column: str,
-        min_value: Optional[float] = None,
-        max_value: Optional[float] = None
-    ) -> Union[pd.DataFrame, pd.Series]:
+        min_value: float | None = None,
+        max_value: float | None = None
+    ) -> pd.DataFrame | pd.Series:
         """
         Slice time series based on value thresholds.
 
@@ -217,11 +226,11 @@ class TimeSeriesSlicer:
 
 # Convenience functions
 def slice_by_time(
-    data: Union[pd.DataFrame, pd.Series],
-    start: Optional[Union[str, datetime]] = None,
-    end: Optional[Union[str, datetime]] = None,
-    time_column: Optional[str] = None
-) -> Union[pd.DataFrame, pd.Series]:
+    data: pd.DataFrame | pd.Series,
+    start: str | datetime | None = None,
+    end: str | datetime | None = None,
+    time_column: str | None = None
+) -> pd.DataFrame | pd.Series:
     """
     Convenience function to slice time series by time range.
 
@@ -239,10 +248,10 @@ def slice_by_time(
 
 
 def slice_by_index(
-    data: Union[pd.DataFrame, pd.Series],
-    start_idx: Optional[int] = None,
-    end_idx: Optional[int] = None
-) -> Union[pd.DataFrame, pd.Series]:
+    data: pd.DataFrame | pd.Series,
+    start_idx: int | None = None,
+    end_idx: int | None = None
+) -> pd.DataFrame | pd.Series:
     """
     Convenience function to slice time series by index.
 
@@ -259,12 +268,12 @@ def slice_by_index(
 
 
 def slice_by_window(
-    data: Union[pd.DataFrame, pd.Series],
-    window_size: Union[int, timedelta],
-    step_size: Optional[Union[int, timedelta]] = None,
+    data: pd.DataFrame | pd.Series,
+    window_size: int | timedelta,
+    step_size: int | timedelta | None = None,
     overlap: bool = False,
-    time_column: Optional[str] = None
-) -> Iterator[Union[pd.DataFrame, pd.Series]]:
+    time_column: str | None = None
+) -> Iterator[pd.DataFrame | pd.Series]:
     """
     Convenience function to slice time series into windows.
 

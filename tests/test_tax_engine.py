@@ -14,16 +14,17 @@ Tests cover:
 - Convenience functions
 """
 
-import pytest
+import os
+import sys
+
 import numpy as np
 import pandas as pd
-import sys
-import os
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from investment_calculator.modules import tax_engine, scenario_generator
+from investment_calculator.modules import scenario_generator, tax_engine
 
 
 # Helper function to create simple test scenarios
@@ -61,7 +62,7 @@ class TestTaxConfigPreset:
 
         assert config['jurisdiction'] == 'FR'
         assert config['social_charges'] == 0.172  # Prélèvements sociaux
-        assert config['wealth_tax']['enabled'] == True
+        assert config['wealth_tax']['enabled'] is True
         assert config['wealth_tax']['threshold'] == 1_300_000
 
     def test_get_preset_uk(self):

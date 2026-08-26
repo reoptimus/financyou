@@ -9,25 +9,25 @@ Tests cover:
 - EIOPA calibration
 """
 
-import unittest
-import numpy as np
-import sys
 import os
+import sys
+import unittest
 import warnings
+
+import numpy as np
 
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from investment_calculator.stochastic_models import (
-    HullWhiteModel,
-    CorrelatedRandomGenerator,
     BlackScholesEquity,
+    CorrelatedRandomGenerator,
+    EIOPACalibrator,
+    HullWhiteModel,
     RealEstateModel,
-    EIOPACalibrator
 )
 from investment_calculator.stochastic_models.correlation import (
     AHLGRIM_2005_CORRELATION,
-    CONSERVATIVE_CORRELATION
 )
 
 
@@ -169,10 +169,6 @@ class TestCorrelatedRandomGenerator(unittest.TestCase):
 
     def test_invalid_correlation_matrix(self):
         """Test that invalid correlation matrices raise errors."""
-        # Not positive definite
-        invalid = np.array([[1.0, 0.9, 0.9], [0.9, 1.0, 0.9], [0.9, 0.9, 1.0]])
-        # This should work but might give warning
-
         # Non-square matrix should fail
         with self.assertRaises(ValueError):
             CorrelatedRandomGenerator(

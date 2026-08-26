@@ -14,12 +14,13 @@ Tests cover:
 - Convenience functions
 """
 
-import pytest
+import os
+import sys
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
-from datetime import datetime
-import sys
-import os
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -133,7 +134,7 @@ class TestConfigurationValidation:
         }
 
         validated = gen._validate_config(config)
-        assert validated['use_stochastic'] == False
+        assert validated['use_stochastic'] is False
         assert validated['currency'] == 'USD'
         assert validated['calibration_date'] == '2025-01-01'
 

@@ -53,20 +53,26 @@ OUTPUT STRUCTURE:
 }
 """
 
+import logging
+import time
+import warnings
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
-from datetime import datetime
-from typing import Dict, Optional, Tuple
-import warnings
 
 # Import from existing modules
 from investment_calculator.stochastic_models import (
-    HullWhiteModel,
-    CorrelatedRandomGenerator,
     BlackScholesEquity,
+    CorrelatedRandomGenerator,
+    EIOPACalibrator,
+    HullWhiteModel,
     RealEstateModel,
-    EIOPACalibrator
 )
+
+# Journalisation : logger nommé d'après le module, il hérite donc de la
+# configuration posée par investment_calculator.logging_config.configure_logging().
+logger = logging.getLogger(__name__)
 
 
 class ScenarioGenerator:
@@ -90,7 +96,7 @@ class ScenarioGenerator:
         >>> scenarios_df = results['scenarios']
     """
 
-    def __init__(self, random_seed: Optional[int] = None):
+    def __init__(self, random_seed: int | None = None):
         """
         Initialize the Scenario Generator.
 
@@ -133,7 +139,7 @@ class ScenarioGenerator:
             ('real_estate_return', 'interest_rate'): 0.3
         }
 
-    def generate(self, config: Dict) -> Dict:
+    def generate(self, config: dict) -> dict:
         """
         Generate economic scenarios based on configuration.
 
@@ -143,16 +149,37 @@ class ScenarioGenerator:
         Returns:
             Dictionary with scenarios, deflators, metadata, and diagnostics
         """
+        # Chronomètre pour tracer la durée de génération.
+        start_time = time.perf_counter()
+
         # Validate and merge config with defaults
         validated_config = self._validate_config(config)
 
+        n_scenarios = validated_config['num_scenarios']
+        method = 'stochastique' if validated_config['use_stochastic'] else 'simple'
+        logger.info(
+            "Début de la génération de scénarios : %s scénarios, horizon %s ans, méthode %s",
+            n_scenarios,
+            validated_config['time_horizon'],
+            method,
+        )
+
         # Choose generation method
         if validated_config['use_stochastic']:
-            return self._generate_stochastic(validated_config)
+            results = self._generate_stochastic(validated_config)
         else:
-            return self._generate_simple(validated_config)
+            results = self._generate_simple(validated_config)
 
-    def _validate_config(self, config: Dict) -> Dict:
+        logger.info(
+            "Fin de la génération de scénarios : %s scénarios produits en %.3f s (méthode %s)",
+            n_scenarios,
+            time.perf_counter() - start_time,
+            method,
+        )
+
+        return results
+
+    def _validate_config(self, config: dict) -> dict:
         """
         Validate and complete configuration with defaults.
 
@@ -185,11 +212,14 @@ class ScenarioGenerator:
         validated['economic_params'] = {**self.default_params, **user_params}
 
         # Merge correlations with defaults
-        validated['correlation_matrix'] = {**self.default_correlations, **validated['correlation_matrix']}
+        validated['correlation_matrix'] = {
+            **self.default_correlations,
+            **validated['correlation_matrix'],
+        }
 
         return validated
 
-    def _generate_simple(self, config: Dict) -> Dict:
+    def _generate_simple(self, config: dict) -> dict:
         """
         Generate scenarios using simple correlated normal distributions.
 
@@ -207,9 +237,6 @@ class ScenarioGenerator:
         params = config['economic_params']
 
         n_steps = int(time_horizon / timestep)
-
-        # Total number of data points
-        total_points = n_scenarios * n_steps
 
         # Initialize arrays for all scenarios and time periods
         scenario_ids = []
@@ -321,7 +348,7 @@ class ScenarioGenerator:
             'diagnostics': diagnostics
         }
 
-    def _generate_stochastic(self, config: Dict) -> Dict:
+    def _generate_stochastic(self, config: dict) -> dict:
         """
         Generate scenarios using advanced stochastic models.
 
@@ -414,7 +441,9 @@ class ScenarioGenerator:
 
         # Step 7: Generate inflation (from correlated shocks)
         inflation_shocks = corr_gen.get_asset_shocks(corr_results['shocks'], 'inflation')
-        inflation_rates = params['inflation_mean'] + params['inflation_volatility'] * inflation_shocks
+        inflation_rates = (
+            params['inflation_mean'] + params['inflation_volatility'] * inflation_shocks
+        )
 
         # Step 8: Generate GDP growth (correlated with equity returns)
         gdp_growth = params['gdp_growth_mean'] + params['gdp_growth_std'] * (
@@ -464,7 +493,9 @@ class ScenarioGenerator:
 
         # Calculate diagnostics
         diagnostics = self._calculate_diagnostics(scenarios_df, method='stochastic')
-        diagnostics['martingale_test'] = self._test_martingale(hw_results['deflators'], hw_results['Rt'], dt)
+        diagnostics['martingale_test'] = self._test_martingale(
+            hw_results['deflators'], hw_results['Rt'], dt
+        )
 
         # Metadata
         metadata = {
@@ -514,12 +545,12 @@ class ScenarioGenerator:
         elif currency == 'GBP':
             spot_rates = 0.020 + 0.025 * (1 - np.exp(-maturities / 10))
         else:
-            warnings.warn(f"Unknown currency {currency}, using EUR curve")
+            warnings.warn(f"Unknown currency {currency}, using EUR curve", stacklevel=2)
             spot_rates = 0.015 + 0.020 * (1 - np.exp(-maturities / 10))
 
         return spot_rates
 
-    def _calculate_diagnostics(self, scenarios_df: pd.DataFrame, method: str) -> Dict:
+    def _calculate_diagnostics(self, scenarios_df: pd.DataFrame, method: str) -> dict:
         """
         Calculate diagnostic statistics for generated scenarios.
 
@@ -553,7 +584,7 @@ class ScenarioGenerator:
             'method': method
         }
 
-    def _test_martingale(self, deflators: np.ndarray, rates: np.ndarray, dt: float) -> Dict:
+    def _test_martingale(self, deflators: np.ndarray, rates: np.ndarray, dt: float) -> dict:
         """
         Test martingale property of deflated assets.
 
@@ -594,7 +625,7 @@ class ScenarioGenerator:
 
 
 # Convenience functions for backward compatibility
-def generate_scenarios(config: Dict, random_seed: Optional[int] = None) -> Dict:
+def generate_scenarios(config: dict, random_seed: int | None = None) -> dict:
     """
     Generate economic scenarios (convenience function).
 

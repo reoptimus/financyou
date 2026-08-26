@@ -21,10 +21,11 @@ Key Features:
 - Integration with Hull-White residuals
 """
 
+import warnings
+from typing import Any
+
 import numpy as np
 import pandas as pd
-from typing import Optional, Dict, Tuple
-import warnings
 
 
 class CorrelatedRandomGenerator:
@@ -71,12 +72,12 @@ class CorrelatedRandomGenerator:
 
     def __init__(
         self,
-        correlation_matrix: Optional[np.ndarray] = None,
-        asset_names: Optional[list] = None,
+        correlation_matrix: np.ndarray | None = None,
+        asset_names: list | None = None,
         n_scenarios: int = 1000,
         n_steps: int = 120,
         use_antithetic: bool = True,
-        random_seed: Optional[int] = None
+        random_seed: int | None = None
     ):
         """
         Initialize correlated random generator.
@@ -122,14 +123,14 @@ class CorrelatedRandomGenerator:
 
         # Check correlation matrix is symmetric
         if not np.allclose(self.correlation_matrix, self.correlation_matrix.T):
-            warnings.warn("Correlation matrix is not symmetric, symmetrizing...")
+            warnings.warn("Correlation matrix is not symmetric, symmetrizing...", stacklevel=2)
             self.correlation_matrix = (
                 self.correlation_matrix + self.correlation_matrix.T
             ) / 2
 
         # Check diagonal is 1
         if not np.allclose(np.diag(self.correlation_matrix), 1.0):
-            warnings.warn("Correlation matrix diagonal is not 1, normalizing...")
+            warnings.warn("Correlation matrix diagonal is not 1, normalizing...", stacklevel=2)
             # Normalize to correlation matrix
             std_devs = np.sqrt(np.diag(self.correlation_matrix))
             self.correlation_matrix = self.correlation_matrix / np.outer(std_devs, std_devs)
@@ -163,7 +164,8 @@ class CorrelatedRandomGenerator:
         except np.linalg.LinAlgError:
             # If Cholesky fails, add small diagonal to make positive definite
             warnings.warn(
-                "Correlation matrix is not positive definite, adding small diagonal..."
+                "Correlation matrix is not positive definite, adding small diagonal...",
+                stacklevel=2,
             )
             epsilon = 1e-6
             regularized = self.correlation_matrix + epsilon * np.eye(self.n_assets)
@@ -171,8 +173,8 @@ class CorrelatedRandomGenerator:
 
     def generate(
         self,
-        rate_residuals: Optional[np.ndarray] = None
-    ) -> Dict[str, np.ndarray]:
+        rate_residuals: np.ndarray | None = None
+    ) -> dict[str, Any]:
         """
         Generate correlated random shocks for all asset classes.
 

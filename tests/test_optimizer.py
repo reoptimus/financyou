@@ -13,16 +13,17 @@ Tests cover:
 - Edge cases and data quality
 """
 
-import pytest
+import os
+import sys
+
 import numpy as np
 import pandas as pd
-import sys
-import os
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from investment_calculator.modules import optimizer, scenario_generator, tax_engine
+from investment_calculator.modules import optimizer, scenario_generator
 
 
 # Helper functions

@@ -10,13 +10,18 @@ investment returns. Includes:
 - Country-specific tax rules
 """
 
-import numpy as np
-import pandas as pd
+import logging
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional
 from enum import Enum
 
+import numpy as np
+import pandas as pd
+
 from .gse import EconomicScenario, GlobalScenarioEngine
+
+# Journalisation : logger nommé d'après le module, il hérite donc de la
+# configuration posée par investment_calculator.logging_config.configure_logging().
+logger = logging.getLogger(__name__)
 
 
 class AccountType(Enum):
@@ -60,14 +65,14 @@ class TaxConfig:
     country_code: str = "US"
     ordinary_income_rate: float = 0.25
     long_term_cap_gains_rate: float = 0.15
-    short_term_cap_gains_rate: Optional[float] = None
+    short_term_cap_gains_rate: float | None = None
     qualified_dividend_rate: float = 0.15
-    non_qualified_dividend_rate: Optional[float] = None
+    non_qualified_dividend_rate: float | None = None
     state_tax_rate: float = 0.05
     social_security_rate: float = 0.062
     medicare_rate: float = 0.0145
     wealth_tax_rate: float = 0.0
-    tax_deferred_withdrawal_rate: Optional[float] = None
+    tax_deferred_withdrawal_rate: float | None = None
     early_withdrawal_penalty: float = 0.10
     standard_deduction: float = 13850.0  # US 2023 single filer
 
@@ -150,7 +155,6 @@ class TaxIntegratedScenario:
             # Stocks: combination of dividends (2% yield) and capital gains
             dividend_yield = 0.02
             dividend_tax = self.tax_config.qualified_dividend_rate
-            ltcg_tax = self.tax_config.effective_ltcg_rate
 
             # Assume dividends taxed annually, capital gains deferred
             # Simplified: annual tax on dividends only
@@ -172,7 +176,9 @@ class TaxIntegratedScenario:
                 self.base_scenario.real_estate_returns * rental_portion * rental_tax
                 + self.base_scenario.real_estate_returns * appreciation_portion * appreciation_tax
             )
-            self.after_tax_real_estate_returns = self.base_scenario.real_estate_returns - real_estate_drag
+            self.after_tax_real_estate_returns = (
+                self.base_scenario.real_estate_returns - real_estate_drag
+            )
 
             # Calculate total tax drag
             self.tax_drag = np.array([
@@ -202,11 +208,31 @@ class TaxIntegratedScenario:
         """
         if self.account_type == AccountType.TAX_FREE:
             # Roth IRA - qualified withdrawals are tax-free
-            return 0.0 if is_qualified_withdrawal else withdrawal_amount * self.tax_config.early_withdrawal_penalty
+            if is_qualified_withdrawal:
+                return 0.0
+            return withdrawal_amount * self.tax_config.early_withdrawal_penalty
 
         elif self.account_type == AccountType.TAX_DEFERRED:
             # Traditional IRA - pay ordinary income tax
-            tax = withdrawal_amount * self.tax_config.tax_deferred_withdrawal_rate
+            #
+            # Choix de correction : on garde `tax_deferred_withdrawal_rate: float | None`
+            # et on lève une garde ici, plutôt que de redéclarer le champ en `float`.
+            # Le None n'est en effet pas une absence de valeur, c'est une sentinelle :
+            # __post_init__ le remplace par `ordinary_income_rate`, donc la valeur par
+            # défaut *dépend d'un autre champ*. La remplacer par une constante
+            # (`float = 0.25`) changerait les taux calculés dès que l'appelant
+            # personnalise `ordinary_income_rate`, et un `default_factory` ne voit pas
+            # les autres champs. La garde ci-dessous documente l'invariant garanti par
+            # __post_init__ sans toucher au contrat du constructeur.
+            withdrawal_rate = self.tax_config.tax_deferred_withdrawal_rate
+            if withdrawal_rate is None:
+                raise ValueError(
+                    "tax_deferred_withdrawal_rate non renseigné : construisez la "
+                    "configuration avec TaxConfig(...), dont __post_init__ le "
+                    "recopie depuis ordinary_income_rate, et ne réaffectez pas "
+                    "l'attribut à None après coup."
+                )
+            tax = withdrawal_amount * withdrawal_rate
             if not is_qualified_withdrawal:
                 tax += withdrawal_amount * self.tax_config.early_withdrawal_penalty
             return tax
@@ -269,7 +295,7 @@ class TaxIntegratedScenarioEngine:
     def __init__(
         self,
         tax_config: TaxConfig,
-        gse: Optional[GlobalScenarioEngine] = None,
+        gse: GlobalScenarioEngine | None = None,
     ):
         """
         Initialize the Tax-Integrated Scenario Engine.
@@ -306,7 +332,7 @@ class TaxIntegratedScenarioEngine:
         self,
         years: int,
         scenario_type: str = "baseline",
-    ) -> Dict[AccountType, TaxIntegratedScenario]:
+    ) -> dict[AccountType, TaxIntegratedScenario]:
         """
         Generate scenarios for all account types.
 
@@ -328,7 +354,9 @@ class TaxIntegratedScenarioEngine:
         # Create tax-integrated scenarios for each account type
         return {
             AccountType.TAXABLE: self.generate_tax_integrated_scenario(base, AccountType.TAXABLE),
-            AccountType.TAX_DEFERRED: self.generate_tax_integrated_scenario(base, AccountType.TAX_DEFERRED),
+            AccountType.TAX_DEFERRED: self.generate_tax_integrated_scenario(
+                base, AccountType.TAX_DEFERRED
+            ),
             AccountType.TAX_FREE: self.generate_tax_integrated_scenario(base, AccountType.TAX_FREE),
         }
 
@@ -337,7 +365,7 @@ class TaxIntegratedScenarioEngine:
         years: int,
         initial_investment: float,
         annual_contribution: float = 0.0,
-        asset_allocation: Optional[Dict[str, float]] = None,
+        asset_allocation: dict[str, float] | None = None,
     ) -> pd.DataFrame:
         """
         Compare investment growth across different account types.
@@ -384,7 +412,9 @@ class TaxIntegratedScenarioEngine:
             total_gains = final_balance - total_contributions
 
             # Calculate withdrawal tax
-            withdrawal_tax = scenario.calculate_withdrawal_tax(final_balance, is_qualified_withdrawal=True)
+            withdrawal_tax = scenario.calculate_withdrawal_tax(
+                final_balance, is_qualified_withdrawal=True
+            )
             after_tax_balance = final_balance - withdrawal_tax
 
             results.append({

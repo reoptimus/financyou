@@ -5,27 +5,19 @@ Comprehensive multi-page Streamlit application inspired by R Shiny interface.
 Includes: Profile, Assets, Projects, Projections, and Analysis sections.
 """
 
-import streamlit as st
-import pandas as pd
-import numpy as np
-import json
-from pathlib import Path
 import sys
+from datetime import datetime
+from pathlib import Path
+
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+import streamlit as st
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from investment_calculator.modules import (
-    scenario_generator,
-    tax_engine,
-    user_profile,
-    optimizer,
-    reporting
-)
-
+from investment_calculator.modules import optimizer, scenario_generator, tax_engine, user_profile
 
 # Page configuration
 st.set_page_config(
@@ -56,7 +48,10 @@ def init_session_state():
 def render_sidebar():
     """Render sidebar with navigation."""
     with st.sidebar:
-        st.image("https://via.placeholder.com/250x80/1f77b4/ffffff?text=FinancYou", use_column_width=True)
+        st.image(
+            "https://via.placeholder.com/250x80/1f77b4/ffffff?text=FinancYou",
+            use_column_width=True,
+        )
 
         st.markdown("---")
         st.markdown("### 📋 Navigation")
@@ -209,15 +204,15 @@ def page_profile():
             num_earners = st.radio("Number of Earners", [1, 2], horizontal=True)
 
             if num_earners == 2:
-                annual_income_2 = st.number_input("Partner's Annual Income ($)", 0, 1000000, 60000, 1000)
+                st.number_input("Partner's Annual Income ($)", 0, 1000000, 60000, 1000)
 
-            income_growth = st.slider("Expected Annual Salary Growth (%)", 0.0, 10.0, 3.0, 0.5)
+            st.slider("Expected Annual Salary Growth (%)", 0.0, 10.0, 3.0, 0.5)
 
         with col2:
             st.markdown("#### Expenses & Savings")
             annual_expenses = st.number_input("Annual Expenses ($)", 0, 500000, 55000, 1000)
 
-            savings_rate = st.slider("Target Savings Rate (%)", 0.0, 50.0, 15.0, 1.0)
+            st.slider("Target Savings Rate (%)", 0.0, 50.0, 15.0, 1.0)
 
             st.metric("Monthly Savings", f"${(annual_income - annual_expenses) / 12:,.0f}")
 
@@ -238,16 +233,16 @@ def page_profile():
             col1, col2 = st.columns(2)
             with col1:
                 property_value = st.number_input("Property Value ($)", 0, 10000000, 300000, 10000)
-                mortgage_remaining = st.number_input("Remaining Mortgage ($)", 0, property_value, 200000, 5000)
+                st.number_input("Remaining Mortgage ($)", 0, property_value, 200000, 5000)
 
             with col2:
                 mortgage_years_total = st.number_input("Total Mortgage Term (years)", 1, 40, 30)
-                mortgage_years_remaining = st.number_input("Years Remaining", 1, mortgage_years_total, 25)
-                mortgage_rate = st.slider("Mortgage Interest Rate (%)", 0.0, 10.0, 3.5, 0.1)
-                monthly_payment = st.number_input("Monthly Payment ($)", 0, 10000, 1500, 50)
+                st.number_input("Years Remaining", 1, mortgage_years_total, 25)
+                st.slider("Mortgage Interest Rate (%)", 0.0, 10.0, 3.5, 0.1)
+                st.number_input("Monthly Payment ($)", 0, 10000, 1500, 50)
 
         else:  # Renter
-            monthly_rent = st.number_input("Monthly Rent ($)", 0, 10000, 1500, 50)
+            st.number_input("Monthly Rent ($)", 0, 10000, 1500, 50)
 
     # Tab 4: Professional
     with tabs[3]:
@@ -266,7 +261,7 @@ def page_profile():
 
         with col2:
             if profession != "Retired":
-                job_security = st.select_slider(
+                st.select_slider(
                     "Job Security",
                     options=["Low", "Medium", "High"],
                     value="Medium"
@@ -287,14 +282,17 @@ def page_profile():
 
             investment_goal = st.selectbox(
                 "Primary Goal",
-                ["retirement", "wealth accumulation", "income generation", "education", "major purchase"]
+                [
+                    "retirement", "wealth accumulation", "income generation",
+                    "education", "major purchase",
+                ]
             )
 
         with col2:
             max_equity = st.slider("Maximum Equity Allocation (%)", 0, 100, 80, 5)
             min_bonds = st.slider("Minimum Bond Allocation (%)", 0, 100, 15, 5)
 
-        esg_focus = st.checkbox("ESG (Environmental/Social/Governance) Focus")
+        st.checkbox("ESG (Environmental/Social/Governance) Focus")
 
     # Save button
     st.markdown("---")
@@ -394,7 +392,9 @@ def page_projects():
                     text=df['name'],
                     textposition='auto'
                 ))
-                fig.update_layout(title='Project Timeline', xaxis_title='Year', yaxis_title='Amount ($)')
+                fig.update_layout(
+                    title='Project Timeline', xaxis_title='Year', yaxis_title='Amount ($)'
+                )
                 st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No projects planned yet. Add your first project using the form →")
@@ -453,7 +453,10 @@ def page_projections():
     if st.session_state.results:
         display_projection_results(st.session_state.results)
     else:
-        st.info("Click 'Run Analysis' to generate projections based on your profile, assets, and projects.")
+        st.info(
+            "Click 'Run Analysis' to generate projections based on your profile, "
+            "assets, and projects."
+        )
 
 
 def display_projection_results(results):
@@ -480,11 +483,16 @@ def display_projection_results(results):
                 st.metric("Sharpe Ratio", f"{portfolio['sharpe_ratio']:.2f}")
 
         with col4:
-            st.metric("Time Horizon", f"{results['profile']['validated_profile']['personal_info']['life_expectancy'] - results['profile']['validated_profile']['personal_info']['age']} years")
+            personal_info = results['profile']['validated_profile']['personal_info']
+            time_horizon = personal_info['life_expectancy'] - personal_info['age']
+            st.metric("Time Horizon", f"{time_horizon} years")
 
     with tabs[1]:
         st.markdown("### Projections Including Your Projects")
-        st.info("Project-adjusted projections will be displayed here after incorporating project costs and timing.")
+        st.info(
+            "Project-adjusted projections will be displayed here after "
+            "incorporating project costs and timing."
+        )
 
     with tabs[2]:
         st.markdown("### Comparison: With vs. Without Projects")
@@ -554,7 +562,10 @@ def run_comprehensive_analysis():
                     'currency': user_data.get('currency', 'USD')
                 },
                 'financial_situation': {
-                    'current_savings': sum([a['value'] for a in st.session_state.assets]) if st.session_state.assets else 50000,
+                    'current_savings': (
+                        sum(a['value'] for a in st.session_state.assets)
+                        if st.session_state.assets else 50000
+                    ),
                     'annual_income': user_data.get('annual_income', 75000),
                     'annual_expenses': user_data.get('annual_expenses', 55000),
                     'debt': {'mortgage': 0, 'student_loans': 0, 'other': 0}
@@ -587,7 +598,9 @@ def run_comprehensive_analysis():
         gen = scenario_generator.ScenarioGenerator(random_seed=42)
         scenario_results = gen.generate({
             'num_scenarios': st.session_state.get('num_scenarios', 100),
-            'time_horizon': profile_config['user_profile']['investment_preferences']['time_horizon'],
+            'time_horizon': (
+                profile_config['user_profile']['investment_preferences']['time_horizon']
+            ),
             'timestep': 1.0,
             'use_stochastic': False
         })
@@ -595,7 +608,9 @@ def run_comprehensive_analysis():
         tax_eng = tax_engine.TaxEngine()
         tax_results = tax_eng.apply_taxes({
             'scenarios': scenario_results['scenarios'],
-            'tax_config': tax_engine.TaxConfigPreset.get_preset(st.session_state.get('jurisdiction', 'US')),
+            'tax_config': tax_engine.TaxConfigPreset.get_preset(
+                st.session_state.get('jurisdiction', 'US')
+            ),
             'investment_allocation': {
                 'stocks': {'taxable': 0.6, 'tax_deferred': 0.3, 'tax_free': 0.1},
                 'bonds': {'taxable': 0.5, 'tax_deferred': 0.4, 'tax_free': 0.1},
