@@ -1,0 +1,60 @@
+# Configuration Ruff pour FinancYou (étape 0.1 : intégration continue et hygiène du code).
+#
+# Ruff remplace ici flake8 + isort + pyupgrade + une partie de bugbear.
+# La configuration est volontairement séparée de pyproject.toml pour rester
+# lisible et indépendante des métadonnées d'empaquetage.
+
+target-version = "py311"
+line-length = 100
+
+# Répertoires exclus de l'analyse :
+# - legacy/   : code historique gelé, non maintenu, conservé pour référence
+# - examples/ : scripts de démonstration (usage libre de print, imports en vrac)
+# - outputs/  : artefacts générés à l'exécution, jamais versionnés
+exclude = [
+    "legacy",
+    "examples",
+    "outputs",
+]
+
+[lint]
+# E : pycodestyle (erreurs)      W : pycodestyle (avertissements)
+# F : Pyflakes                   I : isort (ordre des imports)
+# B : flake8-bugbear             UP: pyupgrade (modernisation de la syntaxe)
+select = ["E", "F", "W", "I", "B", "UP"]
+
+ignore = [
+    # E501 (ligne trop longue) reste actif ; voir [lint.pycodestyle] ci-dessous.
+
+    # E741 : noms de variables ambigus (l, I, O). Le code financier utilise des
+    # notations mathématiques courtes issues des articles de référence
+    # (Hull-White, Black-Scholes) ; les renommer nuirait à la lisibilité pour
+    # les quants et n'apporte aucune sécurité.
+    "E741",
+
+    # B008 : appels de fonction dans les valeurs par défaut d'arguments.
+    # Trop bruyant sur les dataclasses et signatures numériques existantes,
+    # sans risque réel ici (aucune valeur par défaut mutable partagée).
+    "B008",
+]
+
+[lint.per-file-ignores]
+# Les __init__.py réexportent volontairement des symboles : F401 (import non
+# utilisé) est le comportement recherché, pas un défaut.
+"__init__.py" = ["F401"]
+
+# Les tests utilisent des fixtures et des imports de confort ; on tolère les
+# comparaisons explicites et les assertions dans les boucles.
+"tests/*" = ["B011"]
+
+[lint.isort]
+known-first-party = ["investment_calculator", "time_series_slicer", "web_ui"]
+
+[lint.pycodestyle]
+# Tolérance sur les longues lignes déjà présentes dans les docstrings et les
+# tableaux de constantes : la limite dure reste 100 pour le code.
+max-line-length = 100
+
+[format]
+quote-style = "preserve"
+indent-style = "space"

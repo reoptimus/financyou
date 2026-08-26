@@ -11,11 +11,16 @@ Generates economic scenarios for investment analysis including:
 Supports both historical scenarios and Monte Carlo simulation.
 """
 
+import logging
+from dataclasses import dataclass, field
+from enum import Enum
+
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Tuple
-from enum import Enum
+
+# Journalisation : logger nommé d'après le module, il hérite donc de la
+# configuration posée par investment_calculator.logging_config.configure_logging().
+logger = logging.getLogger(__name__)
 
 
 class ScenarioType(Enum):
@@ -57,7 +62,7 @@ class EconomicScenario:
     real_estate_returns: np.ndarray
     gdp_growth: np.ndarray
     probability: float = 1.0
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
     def __post_init__(self):
         """Validate scenario data"""
@@ -93,7 +98,7 @@ class EconomicScenario:
             index=pd.Index(range(1, self.years + 1), name="year"),
         )
 
-    def get_summary_statistics(self) -> Dict[str, Dict[str, float]]:
+    def get_summary_statistics(self) -> dict[str, dict[str, float]]:
         """
         Calculate summary statistics for all economic indicators.
 
@@ -130,7 +135,7 @@ class GlobalScenarioEngine:
     investment analysis and portfolio optimization.
     """
 
-    def __init__(self, random_seed: Optional[int] = None):
+    def __init__(self, random_seed: int | None = None):
         """
         Initialize the Global Scenario Engine.
 
@@ -280,15 +285,18 @@ class GlobalScenarioEngine:
             real_estate_returns=real_estate,
             gdp_growth=gdp,
             probability=0.25,
-            metadata={"description": "Pessimistic scenario with below-average growth and high volatility"},
+            metadata={
+                "description": "Pessimistic scenario with below-average growth "
+                               "and high volatility"
+            },
         )
 
     def generate_monte_carlo_scenarios(
         self,
         years: int,
         n_scenarios: int = 1000,
-        custom_params: Optional[Dict[str, float]] = None,
-    ) -> List[EconomicScenario]:
+        custom_params: dict[str, float] | None = None,
+    ) -> list[EconomicScenario]:
         """
         Generate multiple scenarios using Monte Carlo simulation.
 
@@ -367,7 +375,7 @@ class GlobalScenarioEngine:
 
         return scenarios
 
-    def generate_standard_scenarios(self, years: int) -> List[EconomicScenario]:
+    def generate_standard_scenarios(self, years: int) -> list[EconomicScenario]:
         """
         Generate a standard set of scenarios (pessimistic, baseline, optimistic).
 
@@ -387,12 +395,12 @@ class GlobalScenarioEngine:
         self,
         scenario_id: str,
         years: int,
-        inflation: Optional[np.ndarray] = None,
-        interest: Optional[np.ndarray] = None,
-        stocks: Optional[np.ndarray] = None,
-        bonds: Optional[np.ndarray] = None,
-        real_estate: Optional[np.ndarray] = None,
-        gdp: Optional[np.ndarray] = None,
+        inflation: np.ndarray | None = None,
+        interest: np.ndarray | None = None,
+        stocks: np.ndarray | None = None,
+        bonds: np.ndarray | None = None,
+        real_estate: np.ndarray | None = None,
+        gdp: np.ndarray | None = None,
         probability: float = 1.0,
     ) -> EconomicScenario:
         """
@@ -423,13 +431,15 @@ class GlobalScenarioEngine:
             interest_rates=interest if interest is not None else baseline.interest_rates,
             stock_returns=stocks if stocks is not None else baseline.stock_returns,
             bond_returns=bonds if bonds is not None else baseline.bond_returns,
-            real_estate_returns=real_estate if real_estate is not None else baseline.real_estate_returns,
+            real_estate_returns=(
+                real_estate if real_estate is not None else baseline.real_estate_returns
+            ),
             gdp_growth=gdp if gdp is not None else baseline.gdp_growth,
             probability=probability,
             metadata={"description": "Custom user-defined scenario"},
         )
 
-    def analyze_scenarios(self, scenarios: List[EconomicScenario]) -> pd.DataFrame:
+    def analyze_scenarios(self, scenarios: list[EconomicScenario]) -> pd.DataFrame:
         """
         Analyze and compare multiple scenarios.
 

@@ -29,9 +29,9 @@ Key Features:
 - Inflation indexation of rents
 """
 
-import numpy as np
-from typing import Dict, Optional, Tuple
 import warnings
+
+import numpy as np
 
 
 class RealEstateModel:
@@ -100,9 +100,9 @@ class RealEstateModel:
         self,
         short_rates: np.ndarray,
         f0t: np.ndarray,
-        re_price_shocks: Optional[np.ndarray] = None,
-        re_rental_shocks: Optional[np.ndarray] = None
-    ) -> Dict[str, np.ndarray]:
+        re_price_shocks: np.ndarray | None = None,
+        re_rental_shocks: np.ndarray | None = None
+    ) -> dict[str, np.ndarray]:
         """
         Generate real estate return scenarios.
 
@@ -124,7 +124,8 @@ class RealEstateModel:
         if n_scenarios != self.n_scenarios or n_steps != self.n_steps:
             warnings.warn(
                 f"Input shape ({n_scenarios}, {n_steps}) differs from initialized "
-                f"({self.n_scenarios}, {self.n_steps}). Using input shape."
+                f"({self.n_scenarios}, {self.n_steps}). Using input shape.",
+                stacklevel=2,
             )
 
         # Generate or use provided shocks
@@ -181,11 +182,7 @@ class RealEstateModel:
 
         # Precompute coefficients
         exp_a_dt = np.exp(-self.a * self.dt)
-        K2T_t = (1 - exp_a_dt) / self.a
         K2T_t2a = (1 - np.exp(-2 * self.a * self.dt)) / (2 * self.a)
-        eta2 = (self.sigma / self.a) * (
-            self.dt - 2 * K2T_t + K2T_t2a
-        ) ** 0.5
 
         # Generate auxiliary rate process
         for t in range(n_steps - 1):
@@ -375,7 +372,7 @@ class CommercialRealEstate(RealEstateModel):
     def calculate_noi(
         self,
         property_value: float
-    ) -> Tuple[float, float, float]:
+    ) -> tuple[float, float, float]:
         """
         Calculate Net Operating Income.
 
@@ -454,7 +451,7 @@ def calibrate_real_estate_parameters(
     historical_prices: np.ndarray,
     historical_rents: np.ndarray,
     dt: float = 1.0
-) -> Tuple[float, float, float]:
+) -> tuple[float, float, float]:
     """
     Calibrate real estate model parameters from historical data.
 

@@ -14,23 +14,30 @@ economic scenarios using the Financyou stochastic models:
 This replicates the functionality of the R legacy code but with modern Python.
 """
 
+import os
+import sys
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from typing import Dict
-import sys
-import os
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 from investment_calculator.stochastic_models import (
-    HullWhiteModel,
-    CorrelatedRandomGenerator,
     BlackScholesEquity,
+    CorrelatedRandomGenerator,
+    EIOPACalibrator,
+    HullWhiteModel,
     RealEstateModel,
-    EIOPACalibrator
 )
+
+# Bandes de percentiles tracées sur chaque graphique : (percentile, couleur, légende)
+PERCENTILE_BANDS = [
+    (5, 'red', '5th %ile'),
+    (50, 'black', 'Median'),
+    (95, 'red', '95th %ile'),
+]
 
 
 class EconomicScenarioGenerator:
@@ -50,7 +57,7 @@ class EconomicScenarioGenerator:
         n_scenarios: int = 1000,
         T: int = 30,
         dt: float = 0.5,
-        random_seed: int = None
+        random_seed: int | None = None
     ):
         """
         Initialize ESG.
@@ -71,12 +78,12 @@ class EconomicScenarioGenerator:
             np.random.seed(random_seed)
 
         # Will be populated by calibrate()
-        self.f0t = None
-        self.P0t = None
-        self.hw_params = None
+        self.f0t: np.ndarray | None = None
+        self.P0t: np.ndarray | None = None
+        self.hw_params: dict | None = None
 
         # Will be populated by generate()
-        self.results = {}
+        self.results: dict = {}
 
     def calibrate_from_eiopa(
         self,
@@ -108,7 +115,7 @@ class EconomicScenarioGenerator:
         # Store Hull-White parameters
         self.hw_params = {'a': hw_a, 'sigma': hw_sigma}
 
-        print(f"✓ Calibrated to EIOPA curves")
+        print("✓ Calibrated to EIOPA curves")
         print(f"  Forward rate range: {self.f0t.min():.4f} to {self.f0t.max():.4f}")
         print(f"  Hull-White parameters: a={hw_a}, σ={hw_sigma}")
 
@@ -132,7 +139,11 @@ class EconomicScenarioGenerator:
             re_rental_yield: Rental yield
             re_inflation: Rental inflation adjustment
         """
-        if self.f0t is None:
+        # `f0t`, `P0t` et `hw_params` sont renseignés ensemble par
+        # calibrate_from_eiopa() : on teste les trois pour que l'invariant soit
+        # explicite ici comme pour le vérificateur de types, sans changer le cas
+        # nominal.
+        if self.f0t is None or self.P0t is None or self.hw_params is None:
             raise ValueError("Must call calibrate_from_eiopa() first")
 
         print("\n" + "="*60)
@@ -203,7 +214,7 @@ class EconomicScenarioGenerator:
         self.results['equity']['prices'] = equity_prices
 
         mean_total_return = np.mean(equity_results['total_returns']) * (1 / self.dt)  # Annualized
-        print(f"  ✓ Generated equity scenarios")
+        print("  ✓ Generated equity scenarios")
         print(f"    Annualized mean return: {mean_total_return:.2%}")
         print(f"    Final price (median): ${np.median(equity_prices[:, -1]):.2f}")
 
@@ -232,7 +243,7 @@ class EconomicScenarioGenerator:
         self.results['real_estate'] = re_results
 
         mean_re_return = np.mean(re_results['total_returns']) * (1 / self.dt)  # Annualized
-        print(f"  ✓ Generated real estate scenarios")
+        print("  ✓ Generated real estate scenarios")
         print(f"    Annualized mean return: {mean_re_return:.2%}")
 
         print("\n" + "="*60)
@@ -308,8 +319,9 @@ class EconomicScenarioGenerator:
             ax.plot(time_grid, rates[i, :] * 100, alpha=0.1, color='blue')
 
         # Add percentiles
-        for pct, color, label in [(5, 'red', '5th %ile'), (50, 'black', 'Median'), (95, 'red', '95th %ile')]:
-            ax.plot(time_grid, np.percentile(rates, pct, axis=0) * 100, color=color, linewidth=2, label=label)
+        for pct, color, label in PERCENTILE_BANDS:
+            ax.plot(time_grid, np.percentile(rates, pct, axis=0) * 100,
+                    color=color, linewidth=2, label=label)
 
         ax.set_xlabel('Time (years)')
         ax.set_ylabel('Interest Rate (%)')
@@ -323,8 +335,9 @@ class EconomicScenarioGenerator:
         for i in range(min(50, n_scenarios_to_plot)):
             ax.plot(time_grid, prices[i, :], alpha=0.1, color='green')
 
-        for pct, color, label in [(5, 'red', '5th %ile'), (50, 'black', 'Median'), (95, 'red', '95th %ile')]:
-            ax.plot(time_grid, np.percentile(prices, pct, axis=0), color=color, linewidth=2, label=label)
+        for pct, color, label in PERCENTILE_BANDS:
+            ax.plot(time_grid, np.percentile(prices, pct, axis=0),
+                    color=color, linewidth=2, label=label)
 
         ax.set_xlabel('Time (years)')
         ax.set_ylabel('Price ($)')
@@ -334,12 +347,15 @@ class EconomicScenarioGenerator:
 
         # Plot 3: Real estate cumulative returns
         ax = axes[1, 0]
-        re_cumulative = np.cumsum(self.results['real_estate']['total_returns'][:n_scenarios_to_plot, :], axis=1)
+        re_cumulative = np.cumsum(
+            self.results['real_estate']['total_returns'][:n_scenarios_to_plot, :], axis=1
+        )
         for i in range(min(50, n_scenarios_to_plot)):
             ax.plot(time_grid, re_cumulative[i, :] * 100, alpha=0.1, color='brown')
 
-        for pct, color, label in [(5, 'red', '5th %ile'), (50, 'black', 'Median'), (95, 'red', '95th %ile')]:
-            ax.plot(time_grid, np.percentile(re_cumulative, pct, axis=0) * 100, color=color, linewidth=2, label=label)
+        for pct, color, label in PERCENTILE_BANDS:
+            ax.plot(time_grid, np.percentile(re_cumulative, pct, axis=0) * 100,
+                    color=color, linewidth=2, label=label)
 
         ax.set_xlabel('Time (years)')
         ax.set_ylabel('Cumulative Return (%)')
@@ -368,7 +384,7 @@ class EconomicScenarioGenerator:
         # Add correlation values
         for i in range(3):
             for j in range(3):
-                text = ax.text(j, i, f'{corr_matrix[i, j]:.2f}',
+                ax.text(j, i, f'{corr_matrix[i, j]:.2f}',
                              ha="center", va="center", color="black")
 
         plt.colorbar(im, ax=ax)
@@ -409,7 +425,7 @@ def main():
     )
 
     # Generate scenarios
-    results = esg.generate_scenarios(
+    esg.generate_scenarios(
         equity_sigma=0.18,
         equity_dividend_yield=0.02,
         re_a=0.15,

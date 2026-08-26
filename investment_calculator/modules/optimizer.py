@@ -33,12 +33,17 @@ OUTPUT STRUCTURE:
 }
 """
 
+import logging
+import time
+from enum import Enum
+
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass, field
 from scipy.optimize import minimize
-from enum import Enum
+
+# Journalisation : logger nommé d'après le module, il hérite donc de la
+# configuration posée par investment_calculator.logging_config.configure_logging().
+logger = logging.getLogger(__name__)
 
 
 class OptimizationObjective(Enum):
@@ -71,11 +76,11 @@ class PortfolioOptimizer:
         >>> print(results['optimal_portfolio'])
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the Portfolio Optimizer."""
         pass
 
-    def optimize(self, config: Dict) -> Dict:
+    def optimize(self, config: dict) -> dict:
         """
         Optimize portfolio and run simulations.
 
@@ -85,6 +90,9 @@ class PortfolioOptimizer:
         Returns:
             Dictionary with optimal portfolio, simulations, and analysis
         """
+        # Chronomètre pour tracer la durée totale de l'optimisation.
+        start_time = time.perf_counter()
+
         # Validate configuration
         validated_config = self._validate_config(config)
 
@@ -92,6 +100,12 @@ class PortfolioOptimizer:
         objective = validated_config['optimization_objective']
         params = validated_config['optimization_params']
         constraints = validated_config['user_constraints']
+
+        logger.info(
+            "Début de l'optimisation de portefeuille (objectif=%s, %d lignes de scénarios)",
+            objective,
+            len(scenarios_df),
+        )
 
         # Extract returns for optimization
         asset_returns = self._extract_asset_returns(scenarios_df)
@@ -139,6 +153,17 @@ class PortfolioOptimizer:
             validated_config.get('goal_amount', None)
         )
 
+        logger.info(
+            "Fin de l'optimisation (objectif=%s) en %.3f s : rendement attendu=%.4f, "
+            "volatilité=%.4f, ratio de Sharpe=%.4f, %d points sur la frontière efficiente",
+            objective,
+            time.perf_counter() - start_time,
+            optimal_portfolio['expected_return'],
+            optimal_portfolio['expected_volatility'],
+            optimal_portfolio['sharpe_ratio'],
+            len(efficient_frontier),
+        )
+
         return {
             'optimal_portfolio': optimal_portfolio,
             'efficient_frontier': efficient_frontier,
@@ -148,7 +173,7 @@ class PortfolioOptimizer:
             'goal_analysis': goal_analysis
         }
 
-    def _validate_config(self, config: Dict) -> Dict:
+    def _validate_config(self, config: dict) -> dict:
         """
         Validate and complete configuration.
 
@@ -214,7 +239,8 @@ class PortfolioOptimizer:
         if not return_columns:
             # Fallback to pre-tax returns
             for col in scenarios_df.columns:
-                if 'return' in col.lower() and col not in ['interest_rate', 'inflation', 'gdp_growth']:
+                excluded = ['interest_rate', 'inflation', 'gdp_growth']
+                if 'return' in col.lower() and col not in excluded:
                     return_columns.append(col)
                     asset_name = col.replace('_return', '')
                     asset_names.append(asset_name)
@@ -230,9 +256,9 @@ class PortfolioOptimizer:
         self,
         asset_returns: pd.DataFrame,
         objective: str,
-        params: Dict,
-        constraints: Dict
-    ) -> Dict:
+        params: dict,
+        constraints: dict
+    ) -> dict:
         """
         Run portfolio optimization.
 
@@ -296,7 +322,9 @@ class PortfolioOptimizer:
         max_drawdown = self._estimate_max_drawdown(asset_returns, optimal_weights)
 
         return {
-            'weights': dict(zip(asset_names, optimal_weights)),
+            # strict=False : longueurs structurellement égales (n_assets) ; on
+            # conserve le comportement historique de zip() plutôt que de lever.
+            'weights': dict(zip(asset_names, optimal_weights, strict=False)),
             'expected_return': float(portfolio_return),
             'expected_volatility': float(portfolio_volatility),
             'sharpe_ratio': float(sharpe_ratio),
@@ -312,7 +340,7 @@ class PortfolioOptimizer:
         max_weight: float
     ) -> np.ndarray:
         """Optimize for maximum Sharpe ratio."""
-        def neg_sharpe(weights):
+        def neg_sharpe(weights: np.ndarray) -> float:
             portfolio_return = np.dot(weights, mean_returns)
             portfolio_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
             return -portfolio_return / portfolio_std if portfolio_std > 0 else 1e10
@@ -323,7 +351,15 @@ class PortfolioOptimizer:
 
         result = minimize(neg_sharpe, x0, method='SLSQP', bounds=bounds, constraints=constraints)
 
-        return result.x if result.success else x0
+        if not result.success:
+            # Repli sur l'équipondération : comportement historique conservé,
+            # mais l'échec de convergence n'est plus silencieux.
+            logger.warning(
+                "Échec de convergence SLSQP (max_sharpe) : %s — repli sur l'équipondération",
+                result.message,
+            )
+            return x0
+        return np.asarray(result.x)
 
     def _optimize_min_volatility(
         self,
@@ -333,16 +369,24 @@ class PortfolioOptimizer:
         max_weight: float
     ) -> np.ndarray:
         """Optimize for minimum volatility."""
-        def portfolio_volatility(weights):
-            return np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+        def portfolio_volatility(weights: np.ndarray) -> float:
+            return float(np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights))))
 
         constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}]
         bounds = tuple((min_weight, max_weight) for _ in range(n_assets))
         x0 = np.ones(n_assets) / n_assets
 
-        result = minimize(portfolio_volatility, x0, method='SLSQP', bounds=bounds, constraints=constraints)
+        result = minimize(
+            portfolio_volatility, x0, method='SLSQP', bounds=bounds, constraints=constraints
+        )
 
-        return result.x if result.success else x0
+        if not result.success:
+            logger.warning(
+                "Échec de convergence SLSQP (min_volatility) : %s — repli sur l'équipondération",
+                result.message,
+            )
+            return x0
+        return np.asarray(result.x)
 
     def _optimize_target_return(
         self,
@@ -354,8 +398,8 @@ class PortfolioOptimizer:
         max_weight: float
     ) -> np.ndarray:
         """Optimize for target return with minimum volatility."""
-        def portfolio_volatility(weights):
-            return np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+        def portfolio_volatility(weights: np.ndarray) -> float:
+            return float(np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights))))
 
         constraints = [
             {'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0},
@@ -364,13 +408,22 @@ class PortfolioOptimizer:
         bounds = tuple((min_weight, max_weight) for _ in range(n_assets))
         x0 = np.ones(n_assets) / n_assets
 
-        result = minimize(portfolio_volatility, x0, method='SLSQP', bounds=bounds, constraints=constraints)
+        result = minimize(
+            portfolio_volatility, x0, method='SLSQP', bounds=bounds, constraints=constraints
+        )
 
         if result.success:
-            return result.x
+            return np.asarray(result.x)
         else:
             # If target return not achievable, return max Sharpe
-            return self._optimize_max_sharpe(mean_returns, cov_matrix, n_assets, min_weight, max_weight)
+            logger.warning(
+                "Échec de convergence SLSQP (target_return=%.4f) : %s — repli sur max_sharpe",
+                target_return,
+                result.message,
+            )
+            return self._optimize_max_sharpe(
+                mean_returns, cov_matrix, n_assets, min_weight, max_weight
+            )
 
     def _optimize_risk_parity(
         self,
@@ -380,19 +433,27 @@ class PortfolioOptimizer:
         max_weight: float
     ) -> np.ndarray:
         """Optimize for risk parity (equal risk contribution)."""
-        def risk_parity_objective(weights):
+        def risk_parity_objective(weights: np.ndarray) -> float:
             portfolio_variance = np.dot(weights.T, np.dot(cov_matrix, weights))
             marginal_contrib = np.dot(cov_matrix, weights)
             risk_contrib = weights * marginal_contrib / np.sqrt(portfolio_variance)
-            return np.sum((risk_contrib - risk_contrib.mean()) ** 2)
+            return float(np.sum((risk_contrib - risk_contrib.mean()) ** 2))
 
         constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}]
         bounds = tuple((min_weight, max_weight) for _ in range(n_assets))
         x0 = np.ones(n_assets) / n_assets
 
-        result = minimize(risk_parity_objective, x0, method='SLSQP', bounds=bounds, constraints=constraints)
+        result = minimize(
+            risk_parity_objective, x0, method='SLSQP', bounds=bounds, constraints=constraints
+        )
 
-        return result.x if result.success else x0
+        if not result.success:
+            logger.warning(
+                "Échec de convergence SLSQP (risk_parity) : %s — repli sur l'équipondération",
+                result.message,
+            )
+            return x0
+        return np.asarray(result.x)
 
     def _estimate_max_drawdown(self, asset_returns: pd.DataFrame, weights: np.ndarray) -> float:
         """
@@ -415,13 +476,13 @@ class PortfolioOptimizer:
         running_max = cumulative_returns.expanding().max()
         drawdown = (cumulative_returns - running_max) / running_max
 
-        return abs(drawdown.min())
+        return float(abs(drawdown.min()))
 
     def _generate_efficient_frontier(
         self,
         asset_returns: pd.DataFrame,
-        constraints: Dict,
-        params: Dict,
+        constraints: dict,
+        params: dict,
         n_points: int = 50
     ) -> pd.DataFrame:
         """
@@ -474,18 +535,34 @@ class PortfolioOptimizer:
 
                 frontier_results.append(result_dict)
 
-            except:
+            except (ValueError, ArithmeticError) as exc:
+                # Un rendement cible peut être infaisable sous les contraintes de
+                # poids, ou la matrice de covariance peut être singulière : on
+                # ignore ce point de la frontière, mais on trace la raison.
+                # ValueError couvre np.linalg.LinAlgError (qui en hérite) ;
+                # ArithmeticError couvre les divisions par zéro et débordements.
+                logger.warning(
+                    "Point de frontière efficiente ignoré (rendement cible=%.6f) : %s",
+                    target_ret,
+                    exc,
+                )
                 continue
+
+        logger.debug(
+            "Frontière efficiente générée : %d/%d points retenus",
+            len(frontier_results),
+            n_points,
+        )
 
         return pd.DataFrame(frontier_results)
 
     def _run_simulations(
         self,
         scenarios_df: pd.DataFrame,
-        optimal_portfolio: Dict,
+        optimal_portfolio: dict,
         time_series: pd.DataFrame,
-        params: Dict
-    ) -> Dict:
+        params: dict
+    ) -> dict:
         """
         Run Monte Carlo simulations with optimal portfolio.
 
@@ -571,10 +648,10 @@ class PortfolioOptimizer:
     def _simulate_wealth_path(
         self,
         scenario_data: pd.DataFrame,
-        weights: Dict,
+        weights: dict,
         time_series: pd.DataFrame,
-        params: Dict
-    ) -> Tuple[np.ndarray, float]:
+        params: dict
+    ) -> tuple[np.ndarray, float]:
         """
         Simulate wealth path for a single scenario.
 
@@ -631,8 +708,8 @@ class PortfolioOptimizer:
 
     def _create_rebalancing_schedule(
         self,
-        optimal_portfolio: Dict,
-        params: Dict,
+        optimal_portfolio: dict,
+        params: dict,
         time_series: pd.DataFrame
     ) -> pd.DataFrame:
         """
@@ -661,9 +738,9 @@ class PortfolioOptimizer:
     def _sensitivity_analysis(
         self,
         asset_returns: pd.DataFrame,
-        optimal_portfolio: Dict,
-        params: Dict
-    ) -> Dict:
+        optimal_portfolio: dict,
+        params: dict
+    ) -> dict:
         """
         Perform sensitivity analysis.
 
@@ -698,9 +775,9 @@ class PortfolioOptimizer:
 
     def _analyze_goals(
         self,
-        simulation_results: Dict,
-        goal_amount: Optional[float]
-    ) -> Dict:
+        simulation_results: dict,
+        goal_amount: float | None
+    ) -> dict:
         """
         Analyze goal achievement probability.
 
@@ -724,7 +801,7 @@ class PortfolioOptimizer:
         expected_surplus_deficit = surplus_deficit.mean()
 
         # Years to goal distribution (simplified - would need time-series analysis)
-        years_to_goal = {}
+        years_to_goal: dict = {}
 
         return {
             'goal_amount': float(goal_amount),
@@ -738,7 +815,7 @@ class PortfolioOptimizer:
 def quick_optimize(
     scenarios_df: pd.DataFrame,
     objective: str = 'max_sharpe'
-) -> Dict:
+) -> dict:
     """
     Quick optimization with default parameters.
 

@@ -20,11 +20,11 @@ For a complete workflow example, see examples/complete_workflow_modules.py
 """
 
 from investment_calculator.modules import (
+    optimizer,
+    reporting,
     scenario_generator,
     tax_engine,
     user_profile,
-    optimizer,
-    reporting
 )
 
 __all__ = [

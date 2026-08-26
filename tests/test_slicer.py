@@ -2,17 +2,18 @@
 Unit tests for time_series_slicer.slicer module.
 """
 
-import pytest
+from datetime import timedelta
+
 import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from time_series_slicer import TimeSeriesSlicer, slice_by_time, slice_by_index, slice_by_window
+import pytest
+
+from time_series_slicer import TimeSeriesSlicer, slice_by_index, slice_by_time, slice_by_window
 
 
 @pytest.fixture
 def sample_dataframe():
     """Create a sample DataFrame with DatetimeIndex."""
-    dates = pd.date_range('2024-01-01', periods=100, freq='H')
+    dates = pd.date_range('2024-01-01', periods=100, freq='h')
     data = pd.DataFrame({
         'value': range(100),
         'temperature': [20 + i * 0.1 for i in range(100)]
@@ -23,7 +24,7 @@ def sample_dataframe():
 @pytest.fixture
 def sample_series():
     """Create a sample Series with DatetimeIndex."""
-    dates = pd.date_range('2024-01-01', periods=100, freq='H')
+    dates = pd.date_range('2024-01-01', periods=100, freq='h')
     data = pd.Series(range(100), index=dates, name='value')
     return data
 
@@ -31,7 +32,7 @@ def sample_series():
 @pytest.fixture
 def sample_dataframe_with_time_column():
     """Create a sample DataFrame with time column (no DatetimeIndex)."""
-    dates = pd.date_range('2024-01-01', periods=100, freq='H')
+    dates = pd.date_range('2024-01-01', periods=100, freq='h')
     data = pd.DataFrame({
         'timestamp': dates,
         'value': range(100)
