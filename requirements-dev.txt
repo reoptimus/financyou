@@ -1,0 +1,15 @@
+# Outillage de developpement : tests, couverture, lint et typage.
+# Installe les dependances d'execution puis les outils de qualite.
+-r requirements.txt
+
+# --- Tests ---
+pytest>=8.0,<10
+pytest-cov>=4.1,<8
+
+# --- Qualite de code (configuration dans ruff.toml et mypy.ini) ---
+ruff>=0.6,<1
+mypy>=1.10,<2
+
+# --- Stubs de typage ---
+types-openpyxl>=3.1
+types-requests>=2.31

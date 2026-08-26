@@ -1,10 +1,22 @@
-# Core dependencies
-pandas>=1.0.0
-numpy>=1.18.0
-scipy>=1.7.0
+# Dependances d'execution de FinancYou (moteur + interface web).
+# Chaque dependance est bornee en bas (fonctionnalites requises) et en haut
+# (version majeure suivante exclue) pour garantir des builds reproductibles.
+# Reference : dependencies + extra "web" du pyproject.toml.
 
-# For Excel file reading (EIOPA curves)
-openpyxl>=3.0.0
+# --- Coeur scientifique et financier ---
+pandas>=2.1,<4
+numpy>=1.26,<3
+scipy>=1.11,<2
 
-# For visualization (optional but recommended)
-matplotlib>=3.0.0
+# --- Lecture des classeurs Excel (courbes EIOPA) ---
+openpyxl>=3.1,<4
+
+# --- Graphiques statiques (reporting) ---
+matplotlib>=3.8,<4
+
+# --- Validation des regimes fiscaux (donnees d'entree JSON du modele) ---
+jsonschema>=4.20,<5
+
+# --- Interface web Streamlit ---
+streamlit>=1.28,<2
+plotly>=5.17,<7
