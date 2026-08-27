@@ -11,11 +11,14 @@ Voir ``tests/golden/README.md`` pour le format des cas, et
 ``docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md`` pour le principe
 général : la fiscalité est une donnée d'entrée du modèle, pas une règle codée.
 
-À la création de ce banc, le régime ``fr-2026`` est un brouillon et aucune
-valeur attendue n'a été établie : TOUS les cas échouent. C'est le comportement
-voulu (voir étape 1.A du plan de travail) — un banc de cas d'or entièrement
-vert avant d'avoir vérifié une seule valeur serait plus inquiétant qu'un banc
-rouge.
+Un cas dont ``status`` n'est pas ``"ready"`` est marqué ``xfail`` : la CI
+(``.github/workflows/ci.yml``) exige un ``pytest`` intégralement vert, donc un
+échec documenté ne doit pas faire échouer la CI, mais il doit rester VISIBLE
+dans le rapport (``xfailed``, pas ``skipped``) — sinon une lacune comblée par
+erreur passerait inaperçue. Si un cas ``xfail`` se met à réussir sans que son
+``status`` soit passé à ``"ready"``, ``strict=False`` évite un échec bruyant :
+c'est un signal à traiter (mettre à jour le banc), pas une régression.
+Un cas ``"ready"`` n'a, lui, aucune tolérance : s'il échoue, la CI échoue.
 """
 
 from __future__ import annotations
@@ -38,7 +41,25 @@ def _regime() -> TaxRegime:
     return load_regime(country, int(year), allow_draft=True)
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+def _xfail_reason(case) -> str | None:
+    """None si le cas doit réussir ; sinon la raison de l'échec attendu."""
+    if case.status == "ready":
+        return None
+    if case.kind == "known_gap":
+        return f"lacune connue : {case.blocked_reason}"
+    missing = [f for f in REQUIRED_FIELDS if case.expected.get(f) is None]
+    if missing:
+        return f"valeur(s) attendue(s) non établie(s) pour {', '.join(missing)}"
+    return f"statut {case.status!r} : pas encore prêt"
+
+
+def _as_param(case) -> pytest.param:
+    reason = _xfail_reason(case)
+    marks = [pytest.mark.xfail(reason=reason, strict=False)] if reason else []
+    return pytest.param(case, id=case.id, marks=marks)
+
+
+@pytest.mark.parametrize("case", [_as_param(c) for c in CASES])
 def test_cas_d_or(case):
     if case.kind == "known_gap":
         pytest.fail(

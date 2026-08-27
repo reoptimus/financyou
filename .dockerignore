@@ -1,0 +1,78 @@
+# Contexte de construction Docker : tout ce qui n'est pas necessaire a
+# l'execution est exclu (contexte plus leger, image plus sure).
+
+# --- Historique et metadonnees Git ---
+.git
+.git*
+.github
+
+# --- Code et donnees historiques (classeurs Excel volumineux) ---
+legacy/
+UI.R
+*.Rda
+*.RData
+*.xlsx
+*.xls
+*.xlsm
+
+# --- Sorties et artefacts d'execution ---
+outputs/
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# --- Tests et exemples ---
+tests/
+examples/
+# Exception : les profils/configurations JSON sont charges par l'interface web
+!examples/input_files/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# --- Caches Python ---
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.mypy_cache/
+.dmypy.json
+.ruff_cache/
+.ipynb_checkpoints/
+
+# --- Environnements virtuels ---
+.venv
+venv/
+env/
+ENV/
+.python-version
+.env
+
+# --- Fichiers d'IDE et d'OS ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Docker et CI (inutiles dans l'image) ---
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose*.yml
+
+# --- Documentation longue (le README suffit au build) ---
+docs/
+ARCHITECTURE.md
+COMPLETE_GUIDE.md
+MODULES_GUIDE.md
+REOPTIMUS_THEORY.md
+INSTALLATION.md
+CLAUDE.md

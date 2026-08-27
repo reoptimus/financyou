@@ -19,12 +19,12 @@ Key Features:
 - Multi-country support
 """
 
+import warnings
+
 import numpy as np
 import pandas as pd
-from typing import Tuple, Optional, Dict
 from scipy import interpolate
 from scipy.optimize import minimize
-import warnings
 
 
 class EIOPACalibrator:
@@ -44,8 +44,8 @@ class EIOPACalibrator:
 
     def __init__(
         self,
-        spot_rates: Optional[np.ndarray] = None,
-        maturities: Optional[np.ndarray] = None,
+        spot_rates: np.ndarray | None = None,
+        maturities: np.ndarray | None = None,
         country: str = "France",
         dt: float = 0.5
     ):
@@ -62,16 +62,17 @@ class EIOPACalibrator:
         self.country = country
         self.dt = dt
 
+        self.maturities: np.ndarray | None
         if maturities is None and spot_rates is not None:
             self.maturities = np.arange(1, len(spot_rates) + 1)
         else:
             self.maturities = maturities
 
         # Will be computed
-        self.P0t = None  # Zero-coupon bond prices
-        self.f0t = None  # Forward rates
-        self.P0t_interp = None  # Interpolated bond prices
-        self.f0t_interp = None  # Interpolated forward rates
+        self.P0t: np.ndarray | None = None  # Zero-coupon bond prices
+        self.f0t: np.ndarray | None = None  # Forward rates
+        self.P0t_interp: np.ndarray | None = None  # Interpolated bond prices
+        self.f0t_interp: np.ndarray | None = None  # Interpolated forward rates
 
     @classmethod
     def from_excel(
@@ -116,7 +117,7 @@ class EIOPACalibrator:
             return cls(spot_rates=spot_rates, maturities=maturities, dt=dt)
 
         except Exception as e:
-            raise ValueError(f"Error loading EIOPA data from Excel: {e}")
+            raise ValueError(f"Error loading EIOPA data from Excel: {e}") from e
 
     @classmethod
     def from_csv(
@@ -152,7 +153,7 @@ class EIOPACalibrator:
             return cls(spot_rates=spot_rates, maturities=maturities, dt=dt)
 
         except Exception as e:
-            raise ValueError(f"Error loading EIOPA data from CSV: {e}")
+            raise ValueError(f"Error loading EIOPA data from CSV: {e}") from e
 
     def calibrate(self, smoothing_start: int = 60, smoothing_window: int = 20):
         """
@@ -192,7 +193,21 @@ class EIOPACalibrator:
 
         Returns:
             Bond prices P(0,t)
+
+        Raises:
+            ValueError: si aucune courbe EIOPA n'a été chargée.
         """
+        # Garde explicite : `spot_rates` et `maturities` valent None tant qu'aucune
+        # courbe n'a été fournie. Le contrôle est redondant avec celui de
+        # calibrate(), mais il protège l'appel direct de cette méthode privée et
+        # rend l'invariant visible pour le vérificateur de types.
+        if self.spot_rates is None or self.maturities is None:
+            raise ValueError(
+                "spot_rates/maturities non renseignés : construisez le calibrateur "
+                "avec EIOPACalibrator.from_excel() ou from_csv(), ou passez "
+                "spot_rates au constructeur."
+            )
+
         P0t = 1 / (1 + self.spot_rates) ** self.maturities
 
         # Include P(0,0) = 1
@@ -206,7 +221,18 @@ class EIOPACalibrator:
 
         Returns:
             Interpolated bond prices
+
+        Raises:
+            ValueError: si les prix zéro-coupon n'ont pas encore été calculés.
         """
+        # Garde explicite : `P0t` n'est peuplé que par _calculate_bond_prices(),
+        # première étape de calibrate().
+        if self.P0t is None:
+            raise ValueError(
+                "P0t non renseigné : appelez d'abord calibrate(), qui calcule "
+                "les prix zéro-coupon avant de les interpoler."
+            )
+
         # Time grid for interpolation
         T_max = len(self.P0t) - 1  # Maximum maturity
         t_interp = np.arange(0, T_max + self.dt, self.dt)
@@ -238,6 +264,14 @@ class EIOPACalibrator:
         Returns:
             Forward rates f(0,t)
         """
+        # Garde explicite : `P0t_interp` n'est peuplé que par
+        # _interpolate_bond_prices(), étape précédente de calibrate().
+        if self.P0t_interp is None:
+            raise ValueError(
+                "P0t_interp non renseigné : appelez d'abord calibrate(), qui "
+                "interpole les prix zéro-coupon avant de calculer les taux forward."
+            )
+
         # Log of bond prices
         log_P = np.log(self.P0t_interp)
 
@@ -273,7 +307,18 @@ class EIOPACalibrator:
 
         Returns:
             Smoothed forward rates
+
+        Raises:
+            ValueError: si les taux forward interpolés n'ont pas été calculés.
         """
+        # Garde explicite : `f0t_interp` n'est peuplé que par
+        # _calculate_forward_rates(), troisième étape de calibrate().
+        if self.f0t_interp is None:
+            raise ValueError(
+                "f0t_interp non renseigné : appelez d'abord calibrate(), qui "
+                "calcule les taux forward interpolés avant de les lisser."
+            )
+
         f0t_smooth = self.f0t_interp.copy()
 
         # Convert smoothing_start to index
@@ -294,7 +339,7 @@ class EIOPACalibrator:
 
         return f0t_smooth
 
-    def get_forward_curve(self, n_steps: Optional[int] = None) -> np.ndarray:
+    def get_forward_curve(self, n_steps: int | None = None) -> np.ndarray:
         """
         Get forward rate curve.
 
@@ -312,7 +357,7 @@ class EIOPACalibrator:
         else:
             return self.f0t[:n_steps]
 
-    def get_bond_prices(self, n_steps: Optional[int] = None) -> np.ndarray:
+    def get_bond_prices(self, n_steps: int | None = None) -> np.ndarray:
         """
         Get zero-coupon bond prices.
 
@@ -374,7 +419,7 @@ class EIOPACalibrator:
             plt.show()
 
         except ImportError:
-            warnings.warn("matplotlib not installed, cannot plot curves")
+            warnings.warn("matplotlib not installed, cannot plot curves", stacklevel=2)
 
 
 class SwaptionCalibrator:
@@ -385,7 +430,7 @@ class SwaptionCalibrator:
     can be used to calibrate the volatility parameter σ in the Hull-White model.
     """
 
-    def __init__(self, market_vols: Dict[Tuple[int, int], float]):
+    def __init__(self, market_vols: dict[tuple[int, int], float]):
         """
         Initialize swaption calibrator.
 
@@ -433,7 +478,7 @@ class SwaptionCalibrator:
         if result.success:
             return result.x[0]
         else:
-            warnings.warn("Swaption calibration did not converge")
+            warnings.warn("Swaption calibration did not converge", stacklevel=2)
             return 0.01
 
     def _hw_swaption_vol(

@@ -246,13 +246,13 @@ def test_le_plafonnement_du_quotient_limite_l_avantage_des_enfants():
 
 
 def test_l_appel_sans_dependent_shares_reste_retrocompatible():
-    """dependent_shares est optionnel : l'appel historique doit produire le même résultat qu'avant son ajout."""
+    """dependent_shares est optionnel : l'appel historique doit produire le même résultat."""
     fr = load_regime("FR", 2026, allow_draft=True)
     assert fr.income_tax_due(60_000, shares=2.0) == pytest.approx(4_207.98, abs=0.01)
 
 
 def test_la_cehr_double_ses_seuils_pour_un_couple():
-    """La CEHR (art. 223 sexies CGI) applique les mêmes taux, mais des seuils doublés pour un couple."""
+    """La CEHR (art. 223 sexies CGI) : mêmes taux, seuils doublés pour un couple."""
     fr = load_regime("FR", 2026, allow_draft=True)
     celibataire = fr.surtax_due(600_000, married=False)
     couple = fr.surtax_due(600_000, married=True)

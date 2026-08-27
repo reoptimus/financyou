@@ -37,13 +37,18 @@ OUTPUT STRUCTURE:
 }
 """
 
+import json
+import logging
+import time
+from datetime import datetime
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Any
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-from datetime import datetime
-import json
+
+# Journalisation : logger nommé d'après le module, il hérite donc de la
+# configuration posée par investment_calculator.logging_config.configure_logging().
+logger = logging.getLogger(__name__)
 
 
 class ColorScheme:
@@ -109,11 +114,11 @@ class ReportGenerator:
         >>> print(report['executive_summary']['one_page_summary'])
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the Report Generator."""
-        self.figures = {}
+        self.figures: dict = {}
 
-    def generate(self, config: Dict) -> Dict:
+    def generate(self, config: dict) -> dict:
         """
         Generate comprehensive report.
 
@@ -123,8 +128,17 @@ class ReportGenerator:
         Returns:
             Dictionary with report, figures, tables, and summary
         """
+        # Chronomètre pour tracer la durée de génération du rapport.
+        start_time = time.perf_counter()
+
         # Validate configuration
         validated_config = self._validate_config(config)
+
+        logger.info(
+            "Début de la génération du rapport (type=%s, format=%s)",
+            validated_config['report_config'].get('report_type'),
+            validated_config['report_config'].get('format'),
+        )
 
         # Generate figures
         figures = self._generate_figures(validated_config)
@@ -149,6 +163,13 @@ class ReportGenerator:
             figures
         )
 
+        logger.info(
+            "Fin de la génération du rapport en %.3f s : %d figures, %d tableaux",
+            time.perf_counter() - start_time,
+            len(figures),
+            len(tables),
+        )
+
         return {
             'report': report,
             'figures': figures,
@@ -157,7 +178,7 @@ class ReportGenerator:
             'interactive_dashboard': interactive_dashboard
         }
 
-    def _validate_config(self, config: Dict) -> Dict:
+    def _validate_config(self, config: dict) -> dict:
         """
         Validate and complete configuration.
 
@@ -201,7 +222,7 @@ class ReportGenerator:
 
         return validated
 
-    def _generate_figures(self, config: Dict) -> Dict:
+    def _generate_figures(self, config: dict) -> dict:
         """
         Generate all requested figures.
 
@@ -264,10 +285,10 @@ class ReportGenerator:
 
     def _create_wealth_trajectories(
         self,
-        optimization_results: Dict,
-        colors: Dict,
-        viz_prefs: Dict
-    ) -> Dict:
+        optimization_results: dict,
+        colors: dict,
+        viz_prefs: dict
+    ) -> dict:
         """Create wealth trajectory fan chart."""
         if 'simulation_results' not in optimization_results:
             return self._create_placeholder_figure("Wealth Trajectories")
@@ -289,7 +310,10 @@ class ReportGenerator:
         percentile_data = {}
 
         for p in percentiles:
-            percentile_data[p] = wealth_data.apply(lambda col: np.percentile(col, p), axis=0)
+            percentile_data[p] = wealth_data.apply(
+                # p est lie par defaut pour ne pas dependre de la variable de boucle.
+                lambda col, p=p: np.percentile(col, p), axis=0
+            )
 
         # Plot fan chart
         ax.fill_between(years, percentile_data[5], percentile_data[95],
@@ -315,10 +339,10 @@ class ReportGenerator:
 
     def _create_efficient_frontier(
         self,
-        optimization_results: Dict,
-        colors: Dict,
-        viz_prefs: Dict
-    ) -> Dict:
+        optimization_results: dict,
+        colors: dict,
+        viz_prefs: dict
+    ) -> dict:
         """Create efficient frontier chart."""
         if 'efficient_frontier' not in optimization_results:
             return self._create_placeholder_figure("Efficient Frontier")
@@ -359,10 +383,10 @@ class ReportGenerator:
 
     def _create_allocation_pie(
         self,
-        optimization_results: Dict,
-        colors: Dict,
-        viz_prefs: Dict
-    ) -> Dict:
+        optimization_results: dict,
+        colors: dict,
+        viz_prefs: dict
+    ) -> dict:
         """Create allocation pie chart."""
         if 'optimal_portfolio' not in optimization_results:
             return self._create_placeholder_figure("Asset Allocation")
@@ -419,10 +443,10 @@ class ReportGenerator:
 
     def _create_monte_carlo_histogram(
         self,
-        optimization_results: Dict,
-        colors: Dict,
-        viz_prefs: Dict
-    ) -> Dict:
+        optimization_results: dict,
+        colors: dict,
+        viz_prefs: dict
+    ) -> dict:
         """Create Monte Carlo outcome histogram."""
         if 'simulation_results' not in optimization_results:
             return self._create_placeholder_figure("Monte Carlo Outcomes")
@@ -468,10 +492,10 @@ class ReportGenerator:
 
     def _create_tax_impact_waterfall(
         self,
-        tax_results: Dict,
-        colors: Dict,
-        viz_prefs: Dict
-    ) -> Dict:
+        tax_results: dict,
+        colors: dict,
+        viz_prefs: dict
+    ) -> dict:
         """Create tax impact waterfall chart."""
         # Placeholder for tax waterfall
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -482,7 +506,6 @@ class ReportGenerator:
         values = [100, -5, -8, -3, -4, 80]  # Placeholder values
 
         # Create waterfall effect
-        cumulative = 0
         colors_list = []
         for i, val in enumerate(values):
             if i == 0 or i == len(values) - 1:
@@ -509,7 +532,7 @@ class ReportGenerator:
             'data': pd.DataFrame({'category': categories, 'value': values})
         }
 
-    def _create_placeholder_figure(self, title: str) -> Dict:
+    def _create_placeholder_figure(self, title: str) -> dict:
         """Create placeholder figure when data is missing."""
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.text(0.5, 0.5, f'{title}\n(Data not available)',
@@ -524,7 +547,7 @@ class ReportGenerator:
             'data': pd.DataFrame()
         }
 
-    def _generate_tables(self, config: Dict) -> Dict:
+    def _generate_tables(self, config: dict) -> dict:
         """Generate summary tables."""
         tables = {}
 
@@ -551,7 +574,7 @@ class ReportGenerator:
 
         return tables
 
-    def _generate_executive_summary(self, config: Dict) -> Dict:
+    def _generate_executive_summary(self, config: dict) -> dict:
         """Generate executive summary."""
         opt_results = config.get('optimization_results', {})
 
@@ -562,18 +585,20 @@ class ReportGenerator:
         # Portfolio recommendation
         if 'optimal_portfolio' in opt_results:
             portfolio = opt_results['optimal_portfolio']
-            summary_text += f"RECOMMENDED PORTFOLIO:\n"
+            summary_text += "RECOMMENDED PORTFOLIO:\n"
             summary_text += f"  Expected Return: {portfolio.get('expected_return', 0)*100:.2f}%\n"
-            summary_text += f"  Expected Volatility: {portfolio.get('expected_volatility', 0)*100:.2f}%\n"
+            expected_vol = portfolio.get('expected_volatility', 0) * 100
+            summary_text += f"  Expected Volatility: {expected_vol:.2f}%\n"
             summary_text += f"  Sharpe Ratio: {portfolio.get('sharpe_ratio', 0):.2f}\n\n"
 
         # Risk metrics
         if 'simulation_results' in opt_results:
             stats = opt_results['simulation_results'].get('statistics', {})
-            summary_text += f"PROJECTED OUTCOMES:\n"
+            summary_text += "PROJECTED OUTCOMES:\n"
             summary_text += f"  Median Wealth: ${stats.get('median_terminal_wealth', 0):,.0f}\n"
             summary_text += f"  5th Percentile: ${stats.get('percentiles', {}).get('5', 0):,.0f}\n"
-            summary_text += f"  95th Percentile: ${stats.get('percentiles', {}).get('95', 0):,.0f}\n\n"
+            percentile_95 = stats.get('percentiles', {}).get('95', 0)
+            summary_text += f"  95th Percentile: ${percentile_95:,.0f}\n\n"
 
         # Key findings
         key_findings = [
@@ -605,13 +630,12 @@ class ReportGenerator:
 
     def _generate_report(
         self,
-        config: Dict,
-        figures: Dict,
-        tables: Dict,
-        executive_summary: Dict
-    ) -> Dict:
+        config: dict,
+        figures: dict,
+        tables: dict,
+        executive_summary: dict
+    ) -> dict:
         """Generate full report in requested format."""
-        report_type = config['report_config']['report_type']
         report_format = config['report_config']['format']
 
         if report_format == 'html':
@@ -642,10 +666,10 @@ class ReportGenerator:
 
     def _generate_html_report(
         self,
-        config: Dict,
-        figures: Dict,
-        tables: Dict,
-        executive_summary: Dict
+        config: dict,
+        figures: dict,
+        tables: dict,
+        executive_summary: dict
     ) -> str:
         """Generate HTML report."""
         html = "<html><head><title>Investment Plan Report</title>"
@@ -655,7 +679,7 @@ class ReportGenerator:
         html += "th,td{border:1px solid #ddd;padding:8px;text-align:left;}"
         html += "th{background-color:#f2f2f2;}</style></head><body>"
 
-        html += f"<h1>Investment Plan Report</h1>"
+        html += "<h1>Investment Plan Report</h1>"
         html += f"<p><strong>Generated:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>"
 
         html += "<h2>Executive Summary</h2>"
@@ -677,9 +701,9 @@ class ReportGenerator:
 
     def _generate_json_report(
         self,
-        config: Dict,
-        tables: Dict,
-        executive_summary: Dict
+        config: dict,
+        tables: dict,
+        executive_summary: dict
     ) -> str:
         """Generate JSON report."""
         report_data = {
@@ -693,9 +717,9 @@ class ReportGenerator:
 
     def _generate_interactive_dashboard(
         self,
-        config: Dict,
-        figures: Dict
-    ) -> Dict:
+        config: dict,
+        figures: dict
+    ) -> dict:
         """Generate interactive dashboard (placeholder)."""
         return {
             'url': None,
@@ -704,7 +728,7 @@ class ReportGenerator:
 
 
 # Convenience functions
-def quick_report(optimization_results: Dict) -> str:
+def quick_report(optimization_results: dict) -> str:
     """
     Generate quick text report from optimization results.
 
@@ -725,4 +749,4 @@ def quick_report(optimization_results: Dict) -> str:
 
     reporter = ReportGenerator()
     results = reporter.generate(config)
-    return results['executive_summary']['one_page_summary']
+    return str(results['executive_summary']['one_page_summary'])

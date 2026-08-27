@@ -32,7 +32,10 @@ CENT_TOLERANCE = 0.005
 
 
 class GoldenCaseError(Exception):
-    """Le cas ne peut pas être calculé dans son état actuel — un échec normal tant que la lacune qu'il documente n'est pas comblée."""
+    """Le cas ne peut pas être calculé dans son état actuel.
+
+    Un échec normal tant que la lacune qu'il documente n'est pas comblée.
+    """
 
 
 @dataclass(frozen=True)
@@ -117,7 +120,9 @@ def _compute_income_tax(regime: TaxRegime, inputs: dict[str, Any]) -> dict[str, 
     taxable_income = float(inputs["taxable_income"])
     shares = float(inputs.get("shares", 1.0))
     dependent_shares = float(inputs.get("dependent_shares", 0.0))
-    income_tax = regime.income_tax_due(taxable_income, shares=shares, dependent_shares=dependent_shares)
+    income_tax = regime.income_tax_due(
+        taxable_income, shares=shares, dependent_shares=dependent_shares
+    )
     if inputs.get("apply_surtax"):
         married = inputs.get("household_status") == "couple"
         surtax_base = float(inputs.get("surtax_base", taxable_income))
@@ -164,7 +169,9 @@ def _compute_wrapper_withdrawal(regime: TaxRegime, inputs: dict[str, Any]) -> di
         account_value = float(inputs["account_value"])
         total_gain = float(inputs["total_gain"])
         if account_value <= 0:
-            raise GoldenCaseError("account_value doit être strictement positif pour proportional_gain")
+            raise GoldenCaseError(
+                "account_value doit être strictement positif pour proportional_gain"
+            )
         taxable_amount = withdrawal_amount * (total_gain / account_value)
     else:
         raise GoldenCaseError(f"taxable_base inconnu : {taxable_base!r}")
@@ -175,7 +182,9 @@ def _compute_wrapper_withdrawal(regime: TaxRegime, inputs: dict[str, Any]) -> di
     if allowance:
         household_status = inputs.get("household_status", "single")
         amount = (
-            allowance["amount_couple"] if household_status == "couple" else allowance["amount_single"]
+            allowance["amount_couple"]
+            if household_status == "couple"
+            else allowance["amount_single"]
         )
         against = allowance.get("against", "income_tax")
         if against in ("income_tax", "both"):
@@ -183,7 +192,9 @@ def _compute_wrapper_withdrawal(regime: TaxRegime, inputs: dict[str, Any]) -> di
         if against in ("social_contributions", "both"):
             social_base = max(0.0, social_base - amount)
 
-    income_tax_rate = regime.resolve_income_tax_rate(rule, taxable_amount=income_tax_base, shares=shares)
+    income_tax_rate = regime.resolve_income_tax_rate(
+        rule, taxable_amount=income_tax_base, shares=shares
+    )
     social_rate = regime.resolve_social_rate(rule)
 
     income_tax = income_tax_base * income_tax_rate

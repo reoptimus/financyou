@@ -10,11 +10,17 @@ This package helps investors make informed decisions by calculating optimal inve
 strategies based on personal variables, economic scenarios, and tax implications.
 """
 
-from .gse import GlobalScenarioEngine, EconomicScenario, ScenarioType
-from .gse_plus import TaxIntegratedScenarioEngine, TaxConfig, AccountType, TaxTreatment
-from .moca import MOCA, PortfolioOptimizer, InvestmentResult, PortfolioStatistics, OptimizationMethod
-from .personal_variables import PersonalVariables, InvestmentProfile, RiskTolerance, InvestmentGoal
-from .utils import validate_inputs, calculate_returns, validate_allocation
+from .gse import EconomicScenario, GlobalScenarioEngine, ScenarioType
+from .gse_plus import AccountType, TaxConfig, TaxIntegratedScenarioEngine, TaxTreatment
+from .moca import (
+    MOCA,
+    InvestmentResult,
+    OptimizationMethod,
+    PortfolioOptimizer,
+    PortfolioStatistics,
+)
+from .personal_variables import InvestmentGoal, InvestmentProfile, PersonalVariables, RiskTolerance
+from .utils import calculate_returns, validate_allocation, validate_inputs
 
 __version__ = "1.0.0"
 

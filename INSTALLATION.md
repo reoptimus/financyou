@@ -2,6 +2,30 @@
 
 Complete installation instructions for FinancYou financial planning system.
 
+## Package Overview
+
+| Item | Value |
+|---|---|
+| Distribution name (PyPI / `pip install`) | **`financyou`** |
+| Version | **0.2.0** |
+| Importable packages | `investment_calculator`, `time_series_slicer` |
+| Minimum Python | **3.11** |
+| Build backend | setuptools (PEP 621, `pyproject.toml`) |
+| Repository | https://github.com/reoptimus/financyou |
+
+> The distribution used to be published as `time_series_slicer`. It is now
+> `financyou`. **The importable module names are unchanged** — existing code
+> such as `from investment_calculator.modules import optimizer` keeps working.
+> `setup.py` has been removed; all metadata lives in `pyproject.toml`.
+
+### Extras
+
+| Extra | Installs | Use it for |
+|---|---|---|
+| *(none)* | pandas, numpy, scipy, openpyxl, matplotlib | Core financial engine only |
+| `web` | streamlit, plotly | Streamlit dashboard |
+| `dev` | pytest, pytest-cov, ruff, mypy, type stubs | Tests, lint, type checking |
+
 ## Table of Contents
 - [Quick Start (Local)](#quick-start-local)
 - [Docker Installation (Recommended)](#docker-installation-recommended)
@@ -13,7 +37,7 @@ Complete installation instructions for FinancYou financial planning system.
 ## Quick Start (Local)
 
 ### Prerequisites
-- Python 3.11 or higher
+- Python **3.11 or higher**
 - pip package manager
 
 ### Install Dependencies
@@ -22,12 +46,24 @@ Complete installation instructions for FinancYou financial planning system.
 # Clone or navigate to the project directory
 cd financyou
 
-# Install core dependencies
-pip install -r requirements.txt
+# Recommended: install the package with the web extra
+pip install -e ".[web]"
 
-# Install web UI dependencies
-pip install -r web_ui/requirements.txt
+# Or, for a development environment (tests + lint + typing)
+pip install -e ".[web,dev]"
 ```
+
+Alternatively, install the pinned runtime dependencies directly. The root
+`requirements.txt` now contains **everything the web application needs**
+(streamlit and plotly included) with lower and upper version bounds:
+
+```bash
+pip install -r requirements.txt        # runtime (engine + web UI)
+pip install -r requirements-dev.txt    # runtime + test/lint/typing tools
+```
+
+`web_ui/requirements.txt` is kept only for backwards compatibility and simply
+redirects to the root `requirements.txt`.
 
 ### Run the Application
 
@@ -58,17 +94,40 @@ The web dashboard will open at: **http://localhost:8501**
 ✅ Easy deployment
 ✅ Production-ready
 
+### Image layout
+
+The image is built from the **single `Dockerfile` at the repository root**
+(the former `web_ui/Dockerfile` was a duplicate and has been removed):
+
+- **Multi-stage build** — a `builder` stage compiles the dependencies into a
+  virtualenv at `/opt/venv`; the `runtime` stage is a slim `python:3.12-slim`
+  that receives only that virtualenv plus the code needed at runtime.
+- **Non-root** — the container runs as the `financyou` user (UID/GID 10001),
+  applied before `CMD`.
+- **Selective `COPY`** — `.git`, `legacy/`, `outputs/`, `tests/` and the
+  example scripts are excluded through `.dockerignore` (build context drops
+  from roughly 40 MB to under 0.5 MB).
+- Streamlit still listens on **port 8501** and keeps its `/_stcore/health`
+  healthcheck.
+
+Because the container runs as UID 10001, a bind-mounted `./outputs` directory
+on the host must be writable by that UID:
+
+```bash
+mkdir -p outputs && sudo chown 10001:10001 outputs
+```
+
 ### Option 1: Docker Compose (Easiest)
 
 ```bash
 # From project root directory
-docker-compose up -d
+docker compose up -d
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
 # Stop the application
-docker-compose down
+docker compose down
 ```
 
 Access at: **http://localhost:8501**
@@ -77,14 +136,14 @@ Access at: **http://localhost:8501**
 
 ```bash
 # Build the image
-docker build -t financyou:latest .
+docker build -t financyou:0.2.0 .
 
 # Run the container
 docker run -d \
   --name financyou-app \
   -p 8501:8501 \
   -v $(pwd)/outputs:/app/outputs \
-  financyou:latest
+  financyou:0.2.0
 
 # View logs
 docker logs -f financyou-app
@@ -98,23 +157,21 @@ docker rm financyou-app
 
 ## Manual Installation
 
-### Step 1: Install Python Dependencies
+### Step 1: Install the FinancYou Package
 
 ```bash
-pip install streamlit pandas numpy scipy matplotlib plotly
+# From project root — pulls the pinned dependencies automatically
+pip install -e ".[web,dev]"
 ```
 
-### Step 2: Install FinancYou Package
+### Step 2: Verify Installation
 
 ```bash
-# From project root
-pip install -e .
-```
+# Distribution metadata
+pip show financyou          # Name: financyou, Version: 0.2.0
 
-### Step 3: Verify Installation
-
-```bash
-# Test imports
+# Test imports (module names are unchanged)
+python -c "import investment_calculator, time_series_slicer; print('✓ Packages OK')"
 python -c "from investment_calculator.modules import scenario_generator; print('✓ Core modules OK')"
 
 # Test web UI dependencies
@@ -124,11 +181,10 @@ python -c "import streamlit, plotly; print('✓ Web UI dependencies OK')"
 pytest tests/ -v
 ```
 
-### Step 4: Run the Application
+### Step 3: Run the Application
 
 ```bash
-cd web_ui
-streamlit run app_enhanced.py
+streamlit run web_ui/app_enhanced.py
 ```
 
 ---
@@ -138,10 +194,7 @@ streamlit run app_enhanced.py
 ### Core Financial Engine Only
 
 ```bash
-# Minimal installation for programmatic use
-pip install numpy pandas scipy matplotlib
-
-# Install the package
+# Minimal installation for programmatic use — no extra needed
 pip install -e .
 ```
 
@@ -159,11 +212,8 @@ from investment_calculator.modules import (
 ### Web Interface Only
 
 ```bash
-# Install web dependencies
-pip install streamlit plotly
-
-# Additional core dependencies
-pip install numpy pandas scipy matplotlib
+# Core engine + streamlit + plotly
+pip install -e ".[web]"
 
 # Run the web app
 streamlit run web_ui/app_enhanced.py
@@ -243,8 +293,7 @@ streamlit cache clear
 
 ```bash
 # Use PowerShell or CMD
-pip install -r requirements.txt
-pip install -r web_ui/requirements.txt
+pip install -e ".[web]"
 streamlit run web_ui/app_enhanced.py
 ```
 
@@ -255,8 +304,7 @@ streamlit run web_ui/app_enhanced.py
 brew install python@3.11
 
 # Install dependencies
-pip3 install -r requirements.txt
-pip3 install -r web_ui/requirements.txt
+pip3 install -e ".[web]"
 
 # Run application
 streamlit run web_ui/app_enhanced.py
@@ -270,8 +318,7 @@ sudo apt-get update
 sudo apt-get install python3.11 python3-pip
 
 # Install project dependencies
-pip3 install -r requirements.txt
-pip3 install -r web_ui/requirements.txt
+pip3 install -e ".[web]"
 
 # Run application
 streamlit run web_ui/app_enhanced.py
@@ -295,8 +342,7 @@ financyou-env\Scripts\activate
 source financyou-env/bin/activate
 
 # Install dependencies
-pip install -r requirements.txt
-pip install -r web_ui/requirements.txt
+pip install -e ".[web]"
 
 # Run application
 streamlit run web_ui/app_enhanced.py
@@ -343,7 +389,7 @@ After installation, verify everything works:
 # Run all tests
 pytest tests/ -v
 
-# Should show: 149 passed, 1 skipped
+# Should collect 246 tests (245 passed, 1 skipped)
 
 # Run example pipeline
 python examples/complete_pipeline_with_files.py

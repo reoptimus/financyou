@@ -87,23 +87,20 @@ This module provides two types of slicing:
 Both are available in the output for maximum flexibility.
 """
 
+import logging
+import time
+from enum import Enum
+
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Tuple, Iterator
-from dataclasses import dataclass, field
-from enum import Enum
-from datetime import datetime, timedelta
 
 # Import from existing modules
-from investment_calculator.personal_variables import (
-    PersonalVariables,
-    InvestmentProfile,
-    RiskTolerance,
-    InvestmentGoal
-)
-
 # Import time series slicer for general-purpose slicing
 from time_series_slicer import TimeSeriesSlicer
+
+# Journalisation : logger nommé d'après le module, il hérite donc de la
+# configuration posée par investment_calculator.logging_config.configure_logging().
+logger = logging.getLogger(__name__)
 
 
 class LifeStage(Enum):
@@ -143,11 +140,11 @@ class UserProfileManager:
         >>> time_series = result['investment_time_series']
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the User Profile Manager."""
         pass
 
-    def process(self, config: Dict) -> Dict:
+    def process(self, config: dict) -> dict:
         """
         Process user input and generate investment time series.
 
@@ -157,8 +154,17 @@ class UserProfileManager:
         Returns:
             Dictionary with validated profile, time series, risk profile, etc.
         """
+        # Chronomètre pour tracer la durée du traitement du profil.
+        start_time = time.perf_counter()
+
         # Step 1: Validate user profile
         validated_profile, warnings = self._validate_profile(config['user_profile'])
+
+        if warnings:
+            # Les avertissements de validation ne bloquent pas le traitement,
+            # mais ils doivent rester visibles dans les journaux.
+            for warning in warnings:
+                logger.warning("Validation du profil utilisateur : %s", warning)
 
         # Step 2: Create time series from contribution/withdrawal schedules
         contribution_schedule = config.get('contribution_schedule', [])
@@ -196,6 +202,15 @@ class UserProfileManager:
             time_column='period'  # Use 'period' column for time-based operations
         )
 
+        logger.info(
+            "Profil utilisateur traité en %.3f s : %d périodes de série temporelle, "
+            "%d étapes de vie, %d avertissement(s) de validation",
+            time.perf_counter() - start_time,
+            len(investment_time_series),
+            len(life_stages),
+            len(warnings),
+        )
+
         return {
             'validated_profile': validated_profile,
             'investment_time_series': investment_time_series,
@@ -207,7 +222,7 @@ class UserProfileManager:
             'summary_statistics': summary_stats
         }
 
-    def _validate_profile(self, user_profile: Dict) -> Tuple[Dict, List[str]]:
+    def _validate_profile(self, user_profile: dict) -> tuple[dict, list[str]]:
         """
         Validate and sanitize user profile.
 
@@ -231,11 +246,17 @@ class UserProfileManager:
             age = 30
 
         if retirement_age <= age:
-            warnings.append(f"Retirement age {retirement_age} must be > current age {age}, using age+30")
+            warnings.append(
+                f"Retirement age {retirement_age} must be > current age {age}, "
+                "using age+30"
+            )
             retirement_age = age + 30
 
         if life_expectancy <= retirement_age:
-            warnings.append(f"Life expectancy {life_expectancy} must be > retirement age, using retirement_age+25")
+            warnings.append(
+                f"Life expectancy {life_expectancy} must be > retirement age, "
+                "using retirement_age+25"
+            )
             life_expectancy = retirement_age + 25
 
         validated['personal_info'] = {
@@ -262,7 +283,10 @@ class UserProfileManager:
         debt_to_income = total_debt / annual_income if annual_income > 0 else 0
 
         if debt_to_income > 0.5:
-            warnings.append(f"High debt-to-income ratio: {debt_to_income:.1%}. Consider debt reduction first.")
+            warnings.append(
+                f"High debt-to-income ratio: {debt_to_income:.1%}. "
+                "Consider debt reduction first."
+            )
 
         validated['financial_situation'] = {
             'current_savings': current_savings,
@@ -315,9 +339,9 @@ class UserProfileManager:
 
     def _create_time_series(
         self,
-        profile: Dict,
-        contribution_schedule: List[Dict],
-        withdrawal_schedule: List[Dict]
+        profile: dict,
+        contribution_schedule: list[dict],
+        withdrawal_schedule: list[dict]
     ) -> pd.DataFrame:
         """
         Create investment time series from schedules.
@@ -350,7 +374,8 @@ class UserProfileManager:
             retirement_age = profile['personal_info']['retirement_age']
             annual_income = profile['financial_situation']['annual_income']
             annual_expenses = profile['financial_situation']['annual_expenses']
-            annual_contribution = max(0, annual_income - annual_expenses) * 0.1  # Save 10% of surplus
+            # Save 10% of surplus
+            annual_contribution = max(0, annual_income - annual_expenses) * 0.1
 
             for year_idx in range(time_horizon + 1):
                 current_age = age + year_idx
@@ -369,7 +394,9 @@ class UserProfileManager:
 
                 for year_idx in range(max(0, start_year), min(time_horizon + 1, end_year + 1)):
                     years_since_start = year_idx - start_year
-                    annual_amount = monthly_amount * 12 * ((1 + annual_increase) ** years_since_start)
+                    annual_amount = (
+                        monthly_amount * 12 * ((1 + annual_increase) ** years_since_start)
+                    )
                     contributions[year_idx] += annual_amount
                     account_types[year_idx] = account_type
                     purposes[year_idx] = 'retirement'
@@ -412,7 +439,7 @@ class UserProfileManager:
 
         return time_series_df
 
-    def _identify_life_stages(self, profile: Dict) -> Dict:
+    def _identify_life_stages(self, profile: dict) -> dict:
         """
         Identify life stages based on age and retirement plans.
 
@@ -447,7 +474,7 @@ class UserProfileManager:
             }
         }
 
-    def _calculate_risk_profile(self, profile: Dict, life_stages: Dict) -> Dict:
+    def _calculate_risk_profile(self, profile: dict, life_stages: dict) -> dict:
         """
         Calculate risk profile and recommended allocation with glide path.
 
@@ -491,7 +518,6 @@ class UserProfileManager:
         }
 
         # Create glide path (age-based allocation changes)
-        retirement_age = profile['personal_info']['retirement_age']
         life_expectancy = profile['personal_info']['life_expectancy']
 
         ages = list(range(age, life_expectancy + 1))
@@ -520,9 +546,9 @@ class UserProfileManager:
     def _create_sliced_plans(
         self,
         time_series: pd.DataFrame,
-        life_stages: Dict,
-        profile: Dict
-    ) -> Dict:
+        life_stages: dict,
+        profile: dict
+    ) -> dict:
         """
         Create sliced investment plans by different dimensions.
 
@@ -534,8 +560,6 @@ class UserProfileManager:
         Returns:
             Dictionary of sliced plans
         """
-        age = profile['personal_info']['age']
-
         # Slice by life stage
         by_life_stage = {}
 
@@ -564,7 +588,9 @@ class UserProfileManager:
 
         for account in unique_accounts:
             if account:  # Skip empty strings
-                by_account_type[account] = time_series[time_series['account_type'] == account].copy()
+                by_account_type[account] = time_series[
+                    time_series['account_type'] == account
+                ].copy()
 
         return {
             'by_life_stage': by_life_stage,
@@ -575,8 +601,8 @@ class UserProfileManager:
     def _calculate_summary_statistics(
         self,
         time_series: pd.DataFrame,
-        profile: Dict
-    ) -> Dict:
+        profile: dict
+    ) -> dict:
         """
         Calculate summary statistics for the investment plan.
 
@@ -614,7 +640,7 @@ def create_simple_profile(
     current_savings: float = 0,
     risk_tolerance: str = 'moderate',
     retirement_age: int = 65
-) -> Dict:
+) -> dict:
     """
     Create a simple user profile with defaults.
 

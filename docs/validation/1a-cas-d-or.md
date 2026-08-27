@@ -153,15 +153,12 @@ important :
   ailleurs une dette de lint et de typage préexistante, non liée à la fiscalité (environ 540
   diagnostics ruff et une quinzaine d'erreurs mypy dans `gse_plus.py`, `moca.py`,
   `stochastic_models/`, `optimizer.py`) : je ne l'ai pas résorbée, elle est hors périmètre.
-- `python examples/complete_pipeline_with_files.py` : échoue, **mais échoue à l'identique sur la
-  branche `phase-0.4`** (avant tout travail de cette étape) — vérifié en restaurant temporairement
-  les fichiers de `phase-0.4` puis en revenant à `phase-1a-fiscalite` (aucune perte de travail :
-  les trois commits étaient déjà enregistrés). La cause est un répertoire `outputs/` absent
-  (ignoré par git, jamais créé par un script d'installation) et, sur cet environnement Windows,
-  un encodage de console qui n'accepte pas certains caractères Unicode (✓/✗) tant que
-  `PYTHONIOENCODING=utf-8` n'est pas positionné. Ce n'est pas une régression introduite par cette
-  étape : le moteur fiscal n'est pas encore branché sur les nouveaux régimes (étape 1.A.5), donc
-  rien de ce qui a changé ici n'affecte ce script.
+- `python examples/complete_pipeline_with_files.py` : **correction ultérieure** — j'avais noté ici
+  un échec supposément pré-existant sur `phase-0.4`. C'était une erreur de diagnostic : la cause
+  réelle était le bac à sable de mon propre environnement d'exécution, qui bloquait l'écriture de
+  fichiers dans un répertoire nouvellement créé, pas une régression ni un bug du dépôt. Rejoué avec
+  `PYTHONIOENCODING=utf-8` et le sandbox désactivé (voir `docs/journal-fiscalite.md`, point 11) :
+  le script tourne jusqu'au bout et produit les 7 fichiers de sortie attendus.
 
 ## Ce que ce rapport ne fait pas
 

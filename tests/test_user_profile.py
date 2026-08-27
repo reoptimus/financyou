@@ -14,13 +14,13 @@ Tests cover:
 - Convenience functions
 """
 
-import pytest
-import numpy as np
-import pandas as pd
-import sys
-import os
 import json
+import os
+import sys
 from pathlib import Path
+
+import pandas as pd
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -80,7 +80,7 @@ def create_simple_test_profile(age=35, risk_tolerance='moderate'):
 def load_example_profile(filename='user_profile_aggressive.json'):
     """Load example profile from input_files."""
     filepath = Path(__file__).parent.parent / 'examples' / 'input_files' / filename
-    with open(filepath, 'r') as f:
+    with open(filepath) as f:
         return json.load(f)
 
 
@@ -232,7 +232,7 @@ class TestLifeStages:
         life_stages = results['life_stages']
 
         # Check structure
-        for stage_name, stage_info in life_stages.items():
+        for _stage_name, stage_info in life_stages.items():
             assert 'start' in stage_info
             assert 'end' in stage_info
             assert 'duration' in stage_info

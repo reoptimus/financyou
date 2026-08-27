@@ -146,5 +146,7 @@ def load_market_assumptions(assumptions_id: str = "default-2026") -> MarketAssum
     document = json.loads(path.read_text(encoding="utf-8"))
     document.pop("$schema", None)
     _validate(document, path)
-    logger.info("Hypothèses de marché chargées : %s (statut %s)", assumptions_id, document["status"])
+    logger.info(
+        "Hypothèses de marché chargées : %s (statut %s)", assumptions_id, document["status"]
+    )
     return MarketAssumptions(document=document, source=path)

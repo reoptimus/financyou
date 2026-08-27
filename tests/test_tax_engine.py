@@ -167,7 +167,9 @@ class TestConfigurationValidation:
         scenarios_df = create_test_scenarios()
         engine = tax_engine.TaxEngine()
 
-        custom_tax_config = load_regime('FR').to_scenario_tax_config(reference_household_income=50_000)
+        custom_tax_config = load_regime('FR').to_scenario_tax_config(
+            reference_household_income=50_000
+        )
         config = {
             'scenarios': scenarios_df,
             'tax_config': custom_tax_config
@@ -663,7 +665,9 @@ class TestDataQuality:
 
         config = {
             'scenarios': scenarios_df,
-            'tax_config': load_regime('FR').to_scenario_tax_config(reference_household_income=50_000)
+            'tax_config': load_regime('FR').to_scenario_tax_config(
+                reference_household_income=50_000
+            )
         }
 
         results1 = engine.apply_taxes(config.copy())

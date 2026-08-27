@@ -162,18 +162,25 @@ l'utilisateur` (bloque une décision produit ou de confiance, pas technique),
   fusionné avec "Tax Jurisdiction", ou rester un champ informatif distinct
   assumé comme tel (à documenter si c'est le choix retenu).
 
-## 11. `examples/complete_pipeline_with_files.py` échoue à l'étape 7 (sauvegarde)
+## 11. `examples/complete_pipeline_with_files.py` — FAUSSE ALERTE, corrigée
 
-- **Ouvert le** : 2026-08-27 (avant tout travail de cette conversation)
-- **Statut** : ouvert — hors périmètre fiscalité, signalé pour ne pas être oublié
-- **Contexte** : le script échoue toujours à la sauvegarde des résultats
-  (`outputs/investment_report.html`, répertoires manquants même après
-  création manuelle de `outputs/`, `outputs/charts/`, `outputs/tables/`).
-  Confirmé identique sur la branche `phase-0.4`, avant toute modification
-  de cette feuille de route : ce n'est pas une régression de la fiscalité.
-- **À reprendre** : déboguer `reporting.py` (ou le script) pour comprendre
-  pourquoi le répertoire de sortie n'est pas créé/trouvé au moment de
-  l'écriture.
+- **Ouvert le** : 2026-08-27, **corrigé le** : 2026-08-27 (lors de la mise au
+  point de la PR #18)
+- **Statut** : réglé — c'était une erreur de diagnostic de ma part, pas un bug
+- **Ce que j'avais écrit à tort** : le script échouerait à la sauvegarde des
+  résultats (`outputs/investment_report.html` introuvable), identique sur
+  `phase-0.4`, donc pas une régression de la fiscalité.
+- **Ce qu'il en est réellement** : l'échec venait du bac à sable (sandbox) de
+  mon propre environnement d'exécution local, qui bloquait l'écriture de
+  fichiers dans un répertoire nouvellement créé — pas du code. Rejoué avec le
+  sandbox désactivé (`dangerouslyDisableSandbox`) : le script tourne jusqu'au
+  bout, produit les 7 fichiers attendus par le job CI « Test de fumée bout en
+  bout », et le portefeuille optimal est cohérent (poids sommant à 1,
+  champs complets). Confirmé aussi que la CI (runner Linux) n'a jamais ce
+  problème, puisqu'il n'a rien à voir avec le code.
+- **Leçon** : une commande shell qui échoue avec une erreur de fichier
+  manquant, sur CE poste, mérite d'être rejouée en écartant l'hypothèse
+  sandbox avant de conclure à un bug applicatif.
 
 ## 12. Dette de lint et de typage préexistante
 

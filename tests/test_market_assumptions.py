@@ -53,14 +53,16 @@ def test_les_parts_immobilieres_somment_a_un():
     rental_income_share + appreciation_share doit valoir 1, sans quoi le
     moteur sous- ou sur-compte le rendement immobilier total.
     """
-    document = json.loads((PACKAGE_ASSUMPTIONS_DIR / "default-2026.json").read_text(encoding="utf-8"))
-    document["real_estate"]["appreciation_share"] = 0.9  # ne somme plus à 1 avec rental_income_share=0.4
+    path = PACKAGE_ASSUMPTIONS_DIR / "default-2026.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    # Ne somme plus à 1 avec rental_income_share=0.4.
+    document["real_estate"]["appreciation_share"] = 0.9
     document.pop("$schema", None)
 
     from investment_calculator.market_assumptions import _validate
 
     with pytest.raises(MarketAssumptionsValidationError, match="doit valoir 1"):
-        _validate(document, PACKAGE_ASSUMPTIONS_DIR / "default-2026.json")
+        _validate(document, path)
 
 
 def test_les_valeurs_exposees_correspondent_au_document():

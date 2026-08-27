@@ -4,32 +4,33 @@ Unit tests for the Investment Calculator package
 Tests all major components: GSE, GSE+, MOCA, Personal Variables, and Utilities
 """
 
+import os
+import sys
 import unittest
+
 import numpy as np
 import pandas as pd
-import sys
-import os
 
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from investment_calculator import (
-    PersonalVariables,
-    InvestmentProfile,
-    RiskTolerance,
-    InvestmentGoal,
-    GlobalScenarioEngine,
-    EconomicScenario,
-    ScenarioType,
-    TaxIntegratedScenarioEngine,
-    TaxConfig,
-    AccountType,
     MOCA,
+    AccountType,
+    EconomicScenario,
+    GlobalScenarioEngine,
+    InvestmentGoal,
+    InvestmentProfile,
     OptimizationMethod,
+    PersonalVariables,
     PortfolioOptimizer,
-    validate_inputs,
-    validate_allocation,
+    RiskTolerance,
+    ScenarioType,
+    TaxConfig,
+    TaxIntegratedScenarioEngine,
     calculate_returns,
+    validate_allocation,
+    validate_inputs,
 )
 from investment_calculator.tax_regime import load_regime
 

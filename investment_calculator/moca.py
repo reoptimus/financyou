@@ -7,16 +7,21 @@ Portfolio optimization and statistical analysis engine that:
 3. Optimizes portfolios using classic techniques (mean-variance, efficient frontier, etc.)
 """
 
+import logging
+import time
+from dataclasses import dataclass, field
+from enum import Enum
+
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Tuple, Callable
-from enum import Enum
 from scipy.optimize import minimize
 
-from .gse import EconomicScenario
-from .gse_plus import TaxIntegratedScenario, AccountType
-from .personal_variables import PersonalVariables, InvestmentProfile
+from .gse_plus import TaxIntegratedScenario
+from .personal_variables import InvestmentProfile
+
+# Journalisation : logger nommé d'après le module, il hérite donc de la
+# configuration posée par investment_calculator.logging_config.configure_logging().
+logger = logging.getLogger(__name__)
 
 
 class OptimizationMethod(Enum):
@@ -55,7 +60,7 @@ class InvestmentResult:
     """
 
     scenario_id: str
-    asset_allocation: Dict[str, float]
+    asset_allocation: dict[str, float]
     initial_investment: float
     annual_contribution: float
     years: int
@@ -113,7 +118,7 @@ class InvestmentResult:
 
         return max_dd
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert result to dictionary"""
         return {
             "scenario_id": self.scenario_id,
@@ -169,7 +174,7 @@ class PortfolioStatistics:
     mean_sharpe: float
     value_at_risk_95: float
     conditional_var_95: float
-    target_balance: Optional[float] = None
+    target_balance: float | None = None
 
 
 class PortfolioOptimizer:
@@ -180,8 +185,8 @@ class PortfolioOptimizer:
     def __init__(
         self,
         asset_returns: pd.DataFrame,
-        asset_names: List[str],
-        constraints: Optional[Dict] = None,
+        asset_names: list[str],
+        constraints: dict | None = None,
     ):
         """
         Initialize portfolio optimizer.
@@ -209,7 +214,7 @@ class PortfolioOptimizer:
     def calculate_portfolio_stats(
         self,
         weights: np.ndarray,
-    ) -> Tuple[float, float, float]:
+    ) -> tuple[float, float, float]:
         """
         Calculate portfolio statistics.
 
@@ -229,8 +234,8 @@ class PortfolioOptimizer:
 
     def optimize_mean_variance(
         self,
-        target_return: Optional[float] = None,
-    ) -> Dict[str, float]:
+        target_return: float | None = None,
+    ) -> dict[str, float]:
         """
         Mean-variance optimization (Markowitz).
 
@@ -249,7 +254,8 @@ class PortfolioOptimizer:
         # Constraints
         constraints = [
             {"type": "eq", "fun": lambda w: np.sum(w) - 1.0},  # Fully invested
-            {"type": "eq", "fun": lambda w: np.dot(w, self.mean_returns) - target_return},  # Target return
+            # Contrainte de rendement cible
+            {"type": "eq", "fun": lambda w: np.dot(w, self.mean_returns) - target_return},
         ]
 
         # Bounds
@@ -271,12 +277,18 @@ class PortfolioOptimizer:
         )
 
         if result.success:
-            return dict(zip(self.asset_names, result.x))
+            # strict=False : longueurs structurellement égales (n_assets) ; on
+            # conserve le comportement historique de zip() plutôt que de lever.
+            return dict(zip(self.asset_names, result.x, strict=False))
         else:
             # Return equal weights if optimization fails
-            return dict(zip(self.asset_names, x0))
+            logger.warning(
+                "Échec de convergence SLSQP (mean_variance) : %s — repli sur l'équipondération",
+                result.message,
+            )
+            return dict(zip(self.asset_names, x0, strict=False))
 
-    def optimize_min_volatility(self) -> Dict[str, float]:
+    def optimize_min_volatility(self) -> dict[str, float]:
         """
         Minimize portfolio volatility.
 
@@ -303,11 +315,15 @@ class PortfolioOptimizer:
         )
 
         if result.success:
-            return dict(zip(self.asset_names, result.x))
+            return dict(zip(self.asset_names, result.x, strict=False))
         else:
-            return dict(zip(self.asset_names, x0))
+            logger.warning(
+                "Échec de convergence SLSQP (min_volatility) : %s — repli sur l'équipondération",
+                result.message,
+            )
+            return dict(zip(self.asset_names, x0, strict=False))
 
-    def optimize_max_sharpe(self) -> Dict[str, float]:
+    def optimize_max_sharpe(self) -> dict[str, float]:
         """
         Maximize Sharpe ratio.
 
@@ -335,11 +351,15 @@ class PortfolioOptimizer:
         )
 
         if result.success:
-            return dict(zip(self.asset_names, result.x))
+            return dict(zip(self.asset_names, result.x, strict=False))
         else:
-            return dict(zip(self.asset_names, x0))
+            logger.warning(
+                "Échec de convergence SLSQP (max_sharpe) : %s — repli sur l'équipondération",
+                result.message,
+            )
+            return dict(zip(self.asset_names, x0, strict=False))
 
-    def optimize_max_return(self) -> Dict[str, float]:
+    def optimize_max_return(self) -> dict[str, float]:
         """
         Maximize expected return (essentially all in highest-return asset).
 
@@ -350,9 +370,9 @@ class PortfolioOptimizer:
         max_return_idx = np.argmax(self.mean_returns)
         weights[max_return_idx] = 1.0
 
-        return dict(zip(self.asset_names, weights))
+        return dict(zip(self.asset_names, weights, strict=False))
 
-    def optimize_risk_parity(self) -> Dict[str, float]:
+    def optimize_risk_parity(self) -> dict[str, float]:
         """
         Risk parity allocation (equal risk contribution).
 
@@ -383,9 +403,13 @@ class PortfolioOptimizer:
         )
 
         if result.success:
-            return dict(zip(self.asset_names, result.x))
+            return dict(zip(self.asset_names, result.x, strict=False))
         else:
-            return dict(zip(self.asset_names, x0))
+            logger.warning(
+                "Échec de convergence SLSQP (risk_parity) : %s — repli sur l'équipondération",
+                result.message,
+            )
+            return dict(zip(self.asset_names, x0, strict=False))
 
     def generate_efficient_frontier(
         self,
@@ -420,8 +444,25 @@ class PortfolioOptimizer:
                     "sharpe_ratio": sharpe,
                     **weights_dict,
                 })
-            except:
+            except (ValueError, ArithmeticError, KeyError) as exc:
+                # Un rendement cible peut être infaisable sous les contraintes de
+                # poids, la matrice de covariance peut être singulière, ou un actif
+                # peut manquer du dictionnaire de poids : on ignore ce point de la
+                # frontière, mais on trace la raison au lieu de l'avaler.
+                # ValueError couvre np.linalg.LinAlgError (qui en hérite) ;
+                # ArithmeticError couvre les divisions par zéro et débordements.
+                logger.warning(
+                    "Point de frontière efficiente ignoré (rendement cible=%.6f) : %s",
+                    target,
+                    exc,
+                )
                 continue
+
+        logger.debug(
+            "Frontière efficiente générée : %d/%d points retenus",
+            len(frontier_data),
+            n_points,
+        )
 
         return pd.DataFrame(frontier_data)
 
@@ -447,12 +488,12 @@ class MOCA:
             investment_profile (InvestmentProfile): Investor's profile
         """
         self.profile = investment_profile
-        self.results: List[InvestmentResult] = []
+        self.results: list[InvestmentResult] = []
 
     def simulate_investment(
         self,
         scenario: TaxIntegratedScenario,
-        asset_allocation: Dict[str, float],
+        asset_allocation: dict[str, float],
     ) -> InvestmentResult:
         """
         Simulate investment under a specific scenario and allocation.
@@ -478,8 +519,17 @@ class MOCA:
 
         for year in range(years):
             # Calculate weighted return
-            stock_weight = asset_allocation.get("stocks", 0.0) + asset_allocation.get("domestic_stocks", 0.0) + asset_allocation.get("international_stocks", 0.0) + asset_allocation.get("emerging_markets", 0.0)
-            bond_weight = asset_allocation.get("bonds", 0.0) + asset_allocation.get("government_bonds", 0.0) + asset_allocation.get("corporate_bonds", 0.0)
+            stock_weight = (
+                asset_allocation.get("stocks", 0.0)
+                + asset_allocation.get("domestic_stocks", 0.0)
+                + asset_allocation.get("international_stocks", 0.0)
+                + asset_allocation.get("emerging_markets", 0.0)
+            )
+            bond_weight = (
+                asset_allocation.get("bonds", 0.0)
+                + asset_allocation.get("government_bonds", 0.0)
+                + asset_allocation.get("corporate_bonds", 0.0)
+            )
             re_weight = asset_allocation.get("real_estate", 0.0)
 
             weighted_return = (
@@ -513,9 +563,9 @@ class MOCA:
 
     def run_scenarios(
         self,
-        scenarios: List[TaxIntegratedScenario],
-        asset_allocation: Dict[str, float],
-    ) -> List[InvestmentResult]:
+        scenarios: list[TaxIntegratedScenario],
+        asset_allocation: dict[str, float],
+    ) -> list[InvestmentResult]:
         """
         Run investment simulation across multiple scenarios.
 
@@ -526,22 +576,36 @@ class MOCA:
         Returns:
             List[InvestmentResult]: Results for all scenarios
         """
+        start_time = time.perf_counter()
+        logger.info(
+            "Début de la simulation sur %d scénarios (allocation : %s)",
+            len(scenarios),
+            ", ".join(f"{name}={weight:.2%}" for name, weight in asset_allocation.items()),
+        )
+
         self.results = [
             self.simulate_investment(scenario, asset_allocation)
             for scenario in scenarios
         ]
+
+        logger.info(
+            "Fin de la simulation : %d résultats produits en %.3f s",
+            len(self.results),
+            time.perf_counter() - start_time,
+        )
         return self.results
 
     def calculate_statistics(
         self,
-        results: Optional[List[InvestmentResult]] = None,
-        target_balance: Optional[float] = None,
+        results: list[InvestmentResult] | None = None,
+        target_balance: float | None = None,
     ) -> PortfolioStatistics:
         """
         Calculate statistical metrics across scenarios.
 
         Args:
-            results (Optional[List[InvestmentResult]]): Results to analyze (uses self.results if None)
+            results (Optional[List[InvestmentResult]]): Results to analyze
+                (uses self.results if None)
             target_balance (Optional[float]): Target balance for probability calculation
 
         Returns:
@@ -576,18 +640,18 @@ class MOCA:
 
         # Probability of loss
         initial_contributions = results[0].total_contributions
-        prob_loss = np.sum(final_balances < initial_contributions) / len(final_balances)
+        prob_loss = float(np.sum(final_balances < initial_contributions) / len(final_balances))
 
         # Probability of reaching target
         if target_balance is not None:
-            prob_target = np.sum(final_balances >= target_balance) / len(final_balances)
+            prob_target = float(np.sum(final_balances >= target_balance) / len(final_balances))
         else:
             prob_target = 0.0
 
         # Value at Risk (VaR) and Conditional VaR (CVaR)
         var_95 = initial_contributions - p5
         losses = initial_contributions - final_balances[final_balances < initial_contributions]
-        cvar_95 = np.mean(losses) if len(losses) > 0 else 0.0
+        cvar_95 = float(np.mean(losses)) if len(losses) > 0 else 0.0
 
         return PortfolioStatistics(
             mean_final_balance=mean_balance,
@@ -609,11 +673,11 @@ class MOCA:
 
     def optimize_portfolio(
         self,
-        scenarios: List[TaxIntegratedScenario],
+        scenarios: list[TaxIntegratedScenario],
         method: OptimizationMethod = OptimizationMethod.MAX_SHARPE,
-        asset_classes: Optional[List[str]] = None,
-        constraints: Optional[Dict] = None,
-    ) -> Tuple[Dict[str, float], PortfolioStatistics]:
+        asset_classes: list[str] | None = None,
+        constraints: dict | None = None,
+    ) -> tuple[dict[str, float], PortfolioStatistics]:
         """
         Optimize portfolio allocation across scenarios.
 
@@ -626,8 +690,17 @@ class MOCA:
         Returns:
             Tuple[Dict[str, float], PortfolioStatistics]: (optimal allocation, statistics)
         """
+        start_time = time.perf_counter()
+
         if asset_classes is None:
             asset_classes = ["stocks", "bonds", "real_estate"]
+
+        logger.info(
+            "Début de l'optimisation de portefeuille (méthode=%s, %d scénarios, actifs=%s)",
+            method.value if isinstance(method, OptimizationMethod) else method,
+            len(scenarios),
+            ", ".join(asset_classes),
+        )
 
         # Build return matrix from scenarios
         returns_data = []
@@ -668,6 +741,12 @@ class MOCA:
         # Run scenarios with optimal allocation
         results = self.run_scenarios(scenarios, optimal_weights)
         statistics = self.calculate_statistics(results)
+
+        logger.info(
+            "Fin de l'optimisation en %.3f s — allocation retenue : %s",
+            time.perf_counter() - start_time,
+            ", ".join(f"{name}={weight:.2%}" for name, weight in optimal_weights.items()),
+        )
 
         return optimal_weights, statistics
 

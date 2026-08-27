@@ -462,7 +462,9 @@ class TaxRegime:
         if effective_shares <= 0:
             raise ValueError("Le nombre de parts doit être strictement positif.")
         per_share = taxable_income / effective_shares
-        tax_with_full_quotient = apply_brackets(per_share, income_tax["brackets"]) * effective_shares
+        tax_with_full_quotient = (
+            apply_brackets(per_share, income_tax["brackets"]) * effective_shares
+        )
 
         cap = quotient.get("cap_per_half_share")
         if not quotient.get("enabled") or not cap or dependent_shares <= 0:
@@ -503,7 +505,10 @@ class TaxRegime:
                     {
                         **bracket,
                         "lower": float(bracket.get("lower", 0.0)) * multiplier,
-                        "upper": None if bracket.get("upper") is None else float(bracket["upper"]) * multiplier,
+                        "upper": (
+                            None if bracket.get("upper") is None
+                            else float(bracket["upper"]) * multiplier
+                        ),
                     }
                     for bracket in brackets
                 ]

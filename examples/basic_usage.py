@@ -10,7 +10,7 @@ from time_series_slicer import TimeSeriesSlicer, slice_by_time, slice_by_window
 
 def create_sample_data():
     """Create sample time series data for demonstration."""
-    dates = pd.date_range('2024-01-01', periods=1000, freq='H')
+    dates = pd.date_range('2024-01-01', periods=1000, freq='h')
     data = pd.DataFrame({
         'value': np.random.randn(1000).cumsum(),
         'temperature': 20 + np.random.randn(1000) * 5,

@@ -6,7 +6,6 @@ calculating optimal investment strategies.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Dict, List
 from enum import Enum
 
 
@@ -62,7 +61,7 @@ class PersonalVariables:
     has_tax_advantaged_account: bool = False
     emergency_fund_months: int = 6
     debt_to_income_ratio: float = 0.0
-    existing_portfolio: Optional[Dict[str, float]] = None
+    existing_portfolio: dict[str, float] | None = None
 
     def __post_init__(self):
         """Validate personal variables after initialization"""
@@ -150,9 +149,9 @@ class InvestmentProfile:
 
     personal_vars: PersonalVariables
     primary_goal: InvestmentGoal = InvestmentGoal.WEALTH_BUILDING
-    secondary_goals: List[InvestmentGoal] = field(default_factory=list)
-    target_retirement_income: Optional[float] = None
-    custom_constraints: Dict = field(default_factory=dict)
+    secondary_goals: list[InvestmentGoal] = field(default_factory=list)
+    target_retirement_income: float | None = None
+    custom_constraints: dict = field(default_factory=dict)
 
     def __post_init__(self):
         """Set default target retirement income if not provided"""
@@ -160,7 +159,7 @@ class InvestmentProfile:
             # Default to 80% of final working income
             self.target_retirement_income = self.personal_vars.annual_income * 0.8
 
-    def get_recommended_asset_allocation(self) -> Dict[str, float]:
+    def get_recommended_asset_allocation(self) -> dict[str, float]:
         """
         Get recommended asset allocation based on profile.
 
@@ -190,7 +189,7 @@ class InvestmentProfile:
 
         return allocation
 
-    def is_ready_to_invest(self) -> tuple[bool, List[str]]:
+    def is_ready_to_invest(self) -> tuple[bool, list[str]]:
         """
         Check if investor is ready to invest based on financial health.
 
