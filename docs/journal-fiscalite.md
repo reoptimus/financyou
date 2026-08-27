@@ -231,8 +231,55 @@ l'utilisateur` (bloque une décision produit ou de confiance, pas technique),
   hypothèses interagissent avec le taux social appliqué, donc les deux
   méritent d'être repris ensemble.
 
+## 15. PR #18 bloquée par la CI réelle — réglé
+
+- **Ouvert le** : 2026-08-27 (l'utilisateur a ouvert la PR #18 et poussé la
+  branche vers `origin` lui-même, sans que je le fasse ; je ne le savais pas
+  avant qu'il signale l'échec)
+- **Statut** : réglé
+- **Contexte** : `phase-1a-fiscalite` a été créée à partir de `phase-0.4`,
+  avant que `.github/workflows/ci.yml`, `pyproject.toml`, `ruff.toml`,
+  `mypy.ini`, `requirements-dev.txt` et `CLAUDE.md` n'existent sur cette
+  lignée — ils ont été ajoutés sur `main` par un travail parallèle (phases
+  0.1 à 0.3, PR #14-17) que je n'ai découvert qu'en enquêtant sur l'échec.
+  Toute ma vérification locale de « ruff/mypy verts » pendant cette
+  conversation utilisait donc une configuration par défaut, pas celle
+  réellement appliquée par la CI.
+- **Trois causes distinctes, toutes corrigées** :
+  1. `ruff.toml` impose une limite de 100 caractères par ligne (E501) : 14
+     lignes à corriger, ajoutées au fil de mes commits sans que je le sache.
+  2. `mypy.ini` en mode strict sur `investment_calculator.modules.*` a
+     révélé 2 erreurs préexistantes, dans des fichiers jamais touchés par
+     moi (`scenario_generator.py`, `moca.py`) — **la CI de `main` elle-même
+     était déjà cassée** avant ma PR (vérifié : les deux derniers push sur
+     `main` avaient échoué). Corrigées ici pour débloquer, puisqu'elles
+     bloquaient toute PR vers `main`, pas seulement la mienne.
+  3. `mypy.ini` fixait `python_version = 3.11` alors que la CI teste 3.11
+     ET 3.12 dans la même matrice : sous 3.12, les stubs numpy embarqués
+     utilisent une syntaxe que mypy refusait de lire pour une cible 3.11.
+     Retiré le réglage (mypy déduit la version de l'interpréteur qui
+     l'exécute).
+  4. Le banc de cas d'or (12 cas `known_gap`/`pending_*` conçus pour
+     échouer, voir étape 1.A.1) est incompatible avec l'exigence
+     `pytest tests/ -q` strictement vert sans `continue-on-error`. Convertis
+     en `xfail(strict=False)` : visibles dans le rapport comme `xfailed`,
+     sans faire échouer la CI ; un cas `"ready"` reste sans tolérance.
+- **Erreur de diagnostic corrigée au passage** : voir le point 11 révisé —
+  ce que j'avais pris pour un bug préexistant du pipeline était en réalité
+  une restriction du bac à sable de mon propre environnement d'exécution.
+- **État final, vérifié directement sur GitHub** : PR #18 —
+  `mergeable: MERGEABLE`, `mergeStateStatus: CLEAN`, les trois checks
+  requis (Qualité 3.11, Qualité 3.12, Test de fumée bout en bout) en
+  `SUCCESS`.
+- **À reprendre** : rien côté fiscalité, mais deux leçons générales pour la
+  suite — (a) avant de déclarer « ruff/mypy verts » sur une branche isolée
+  d'un dépôt qui a une CI, vérifier d'abord que la configuration locale
+  correspond à celle réellement utilisée, pas une configuration par défaut ;
+  (b) sur ce poste précisément, une erreur de fichier manquant en cours
+  d'exécution mérite d'être rejouée avec le sandbox désactivé avant de
+  conclure à un bug applicatif.
+
 ---
 
-*Dernière mise à jour : 2026-08-27, après l'étape 1.A.6 (sortie des
-hypothèses de marché du moteur fiscal). Prochaine étape à discuter avec
-l'utilisateur.*
+*Dernière mise à jour : 2026-08-27, après la mise au point de la PR #18
+(CI verte, mergeable). Prochaine étape à discuter avec l'utilisateur.*
