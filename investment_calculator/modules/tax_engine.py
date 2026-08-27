@@ -74,20 +74,15 @@ from enum import Enum
 
 import pandas as pd
 
+from investment_calculator.market_assumptions import (
+    MarketAssumptions,
+    load_market_assumptions,
+)
 from investment_calculator.tax_regime import load_regime
 
 # Journalisation : logger nommé d'après le module, il hérite donc de la
 # configuration posée par investment_calculator.logging_config.configure_logging().
 logger = logging.getLogger(__name__)
-
-#: Revenu de foyer utilisé pour réduire le barème progressif de l'impôt sur le
-#: revenu à un taux moyen unique (voir TaxRegime.to_scenario_tax_config), faute
-#: de connaître le revenu réel du foyer simulé à ce stade du calcul. Ce n'est
-#: pas une donnée fiscale : c'est une hypothèse de modélisation du moteur de
-#: scénarios, au même titre que le rendement du dividende ou la répartition
-#: loyer/appréciation ci-dessous — destinée à rejoindre les hypothèses de
-#: marché à l'étape 1.B plutôt qu'à rester ici.
-_REFERENCE_HOUSEHOLD_INCOME = 50_000.0
 
 
 class AccountType(Enum):
@@ -107,7 +102,8 @@ def _default_tax_config() -> dict:
     cette fonction.
     """
     regime = load_regime("FR")
-    return regime.to_scenario_tax_config(reference_household_income=_REFERENCE_HOUSEHOLD_INCOME)
+    reference_income = load_market_assumptions().reference_household_income
+    return regime.to_scenario_tax_config(reference_household_income=reference_income)
 
 
 class TaxEngine:
@@ -162,8 +158,9 @@ class TaxEngine:
         )
 
         # Calculate after-tax returns for each account type
+        market_assumptions = load_market_assumptions()
         after_tax_scenarios = self._calculate_after_tax_scenarios(
-            scenarios_df, tax_config, allocation
+            scenarios_df, tax_config, allocation, market_assumptions
         )
 
         # Calculate tax tables
@@ -224,7 +221,8 @@ class TaxEngine:
         self,
         scenarios_df: pd.DataFrame,
         tax_config: dict,
-        allocation: dict
+        allocation: dict,
+        market_assumptions: MarketAssumptions,
     ) -> pd.DataFrame:
         """
         Calculate after-tax returns for all scenarios.
@@ -233,6 +231,11 @@ class TaxEngine:
             scenarios_df: Economic scenarios from Module 1
             tax_config: Tax configuration
             allocation: Asset allocation across account types
+            market_assumptions: hypothèses de marché et de comportement
+                (rendement du dividende, répartition loyer/appréciation,
+                fraction de plus-value réalisée annuellement) — voir
+                investment_calculator.market_assumptions. Ce ne sont pas des
+                paramètres fiscaux.
 
         Returns:
             DataFrame with after-tax return columns added
@@ -252,7 +255,7 @@ class TaxEngine:
         )
 
         # Taxable: dividends taxed annually, capital gains deferred
-        dividend_yield = 0.02
+        dividend_yield = market_assumptions.dividend_yield
         dividend_tax = taxable_config['dividend_tax_rate'] + social_charges
         stock_taxable_drag = dividend_yield * dividend_tax
 
@@ -290,11 +293,13 @@ class TaxEngine:
             'real_estate', {'taxable': 1.0, 'tax_deferred': 0.0, 'tax_free': 0.0}
         )
 
-        # Taxable: rental income (40%) + appreciation (60%)
-        rental_portion = 0.4
-        appreciation_portion = 0.6
+        # Taxable: rental income + appreciation, split per market_assumptions
+        rental_portion = market_assumptions.rental_income_share
+        appreciation_portion = market_assumptions.appreciation_share
         rental_tax = taxable_config['income_tax_rate'] + social_charges
-        appreciation_tax = taxable_config['capital_gains_rate'] * 0.2  # Only 20% realized annually
+        appreciation_tax = (
+            taxable_config['capital_gains_rate'] * market_assumptions.annual_realized_fraction
+        )
 
         re_taxable_drag = (
             rental_portion * rental_tax +
@@ -515,7 +520,7 @@ def apply_taxes_simple(
     scenarios_df: pd.DataFrame,
     jurisdiction: str = 'FR',
     allocation: dict | None = None,
-    reference_household_income: float = _REFERENCE_HOUSEHOLD_INCOME,
+    reference_household_income: float | None = None,
 ) -> dict:
     """
     Apply taxes with simple configuration.
@@ -528,7 +533,8 @@ def apply_taxes_simple(
         allocation: Asset allocation (optional)
         reference_household_income: revenu de foyer utilisé pour réduire le
             barème progressif à un taux moyen — voir
-            TaxRegime.to_scenario_tax_config.
+            TaxRegime.to_scenario_tax_config. Par défaut, celui des
+            hypothèses de marché (investment_calculator.market_assumptions).
 
     Returns:
         Tax results dictionary
@@ -536,6 +542,9 @@ def apply_taxes_simple(
     Example:
         >>> results = apply_taxes_simple(scenarios_df, jurisdiction='FR')
     """
+    if reference_household_income is None:
+        reference_household_income = load_market_assumptions().reference_household_income
+
     regime = load_regime(jurisdiction)
     tax_config = regime.to_scenario_tax_config(
         reference_household_income=reference_household_income

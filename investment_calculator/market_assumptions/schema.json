@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/reoptimus/financyou/schemas/market_assumptions-0.1.json",
+  "title": "Hypothèses de marché et de comportement FinancYou",
+  "description": "Décrit des hypothèses de MARCHÉ et de COMPORTEMENT (rendement, répartition, comportement de réalisation), PAS de la fiscalité. Voir docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md, section « ce qui n'est pas de la fiscalité ». Le moteur fiscal (investment_calculator/modules/tax_engine.py) ne doit contenir aucune de ces valeurs en dur ; il charge ce document.",
+  "type": "object",
+  "required": ["schema_version", "id", "status", "equity", "real_estate", "capital_gains_behavior", "household_income_approximation"],
+  "additionalProperties": false,
+
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+$" },
+    "id": {
+      "type": "string",
+      "description": "Identifiant du jeu d'hypothèses, par exemple default-2026."
+    },
+    "label": { "type": "string" },
+
+    "status": {
+      "enum": ["draft", "validated"],
+      "description": "draft : valeurs héritées du moteur, jamais confrontées à une source de marché. validated : chaque valeur est sourcée et relue par une personne, nommée dans validation.validated_by."
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "validated_by": { "type": ["string", "null"] },
+        "validated_on": { "type": ["string", "null"], "format": "date" }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["label"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": "string" },
+          "url": { "type": "string" },
+          "consulted_on": { "type": "string", "format": "date" },
+          "covers": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "known_gaps": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+
+    "equity": {
+      "type": "object",
+      "required": ["dividend_yield"],
+      "additionalProperties": false,
+      "properties": {
+        "dividend_yield": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Rendement du dividende supposé, en fraction du cours."
+        }
+      }
+    },
+
+    "real_estate": {
+      "type": "object",
+      "required": ["rental_income_share", "appreciation_share"],
+      "additionalProperties": false,
+      "properties": {
+        "rental_income_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Part du rendement immobilier supposée provenir du loyer plutôt que de l'appréciation."
+        },
+        "appreciation_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Part du rendement immobilier supposée provenir de l'appréciation. Doit compléter rental_income_share à 1."
+        }
+      }
+    },
+
+    "capital_gains_behavior": {
+      "type": "object",
+      "required": ["annual_realized_fraction"],
+      "additionalProperties": false,
+      "properties": {
+        "annual_realized_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Fraction des plus-values latentes supposée réalisée (vendue, donc imposée) chaque année, plutôt que capitalisée."
+        }
+      }
+    },
+
+    "household_income_approximation": {
+      "type": "object",
+      "required": ["reference_household_income"],
+      "additionalProperties": false,
+      "properties": {
+        "reference_household_income": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Revenu de foyer utilisé pour réduire un barème progressif de l'impôt sur le revenu à un taux moyen unique, faute de connaître le revenu réel du foyer simulé à ce stade du calcul. N'est pas une donnée fiscale : c'est un choix de modélisation du moteur de scénarios. Voir investment_calculator.tax_regime.TaxRegime.to_scenario_tax_config."
+        }
+      }
+    }
+  }
+}

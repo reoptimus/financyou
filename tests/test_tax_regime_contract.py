@@ -318,16 +318,10 @@ def test_l_absence_de_plafond_s_ecrit_null_et_non_infini():
 #: leur disparition. Toute nouvelle valeur non listée ici fait échouer la CI.
 #: Clé : ``"<fonction>:<valeur>"``.
 LITTERAUX_TOLERES: dict[str, str] = {
-    # Hypothèses de MARCHÉ égarées dans le moteur fiscal. Ce ne sont pas des
-    # paramètres d'imposition : elles doivent rejoindre les hypothèses de
-    # scénario en 1.B, pas un régime fiscal.
-    "_calculate_after_tax_scenarios:0.02":
-        "hypothèse de marché (rendement du dividende) — à déplacer en 1.B",
-    "_calculate_after_tax_scenarios:0.4": "hypothèse de marché (part de loyer) — à déplacer en 1.B",
-    "_calculate_after_tax_scenarios:0.6":
-        "hypothèse de marché (part d'appréciation) — à déplacer en 1.B",
-    "_calculate_after_tax_scenarios:0.2":
-        "hypothèse comportementale (part réalisée annuellement) — à déplacer en 1.B",
+    # Les hypothèses de marché (rendement du dividende, répartition
+    # loyer/appréciation, part réalisée annuellement) ont déménagé à l'étape
+    # 1.A.6 dans investment_calculator/market_assumptions/ ; elles ne sont
+    # plus des littéraux de ce fichier et n'ont donc plus leur place ici.
     # Garde-fous numériques, sans contenu fiscal.
     "_calculate_after_tax_scenarios:0.01": "epsilon de division, pas un taux",
     "_calculate_tax_tables:0.001": "epsilon de division, pas un taux",

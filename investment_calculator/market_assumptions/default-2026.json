@@ -1,0 +1,42 @@
+{
+  "$schema": "./schema.json",
+  "schema_version": "0.1",
+  "id": "default-2026",
+  "label": "Hypothèses de marché et de comportement par défaut, moteur fiscal (GSE+)",
+
+  "status": "draft",
+  "validation": {
+    "validated_by": null,
+    "validated_on": null
+  },
+
+  "sources": [
+    {
+      "label": "AUCUNE — extraction fidèle des littéraux qui figuraient en dur dans investment_calculator/modules/tax_engine.py avant l'étape 1.A.6. Aucune de ces valeurs n'a été vérifiée contre une source de marché réelle.",
+      "covers": ["equity.dividend_yield", "real_estate.rental_income_share", "real_estate.appreciation_share", "capital_gains_behavior.annual_realized_fraction"]
+    }
+  ],
+
+  "known_gaps": [
+    "STATUT BROUILLON : ces valeurs sont l'extraction fidèle de littéraux qui étaient codés en dur dans tax_engine.py, jamais vérifiées contre une source de marché (rendement du dividende réel d'un indice, répartition loyer/appréciation observée, comportement effectif de réalisation des plus-values). À sourcer avant tout usage présenté comme réaliste à un utilisateur.",
+    "Aucune de ces hypothèses ne varie par pays, par classe d'actif au sein d'une classe (par exemple actions US vs actions EU), ni par horizon : ce sont des constantes globales, ce qui était déjà le cas avant leur extraction du moteur.",
+    "reference_household_income (50 000 €) est un choix arbitraire destiné à approximer un barème progressif par un taux moyen ; il ne représente aucun foyer réel ni aucune médiane statistique sourcée."
+  ],
+
+  "equity": {
+    "dividend_yield": 0.02
+  },
+
+  "real_estate": {
+    "rental_income_share": 0.4,
+    "appreciation_share": 0.6
+  },
+
+  "capital_gains_behavior": {
+    "annual_realized_fraction": 0.2
+  },
+
+  "household_income_approximation": {
+    "reference_household_income": 50000
+  }
+}
