@@ -8,9 +8,9 @@
 
   "status": "draft",
   "validation": {
-    "validated_by": null,
-    "validated_on": null,
-    "golden_cases": null,
+    "validated_by": "SebG",
+    "validated_on": "2026-08-27",
+    "golden_cases": "tests/golden/fr-2026.json",
     "reviewed_by_professional": false
   },
 
