@@ -43,19 +43,19 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "TaxRegime",
-    "RegimeDescriptor",
-    "TaxRegimeError",
-    "RegimeNotFoundError",
-    "RegimeValidationError",
-    "DraftRegimeError",
-    "load_regime",
-    "list_regimes",
-    "search_paths",
-    "apply_brackets",
+    "ENV_REGIME_PATH",
     "PACKAGE_REGIME_DIR",
     "SCHEMA_PATH",
-    "ENV_REGIME_PATH",
+    "DraftRegimeError",
+    "RegimeDescriptor",
+    "RegimeNotFoundError",
+    "RegimeValidationError",
+    "TaxRegime",
+    "TaxRegimeError",
+    "apply_brackets",
+    "list_regimes",
+    "load_regime",
+    "search_paths",
 ]
 
 
@@ -429,14 +429,26 @@ class TaxRegime:
             )
         return float(flat.get("income_tax_rate", 0.0)) + float(flat.get("social_rate", 0.0))
 
-    def income_tax_due(self, taxable_income: float, *, shares: float = 1.0) -> float:
+    def income_tax_due(
+        self, taxable_income: float, *, shares: float = 1.0, dependent_shares: float = 0.0
+    ) -> float:
         """
         Impôt sur le revenu dû pour un revenu imposable donné.
 
-        ``shares`` est le nombre de parts du foyer lorsque le régime pratique le
-        quotient familial ; il est ignoré sinon. Le plafonnement de l'avantage
-        par demi-part n'est pas appliqué ici : il sera introduit avec les cas
-        d'or de l'étape 1.A.
+        ``shares`` est le nombre de parts total du foyer lorsque le régime
+        pratique le quotient familial ; il est ignoré sinon. ``dependent_shares``
+        est la fraction de ``shares`` attribuable aux personnes à charge
+        (enfants), par opposition aux parts de base du foyer (1 pour un
+        célibataire, 2 pour un couple) : elle sert à appliquer le
+        plafonnement général de l'avantage du quotient familial
+        (``household_quotient.cap_per_half_share``), quand le régime en
+        prévoit un.
+
+        Ne modélise que le cas général du plafonnement (CGI art. 197 I-2°).
+        Les cas particuliers (parent isolé, veuf avec enfant à charge, garde
+        alternée au quart de part, invalides) portent des plafonds ou des
+        réductions complémentaires distincts, non modélisés ici — voir les
+        ``known_gaps`` du régime.
         """
         income_tax = self.document["income_tax"]
         mode = income_tax["mode"]
@@ -450,7 +462,53 @@ class TaxRegime:
         if effective_shares <= 0:
             raise ValueError("Le nombre de parts doit être strictement positif.")
         per_share = taxable_income / effective_shares
-        return apply_brackets(per_share, income_tax["brackets"]) * effective_shares
+        tax_with_full_quotient = apply_brackets(per_share, income_tax["brackets"]) * effective_shares
+
+        cap = quotient.get("cap_per_half_share")
+        if not quotient.get("enabled") or not cap or dependent_shares <= 0:
+            return tax_with_full_quotient
+
+        base_shares = effective_shares - dependent_shares
+        if base_shares <= 0:
+            raise ValueError(
+                "dependent_shares ne peut pas atteindre ni dépasser le nombre total de parts."
+            )
+        per_base_share = taxable_income / base_shares
+        tax_at_base_shares = apply_brackets(per_base_share, income_tax["brackets"]) * base_shares
+
+        advantage = tax_at_base_shares - tax_with_full_quotient
+        if advantage <= 0:
+            return tax_with_full_quotient
+        max_advantage = (dependent_shares / 0.5) * float(cap)
+        return tax_at_base_shares - min(advantage, max_advantage)
+
+    def surtax_due(self, taxable_amount: float, *, married: bool = False) -> float:
+        """
+        Total des contributions additionnelles sur le revenu (``income_tax.surtaxes``),
+        par exemple la contribution exceptionnelle sur les hauts revenus (CEHR).
+
+        ``taxable_amount`` est l'assiette de la contribution (le revenu
+        fiscal de référence pour la CEHR) : elle n'est jamais divisée par le
+        nombre de parts, contrairement à l'impôt sur le revenu — ces
+        contributions ne pratiquent pas le quotient familial. ``married``
+        double les seuils du barème quand le régime le prévoit
+        (``threshold_multiplier_married``).
+        """
+        total = 0.0
+        for surtax in self.document["income_tax"].get("surtaxes", []):
+            multiplier = float(surtax.get("threshold_multiplier_married", 1.0)) if married else 1.0
+            brackets = surtax["brackets"]
+            if multiplier != 1.0:
+                brackets = [
+                    {
+                        **bracket,
+                        "lower": float(bracket.get("lower", 0.0)) * multiplier,
+                        "upper": None if bracket.get("upper") is None else float(bracket["upper"]) * multiplier,
+                    }
+                    for bracket in brackets
+                ]
+            total += apply_brackets(taxable_amount, brackets)
+        return total
 
     def wealth_tax_due(self, net_taxable_wealth: float) -> float:
         """

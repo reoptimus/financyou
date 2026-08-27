@@ -194,6 +194,46 @@ def test_le_quotient_familial_reduit_l_impot():
     assert fr.income_tax_due(0) == 0.0
 
 
+def test_le_plafonnement_du_quotient_limite_l_avantage_des_enfants():
+    """
+    Cas général du plafonnement (CGI art. 197 I-2°) : au-delà d'un certain
+    revenu, l'avantage procuré par les parts d'enfants est plafonné à un
+    montant par demi-part, pas illimité.
+    """
+    fr = load_regime("FR", 2026, allow_draft=True)
+    revenu = 300_000
+    sans_enfants = fr.income_tax_due(revenu, shares=2.0)
+    avec_plafonnement = fr.income_tax_due(revenu, shares=3.0, dependent_shares=1.0)
+    sans_plafonnement = fr.income_tax_due(revenu, shares=3.0)
+
+    assert avec_plafonnement > sans_plafonnement, (
+        "Le plafonnement doit renchérir l'impôt par rapport au quotient plein, "
+        "à ce niveau de revenu où l'avantage dépasse le plafond."
+    )
+    avantage_plafonne = sans_enfants - avec_plafonnement
+    plafond = fr.document["income_tax"]["household_quotient"]["cap_per_half_share"]
+    # dependent_shares=1.0 équivaut à deux demi-parts (2 enfants à 0.5 part chacun).
+    assert avantage_plafonne == pytest.approx(2 * plafond)
+
+
+def test_l_appel_sans_dependent_shares_reste_retrocompatible():
+    """dependent_shares est optionnel : l'appel historique doit produire le même résultat qu'avant son ajout."""
+    fr = load_regime("FR", 2026, allow_draft=True)
+    assert fr.income_tax_due(60_000, shares=2.0) == pytest.approx(4_207.98, abs=0.01)
+
+
+def test_la_cehr_double_ses_seuils_pour_un_couple():
+    """La CEHR (art. 223 sexies CGI) applique les mêmes taux, mais des seuils doublés pour un couple."""
+    fr = load_regime("FR", 2026, allow_draft=True)
+    celibataire = fr.surtax_due(600_000, married=False)
+    couple = fr.surtax_due(600_000, married=True)
+    assert celibataire > couple > 0, (
+        "À RFR égal, un couple doit payer moins de CEHR qu'une personne seule : "
+        "ses seuils sont doublés."
+    )
+    assert fr.surtax_due(200_000, married=False) == 0.0, "Sous 250 000 €, la CEHR n'est pas due."
+
+
 def test_l_impot_sur_la_fortune_respecte_son_seuil():
     fr = load_regime("FR", 2026, allow_draft=True)
     assert fr.wealth_tax_due(1_000_000) == 0.0

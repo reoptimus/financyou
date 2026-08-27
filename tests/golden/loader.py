@@ -116,7 +116,12 @@ def compute(regime: TaxRegime, case: GoldenCase) -> dict[str, float]:
 def _compute_income_tax(regime: TaxRegime, inputs: dict[str, Any]) -> dict[str, float]:
     taxable_income = float(inputs["taxable_income"])
     shares = float(inputs.get("shares", 1.0))
-    income_tax = regime.income_tax_due(taxable_income, shares=shares)
+    dependent_shares = float(inputs.get("dependent_shares", 0.0))
+    income_tax = regime.income_tax_due(taxable_income, shares=shares, dependent_shares=dependent_shares)
+    if inputs.get("apply_surtax"):
+        married = inputs.get("household_status") == "couple"
+        surtax_base = float(inputs.get("surtax_base", taxable_income))
+        income_tax += regime.surtax_due(surtax_base, married=married)
     return {
         "income_tax": income_tax,
         "social_contributions": 0.0,

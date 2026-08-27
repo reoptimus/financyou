@@ -154,6 +154,39 @@
       "notes": "La plus-value de 30 000 € est fournie déjà nette des abattements pour durée de détention (capital_gains.real_estate.holding_allowances) : ce cas ne teste pas le calcul de l'abattement lui-même, qui n'est pas mis en œuvre par ce banc."
     },
     {
+      "id": "ir_plafonnement_quotient_familial_general",
+      "description": "Un couple marié avec deux enfants à charge (3 parts, dont 1 part attribuable aux enfants) déclare un revenu imposable de 300 000 € : l'avantage du quotient familial est plafonné au cas général (1 807 € par demi-part).",
+      "kind": "income_tax",
+      "status": "pending_expected_value",
+      "inputs": { "taxable_income": 300000, "shares": 3.0, "dependent_shares": 1.0 }
+    },
+    {
+      "id": "cehr_celibataire_hauts_revenus",
+      "description": "Un célibataire déclare un revenu fiscal de référence de 600 000 € : contribution exceptionnelle sur les hauts revenus (CEHR) due, en plus de l'impôt sur le revenu au barème.",
+      "kind": "income_tax",
+      "status": "pending_expected_value",
+      "inputs": {
+        "taxable_income": 600000,
+        "shares": 1.0,
+        "apply_surtax": true,
+        "household_status": "single"
+      },
+      "notes": "Le revenu fiscal de référence et le revenu imposable sont supposés identiques dans ce cas, par simplification."
+    },
+    {
+      "id": "cehr_couple_hauts_revenus",
+      "description": "Un couple soumis à imposition commune déclare un revenu fiscal de référence de 600 000 € : les seuils de la CEHR sont doublés par rapport à une personne seule.",
+      "kind": "income_tax",
+      "status": "pending_expected_value",
+      "inputs": {
+        "taxable_income": 600000,
+        "shares": 2.0,
+        "apply_surtax": true,
+        "household_status": "couple"
+      },
+      "notes": "Le revenu fiscal de référence et le revenu imposable sont supposés identiques dans ce cas, par simplification."
+    },
+    {
       "id": "quotient_familial_plafonnement_cas_particuliers",
       "description": "Plafonnement du quotient familial pour les cas particuliers (parent isolé, veuf avec enfant à charge, garde alternée au quart de part, invalides/anciens combattants), chacun portant un plafond ou une réduction complémentaire distincts du plafond général.",
       "kind": "known_gap",
@@ -161,11 +194,11 @@
       "blocked_reason": "Le régime ne porte qu'un plafond général unique par demi-part (household_quotient.cap_per_half_share) ; les mécanismes à deux étages des cas particuliers (CGI art. 197 I-3°) ne sont pas représentables par ce seul champ."
     },
     {
-      "id": "cehr_et_cdhr_hauts_revenus",
-      "description": "Contribution exceptionnelle sur les hauts revenus (CEHR) et contribution différentielle sur les hauts revenus (CDHR) applicables aux revenus 2025.",
+      "id": "cdhr_hauts_revenus",
+      "description": "Contribution différentielle sur les hauts revenus (CDHR, art. 224 CGI) applicable aux revenus 2025.",
       "kind": "known_gap",
       "status": "pending_regime_data",
-      "blocked_reason": "Non encore renseignées dans le régime. Le statut de la CDHR pour les revenus 2025 (reconduite ou non par la loi de finances pour 2026) n'a pas pu être confirmé auprès d'une source primaire au moment de la rédaction — voir docs/validation/1a-cas-d-or.md."
+      "blocked_reason": "Non renseignée dans le régime : son existence et ses paramètres pour les revenus 2025 (reconduite ou non par la loi de finances pour 2026) n'ont pas pu être confirmés auprès d'une source primaire consultée directement au moment de la rédaction — voir docs/validation/1a-cas-d-or.md. La CEHR (art. 223 sexies), elle, est modélisée — voir les cas cehr_celibataire_hauts_revenus et cehr_couple_hauts_revenus."
     },
     {
       "id": "per_plafond_deduction",

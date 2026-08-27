@@ -168,7 +168,12 @@
             "additionalProperties": false,
             "properties": {
               "label": { "type": "string" },
-              "brackets": { "type": "array", "items": { "$ref": "#/$defs/bracket" } }
+              "brackets": { "type": "array", "items": { "$ref": "#/$defs/bracket" } },
+              "threshold_multiplier_married": {
+                "type": "number",
+                "minimum": 1,
+                "description": "Facteur par lequel multiplier les bornes du barème (lower/upper) pour un foyer soumis à imposition commune. Absent ou 1 : les bornes sont les mêmes pour tous les foyers. Exemple : la CEHR française double ses seuils pour un couple."
+              }
             }
           }
         }
@@ -279,6 +284,59 @@
       }
     },
 
+    "rental_income_regimes": {
+      "type": "object",
+      "description": "Régimes d'imposition des revenus fonciers (location nue). C'est une catégorie de revenu récurrent, distincte de la plus-value de cession d'une enveloppe : un bien loué en direct produit à la fois un revenu foncier annuel (ici) et, lors de sa vente, une plus-value (wrappers[immobilier_direct] et capital_gains.real_estate).",
+      "additionalProperties": false,
+      "properties": {
+        "micro_foncier": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "revenue_threshold": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Recettes brutes annuelles en-dessous desquelles le régime s'applique de plein droit."
+            },
+            "allowance_rate": {
+              "$ref": "#/$defs/rate",
+              "description": "Abattement forfaitaire réputé couvrir toutes les charges."
+            },
+            "threshold_basis": {
+              "enum": ["household", "per_property"],
+              "description": "Le seuil s'apprécie-t-il en faisant masse de tous les biens du foyer, ou bien par bien."
+            }
+          }
+        },
+        "real_regime": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "deficit_cap_against_global_income": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Plafond annuel de déficit foncier imputable sur le revenu global du foyer, hors intérêts d'emprunt."
+            },
+            "deficit_cap_energy_renovation": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Plafond majoré, temporaire, pour certains travaux de rénovation énergétique."
+            },
+            "deficit_carry_forward_years": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Durée de report du déficit foncier non imputé sur le revenu global, sur les seuls revenus fonciers des années suivantes."
+            },
+            "option_commitment_years": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Durée d'engagement lorsque le régime réel est choisi par option en-deçà du seuil du micro-foncier."
+            }
+          }
+        }
+      }
+    },
+
     "inheritance": {
       "type": "object",
       "description": "Réservé à une extension ultérieure. Aucun calcul n'en dépend aujourd'hui.",
@@ -367,6 +425,44 @@
           "description": "Les versements réduisent-ils le revenu imposable de l'année."
         },
         "contribution_deduction_cap": { "type": ["number", "null"], "minimum": 0 },
+        "contribution_deduction_formula": {
+          "type": "object",
+          "description": "Formule du plafond de déduction lorsque celui-ci dépend d'une donnée personnelle du contribuable (typiquement son revenu professionnel N-1) et ne peut donc pas s'exprimer par une seule constante comme contribution_deduction_cap. Les paramètres ci-dessous (taux, multiplicateurs de PASS) sont des données du régime, qui changent avec la loi ; le revenu professionnel N-1 est une entrée utilisateur que ce document ne porte pas.",
+          "additionalProperties": false,
+          "properties": {
+            "basis": {
+              "enum": ["prior_year_net_professional_income", "prior_year_tns_profit"],
+              "description": "Assiette de référence : revenu net professionnel N-1 pour un salarié, bénéfice imposable N-1 pour un travailleur non salarié."
+            },
+            "employee_rate": { "$ref": "#/$defs/rate" },
+            "employee_pass_multiplier_cap": {
+              "type": "number",
+              "minimum": 0,
+              "description": "L'assiette est retenue dans la limite de ce multiple du PASS de référence."
+            },
+            "employee_floor_rate_of_pass": {
+              "$ref": "#/$defs/rate",
+              "description": "Plafond plancher, en fraction du PASS de référence, applicable même sans revenu professionnel N-1."
+            },
+            "tns_base_rate": { "$ref": "#/$defs/rate" },
+            "tns_upper_band_rate": {
+              "$ref": "#/$defs/rate",
+              "description": "Taux additionnel sur la fraction de l'assiette comprise entre 1 et tns_pass_multiplier_cap fois le PASS de référence."
+            },
+            "tns_pass_multiplier_cap": { "type": "number", "minimum": 0 },
+            "carry_forward_years": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Nombre d'années sur lesquelles un plafond non consommé peut être reporté."
+            },
+            "pass_reference_year": { "type": "integer" },
+            "pass_reference_value": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Valeur du PASS de l'année de référence, en euros. Change chaque année : ne pas figer dans le moteur."
+            }
+          }
+        },
         "eligible_assets": {
           "type": "array",
           "items": { "type": "string" },

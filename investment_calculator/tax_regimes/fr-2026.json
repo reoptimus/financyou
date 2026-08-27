@@ -24,19 +24,61 @@
     {
       "label": "À COMPLÉTER — BOFiP, référence par article pour chaque enveloppe",
       "covers": ["wrappers", "capital_gains", "wealth_tax"]
+    },
+    {
+      "label": "BOFiP BOI-IR-LIQ-20-20-20 — Plafonnement des effets du quotient familial (cas général)",
+      "url": "https://bofip.impots.gouv.fr/bofip/2494-PGP.html/identifiant=BOI-IR-LIQ-20-20-20-20260407",
+      "consulted_on": "2026-08-27",
+      "covers": ["income_tax.household_quotient.cap_per_half_share"]
+    },
+    {
+      "label": "LégiFiscal — IR 2026 : quotient familial et plafonnement",
+      "url": "https://www.legifiscal.fr/actualites-fiscales/4474-ir-bareme-2026-quotient-familial-decote.html",
+      "consulted_on": "2026-08-27",
+      "covers": ["income_tax.household_quotient.cap_per_half_share"]
+    },
+    {
+      "label": "Légifrance — Code général des impôts, article 223 sexies (CEHR)",
+      "url": "https://www.legifrance.gouv.fr/codes/id/LEGISCTA000025049019",
+      "consulted_on": "2026-08-27",
+      "covers": ["income_tax.surtaxes"]
+    },
+    {
+      "label": "BOFiP BOI-IR-BASE-20-50-20 — Plafond de déduction des versements sur un PER (salariés)",
+      "url": "https://bofip.impots.gouv.fr/bofip/1124-PGP.html/identifiant=BOI-IR-BASE-20-50-20-20260217",
+      "consulted_on": "2026-08-27",
+      "covers": ["wrappers[per].contribution_deduction_formula"]
+    },
+    {
+      "label": "Arrêté du 19 décembre 2024 fixant le plafond de la sécurité sociale (PASS) pour 2025",
+      "url": "https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000050854392",
+      "consulted_on": "2026-08-27",
+      "covers": ["wrappers[per].contribution_deduction_formula.pass_reference_value"]
+    },
+    {
+      "label": "BOFiP BOI-RFPI-DECLA-10 — Régime micro-foncier : seuil et abattement",
+      "url": "https://bofip.impots.gouv.fr/bofip/3973-PGP.html/identifiant=BOI-RFPI-DECLA-10-20250306",
+      "consulted_on": "2026-08-27",
+      "covers": ["rental_income_regimes.micro_foncier"]
+    },
+    {
+      "label": "BOFiP BOI-RFPI-BASE-30-20 — Plafond d'imputation du déficit foncier sur le revenu global",
+      "url": "https://bofip.impots.gouv.fr/bofip/4142-PGP.html/identifiant=BOI-RFPI-BASE-30-20-20250916",
+      "consulted_on": "2026-08-27",
+      "covers": ["rental_income_regimes.real_regime"]
     }
   ],
 
   "known_gaps": [
-    "STATUT BROUILLON : aucune valeur de ce fichier n'a encore été confrontée à un cas d'or. Ne pas utiliser en production (le chargeur le refuse par défaut).",
-    "Plafond du quotient familial par demi-part non renseigné : à établir en 1.A.",
-    "Contribution exceptionnelle sur les hauts revenus et contribution différentielle non modélisées.",
-    "PER : le plafond de déduction dépend des revenus professionnels de l'année précédente, il n'est pas modélisable par une constante.",
-    "Assurance-vie : le seuil de 150 000 € porte sur les primes versées nettes de rachats, notion non encore représentée dans le moteur.",
+    "STATUT BROUILLON : les valeurs de ce fichier ont été rédigées par un agent et n'ont pas encore été confrontées à des cas d'or par un humain. Ne pas utiliser en production (le chargeur le refuse par défaut).",
+    "Plafonnement du quotient familial : seul le cas général (CGI art. 197 I-2°) est modélisé (household_quotient.cap_per_half_share, TaxRegime.income_tax_due). Les plafonds et réductions complémentaires des cas particuliers (parent isolé, veuf avec enfant à charge, garde alternée au quart de part, invalides ou anciens combattants) ne le sont pas.",
+    "Contribution différentielle sur les hauts revenus (CDHR, art. 224 CGI) : son existence et ses paramètres pour les revenus 2025 n'ont pas pu être confirmés auprès d'une source primaire consultée directement — voir docs/validation/1a-cas-d-or.md. Elle n'est donc pas modélisée, à la différence de la CEHR (art. 223 sexies, income_tax.surtaxes) qui l'est.",
+    "PER : le plafond de déduction dépend des revenus professionnels de l'année précédente et n'est pas modélisable par une constante ; une formule est proposée (wrappers[per].contribution_deduction_formula), mais les paramètres propres aux travailleurs non salariés (tns_base_rate, tns_upper_band_rate, année de référence du PASS retenue) n'ont pas pu être confirmés sur le texte BOFiP intégral — confiance faible sur ce point précis, voir le rapport de validation.",
+    "Assurance-vie : le seuil de 150 000 € porte sur les primes versées nettes des rachats déjà effectués, calculées proportionnellement (BOI-RPPM-RCM-20-15). Ce suivi dans le temps ne peut pas être porté par un régime fiscal sans état ; il relève du moteur de simulation (étape 1.B).",
     "PEA-PME et PEA jeunes non modélisés.",
-    "Revenus fonciers : régimes micro-foncier et réel, déficit foncier, dispositifs de défiscalisation immobilière non modélisés.",
+    "Revenus fonciers : rental_income_regimes porte les paramètres du micro-foncier et du régime réel, mais aucune méthode du moteur ne les consomme encore — la catégorie « revenu locatif récurrent » n'est pas intégrée au calcul. Le déficit foncier et les dispositifs de défiscalisation immobilière ne sont pas modélisés au-delà des plafonds portés ici.",
     "Prélèvement forfaitaire non libératoire acompte et sa régularisation non modélisés (sans effet sur un résultat annuel, mais sur la trésorerie oui).",
-    "Barème de l'IFI à vérifier pour le millésime 2026."
+    "Barème de l'IFI à vérifier pour le millésime 2026 (non revu dans cette itération)."
   ],
 
   "social_contributions": {
@@ -63,8 +105,19 @@
       "shares_first_adult": 1.0,
       "shares_second_adult": 1.0,
       "shares_per_dependent": [0.5, 0.5, 1.0],
-      "cap_per_half_share": null
-    }
+      "cap_per_half_share": 1807
+    },
+    "surtaxes": [
+      {
+        "label": "Contribution exceptionnelle sur les hauts revenus (CEHR)",
+        "brackets": [
+          { "lower": 0, "upper": 250000, "rate": 0.0 },
+          { "lower": 250000, "upper": 500000, "rate": 0.03 },
+          { "lower": 500000, "upper": null, "rate": 0.04 }
+        ],
+        "threshold_multiplier_married": 2.0
+      }
+    ]
   },
 
   "flat_tax": {
@@ -173,6 +226,18 @@
       "contribution_limit": null,
       "contribution_deductible": true,
       "contribution_deduction_cap": null,
+      "contribution_deduction_formula": {
+        "basis": "prior_year_net_professional_income",
+        "employee_rate": 0.10,
+        "employee_pass_multiplier_cap": 8,
+        "employee_floor_rate_of_pass": 0.10,
+        "tns_base_rate": 0.10,
+        "tns_upper_band_rate": 0.15,
+        "tns_pass_multiplier_cap": 8,
+        "carry_forward_years": 3,
+        "pass_reference_year": 2025,
+        "pass_reference_value": 47100
+      },
       "eligible_assets": ["equity", "bond", "fund", "etf", "euro_fund"],
       "growth_taxed_annually": false,
       "withdrawal_rules": [
@@ -277,5 +342,19 @@
       { "lower": 10000000, "upper": null, "rate": 0.015 }
     ],
     "primary_residence_allowance": 0.30
+  },
+
+  "rental_income_regimes": {
+    "micro_foncier": {
+      "revenue_threshold": 15000,
+      "allowance_rate": 0.30,
+      "threshold_basis": "household"
+    },
+    "real_regime": {
+      "deficit_cap_against_global_income": 10700,
+      "deficit_cap_energy_renovation": 21400,
+      "deficit_carry_forward_years": 10,
+      "option_commitment_years": 3
+    }
   }
 }
