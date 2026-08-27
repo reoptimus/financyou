@@ -493,8 +493,18 @@ class ScenarioGenerator:
 
         # Calculate diagnostics
         diagnostics = self._calculate_diagnostics(scenarios_df, method='stochastic')
+
+        # Indices de rendement total (dividendes/loyers réinvestis), normalisés
+        # à 1 en t=0, mêmes conventions d'indexation que les déflateurs : voir
+        # _test_martingale pour la justification de ce qui est comparé à quoi.
+        equity_index = np.exp(np.cumsum(equity_results['total_returns'], axis=1))
+        real_estate_index = np.exp(np.cumsum(re_results['total_returns'], axis=1))
+
         diagnostics['martingale_test'] = self._test_martingale(
-            hw_results['deflators'], hw_results['Rt'], dt
+            hw_results['deflators'],
+            P0t,
+            equity_index=equity_index,
+            real_estate_index=real_estate_index,
         )
 
         # Metadata
@@ -584,43 +594,88 @@ class ScenarioGenerator:
             'method': method
         }
 
-    def _test_martingale(self, deflators: np.ndarray, rates: np.ndarray, dt: float) -> dict:
+    def _test_martingale(
+        self,
+        deflators: np.ndarray,
+        P0t: np.ndarray,
+        equity_index: np.ndarray | None = None,
+        real_estate_index: np.ndarray | None = None,
+        tolerance: float = 0.01,
+    ) -> dict:
         """
-        Test martingale property of deflated assets.
+        Test the martingale property of deflated assets under the risk-neutral measure.
 
-        For risk-neutral pricing, deflated asset prices should be martingales.
+        Le déflateur D(t) = exp(-∫₀ᵗ r(s)ds) n'est pas un actif : c'est le prix
+        d'une obligation zéro-coupon virtuelle de maturité t. Son espérance sous
+        la mesure risque-neutre vaut donc P(0,t), le prix de marché de cette
+        obligation aujourd'hui — **pas 1**, sauf trivialement à t=0. C'est la
+        définition même du pricing risque-neutre : P(0,t) = E^Q[D(t)]. Comparer
+        E[D(t)] à 1 pour tout t>0 fait donc échouer le test dès que la courbe des
+        taux est positive, quelle que soit la qualité du modèle : ce n'est pas un
+        test de martingalité, c'est un test structurellement faux au-delà de t=0
+        (voir docs/validation/1b-hypotheses-monde-reel.md pour le détail).
+
+        Pour un actif risqué (action, immobilier), la propriété testée est
+        différente : c'est D(t)*Actif(t) qui doit être martingale, donc son
+        espérance doit rester égale à Actif(0) (normalisé à 1 ici) pour tout t —
+        pas à P(0,t), qui n'a rien à voir avec un actif risqué.
 
         Args:
-            deflators: Deflator array (n_scenarios, n_steps)
-            rates: Forward rate array (n_scenarios, n_steps)
-            dt: Time step
+            deflators: D(t), (n_scenarios, n_steps). La colonne i vaut D(i*dt) ;
+                en particulier deflators[:, 0] == 1 pour tout scénario (D(0)=1).
+            P0t: prix zéro-coupon P(0,t), même convention d'indexation que
+                deflators (P0t[i] == P(0, i*dt)) — typiquement
+                EIOPACalibrator.get_bond_prices(), sourcé de la même courbe que
+                celle utilisée pour calibrer le modèle de taux.
+            equity_index: indice de rendement total actions (dividendes
+                réinvestis), normalisé à 1 en t=0, même convention
+                d'indexation. Optionnel : composant ignoré si absent.
+            real_estate_index: idem pour l'immobilier (loyers réinvestis).
+            tolerance: écart relatif maximal toléré, par composant.
 
         Returns:
-            Dictionary with martingale test results
+            Un sous-résultat par composant testé (« rates », et « equity » /
+            « real_estate » si les index correspondants sont fournis), plus un
+            indicateur global ``passes``.
         """
         n_scenarios, n_steps = deflators.shape
+        p0t = np.asarray(P0t, dtype=float)[:n_steps]
 
-        # Test: E[D(t)] should equal 1.0 for all t under risk-neutral measure
-        # In practice, we test E[D(t) * exp(integral r(s)ds)] = 1
+        result: dict = {
+            'rates': self._martingale_deviation(deflators.mean(axis=0), p0t)
+        }
 
-        mean_deflator = deflators.mean(axis=0)
-        expected_value = 1.0  # Should be 1.0 theoretically
+        if equity_index is not None:
+            deflated_equity = (deflators * equity_index).mean(axis=0)
+            target = np.full(n_steps, float(equity_index[:, 0].mean()))
+            result['equity'] = self._martingale_deviation(deflated_equity, target)
 
-        # Calculate deviation from martingale property
-        deviations = np.abs(mean_deflator - expected_value)
-        max_deviation = float(deviations.max())
-        mean_deviation = float(deviations.mean())
+        if real_estate_index is not None:
+            deflated_re = (deflators * real_estate_index).mean(axis=0)
+            target = np.full(n_steps, float(real_estate_index[:, 0].mean()))
+            result['real_estate'] = self._martingale_deviation(deflated_re, target)
 
-        # Check if martingale property holds (within tolerance)
-        tolerance = 0.05
-        passes_test = max_deviation < tolerance
+        for component in result.values():
+            component['tolerance'] = tolerance
+            component['passes'] = component['max_relative_deviation'] < tolerance
 
+        result['tolerance'] = tolerance
+        result['passes'] = all(
+            component['passes'] for component in result.values() if isinstance(component, dict)
+        )
+        return result
+
+    @staticmethod
+    def _martingale_deviation(mean_process: np.ndarray, target: np.ndarray) -> dict:
+        """Écart entre un processus déflaté moyen et sa cible théorique, terme à terme."""
+        absolute = np.abs(mean_process - target)
+        relative = absolute / np.abs(target)
         return {
-            'passes': passes_test,
-            'max_deviation': max_deviation,
-            'mean_deviation': mean_deviation,
-            'tolerance': tolerance,
-            'mean_final_deflator': float(mean_deflator[-1])
+            'max_absolute_deviation': float(absolute.max()),
+            'max_relative_deviation': float(relative.max()),
+            'mean_relative_deviation': float(relative.mean()),
+            'final_value': float(mean_process[-1]),
+            'final_target': float(target[-1]),
         }
 
 

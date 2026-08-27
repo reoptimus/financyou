@@ -350,8 +350,8 @@ class TestStochasticScenarioGeneration:
         for col in required_cols:
             assert col in scenarios_df.columns
 
-    def test_stochastic_martingale_test(self):
-        """Test martingale property testing."""
+    def test_stochastic_martingale_test_structure(self):
+        """La sortie du test de martingalité porte un sous-résultat par composant."""
         gen = scenario_generator.ScenarioGenerator(random_seed=42)
         config = {
             'num_scenarios': 100,
@@ -364,10 +364,12 @@ class TestStochasticScenarioGeneration:
             results = gen.generate(config)
             diagnostics = results['diagnostics']
 
-            # Martingale test should be present for stochastic scenarios
-            assert 'martingale_test' in diagnostics
-            assert 'passes' in diagnostics['martingale_test']
-            assert 'max_deviation' in diagnostics['martingale_test']
+            mt = diagnostics['martingale_test']
+            assert 'passes' in mt
+            for component in ('rates', 'equity', 'real_estate'):
+                assert component in mt
+                assert 'max_relative_deviation' in mt[component]
+                assert 'passes' in mt[component]
         except ValueError as e:
             # Known issue with stochastic model dimension mismatch in edge cases
             # This is a real bug in the stochastic models that needs fixing
@@ -375,6 +377,102 @@ class TestStochasticScenarioGeneration:
                 pytest.skip(f"Skipping due to known stochastic model bug: {e}")
             else:
                 raise
+
+    def test_martingale_rates_sous_demi_pourcent_a_30_ans(self):
+        """
+        Régression du bug corrigé à l'étape 1.B.1 : le test de martingalité
+        comparait E[D(t)] à 1,0 pour tout t. C'est faux — la valeur théorique
+        est P(0,t), le prix zéro-coupon, qui décroît avec t. Comparer à 1
+        faisait donc échouer le test par construction dès que t>0 et le taux
+        est positif, quel que soit le modèle sous-jacent.
+
+        Objectif explicite de l'étape 1.B.1 : une fois comparé à P(0,t), l'écart
+        doit rester sous 0,5 % à 30 ans. Vérifié stable sur 5 graines
+        différentes avant d'écrire ce test (0,23 % à 0,40 %) ; 10 000
+        scénarios et un pas semestriel de 0,25 an suffisent, sans avoir besoin
+        d'un Monte-Carlo massif.
+        """
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 10_000,
+            'time_horizon': 30,
+            'timestep': 0.25,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+
+        results = gen.generate(config)
+        rates = results['diagnostics']['martingale_test']['rates']
+
+        assert rates['max_relative_deviation'] < 0.005, (
+            f"E[D(t)] s'écarte de P(0,t) de {rates['max_relative_deviation']:.4%} "
+            f"au pire point de la courbe : au-delà de l'objectif de 0,5 % à 30 ans."
+        )
+
+    @pytest.mark.xfail(
+        reason=(
+            "black_scholes.py utilise un drift risque-neutre r(t)+sigma^2/2 pour "
+            "l'indice actions total-return, au lieu de r(t)-sigma^2/2 : l'indice "
+            "déflaté D(t)*Index(t) n'est donc pas martingale (~18 % d'écart à 30 "
+            "ans). Corrigé à l'étape 1.B.3 (séparation risque-neutre / monde "
+            "réel) — voir docs/validation/1b-hypotheses-monde-reel.md."
+        ),
+        strict=False,
+    )
+    def test_martingale_equity_est_risque_neutre(self):
+        """L'indice actions déflaté doit rester égal à 1 en espérance (martingale)."""
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 10_000,
+            'time_horizon': 30,
+            'timestep': 0.25,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+
+        results = gen.generate(config)
+        equity = results['diagnostics']['martingale_test']['equity']
+
+        assert equity['max_relative_deviation'] < 0.005, (
+            f"D(t)*Index_actions(t) s'écarte de 1 de {equity['max_relative_deviation']:.4%} "
+            f"au pire point : l'indice actions n'est pas risque-neutre."
+        )
+
+    @pytest.mark.xfail(
+        reason=(
+            "Bug structurel découvert à l'étape 1.B.1, distinct du bug actions : "
+            "RealEstateModel._generate_auxiliary_rates utilise la volatilité "
+            "IMMOBILIÈRE (12 %) comme si c'était une volatilité de taux court "
+            "Hull-White (typiquement 1 %). Le processus auxiliaire explose "
+            "(valeurs observées jusqu'à ±108 % sur un horizon de 30 ans), et "
+            "l'indice immobilier déflaté diverge de plusieurs ordres de "
+            "grandeur (jusqu'à 1e18 sur certains tirages). Ce n'est pas une "
+            "simple question de prime de risque manquante (contrairement aux "
+            "actions) : c'est une instabilité numérique du modèle lui-même, "
+            "qui dépasse le périmètre de l'étape 1.B.3 et mérite un suivi "
+            "dédié — voir docs/journal-1b-calibration.md."
+        ),
+        strict=False,
+    )
+    def test_martingale_immobilier_est_risque_neutre(self):
+        """L'indice immobilier déflaté doit rester égal à 1 en espérance (martingale)."""
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 10_000,
+            'time_horizon': 30,
+            'timestep': 0.25,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+
+        results = gen.generate(config)
+        real_estate = results['diagnostics']['martingale_test']['real_estate']
+
+        assert real_estate['max_relative_deviation'] < 0.005, (
+            f"D(t)*Index_immo(t) s'écarte de 1 de "
+            f"{real_estate['max_relative_deviation']:.4%} au pire point : "
+            f"l'indice immobilier n'est pas risque-neutre."
+        )
 
     def test_stochastic_different_currency(self):
         """Test stochastic generation with different currencies."""
