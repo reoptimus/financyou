@@ -204,7 +204,28 @@ l'utilisateur` (bloque une décision produit ou de confiance, pas technique),
   fichier neuf sourcé — pas des anciens fichiers retirés (consultables
   dans l'historique git si besoin de référence structurelle).
 
+## 14. Hypothèses de marché non sourcées (`market_assumptions/default-2026.json`)
+
+- **Ouvert le** : 2026-08-27 (étape 1.A.6)
+- **Statut** : ouvert
+- **Contexte** : l'étape 1.A.6 a déplacé le rendement du dividende (2 %),
+  la répartition loyer/appréciation (40/60), la part de plus-value réalisée
+  annuellement (20 %) et le revenu de référence pour approximer le barème
+  progressif (50 000 €) hors du moteur fiscal, dans un document versionné
+  et validé par schéma — mais **sans les sourcer**. Ce sont exactement les
+  mêmes valeurs qu'avant, juste déplacées ; le document porte `status:
+  "draft"` et un `known_gap` qui le dit explicitement, sur le même principe
+  que `_legacy_presets.json` en son temps.
+- **À reprendre** : sourcer ces hypothèses (rendement de dividende observé
+  sur un indice de référence, répartition loyer/appréciation observée sur
+  le marché immobilier français, comportement réel de réalisation des
+  plus-values) avant de les présenter comme autre chose qu'un ordre de
+  grandeur illustratif. Voir aussi le point 1 (prélèvements sociaux) : ces
+  hypothèses interagissent avec le taux social appliqué, donc les deux
+  méritent d'être repris ensemble.
+
 ---
 
-*Dernière mise à jour : 2026-08-27, avant l'étape 1.A.6 (sortie des
-hypothèses de marché du moteur fiscal).*
+*Dernière mise à jour : 2026-08-27, après l'étape 1.A.6 (sortie des
+hypothèses de marché du moteur fiscal). Prochaine étape à discuter avec
+l'utilisateur.*
