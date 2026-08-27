@@ -1,0 +1,73 @@
+"""
+Hypothèses de marché et de comportement — chargement et validation.
+
+Étape 1.A.6 : ces valeurs (rendement du dividende, répartition
+loyer/appréciation, part de plus-value réalisée annuellement, revenu de
+référence pour approximer un barème progressif) vivaient auparavant en dur
+dans investment_calculator/modules/tax_engine.py — voir
+tests/test_tax_regime_contract.py::LITTERAUX_TOLERES pour l'historique.
+
+Elles ne sont PAS de la fiscalité (voir
+docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md) et ne sont pas
+davantage vérifiées que ne l'étaient les littéraux dont elles proviennent :
+le statut ``draft`` et les ``known_gaps`` du document le disent
+explicitement.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from investment_calculator.market_assumptions import (
+    PACKAGE_ASSUMPTIONS_DIR,
+    SCHEMA_PATH,
+    MarketAssumptionsNotFoundError,
+    MarketAssumptionsValidationError,
+    load_market_assumptions,
+)
+
+
+def test_le_schema_est_un_json_schema_valide():
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.Draft202012Validator.check_schema(schema)
+
+
+def test_le_jeu_par_defaut_se_charge():
+    assumptions = load_market_assumptions()
+    assert assumptions.id == "default-2026"
+    assert assumptions.status == "draft"
+
+
+def test_un_identifiant_inconnu_leve_une_erreur_explicite():
+    with pytest.raises(MarketAssumptionsNotFoundError) as excinfo:
+        load_market_assumptions("inexistant-2099")
+    assert "Disponibles" in str(excinfo.value)
+
+
+def test_les_parts_immobilieres_somment_a_un():
+    """
+    Contrôle sémantique que le schéma JSON seul ne peut pas exprimer :
+    rental_income_share + appreciation_share doit valoir 1, sans quoi le
+    moteur sous- ou sur-compte le rendement immobilier total.
+    """
+    path = PACKAGE_ASSUMPTIONS_DIR / "default-2026.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    # Ne somme plus à 1 avec rental_income_share=0.4.
+    document["real_estate"]["appreciation_share"] = 0.9
+    document.pop("$schema", None)
+
+    from investment_calculator.market_assumptions import _validate
+
+    with pytest.raises(MarketAssumptionsValidationError, match="doit valoir 1"):
+        _validate(document, path)
+
+
+def test_les_valeurs_exposees_correspondent_au_document():
+    assumptions = load_market_assumptions()
+    assert 0.0 <= assumptions.dividend_yield <= 1.0
+    assert assumptions.rental_income_share + assumptions.appreciation_share == pytest.approx(1.0)
+    assert 0.0 <= assumptions.annual_realized_fraction <= 1.0
+    assert assumptions.reference_household_income > 0

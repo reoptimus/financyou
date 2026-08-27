@@ -640,7 +640,7 @@ class MOCA:
 
         # Probability of loss
         initial_contributions = results[0].total_contributions
-        prob_loss = np.sum(final_balances < initial_contributions) / len(final_balances)
+        prob_loss = float(np.sum(final_balances < initial_contributions) / len(final_balances))
 
         # Probability of reaching target
         if target_balance is not None:

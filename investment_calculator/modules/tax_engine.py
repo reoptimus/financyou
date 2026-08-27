@@ -68,18 +68,17 @@ OUTPUT STRUCTURE:
 }
 """
 
-import copy
-import json
 import logging
 import time
-import warnings
-from dataclasses import dataclass
 from enum import Enum
-from functools import lru_cache
-from pathlib import Path
-from typing import Any, ClassVar
 
 import pandas as pd
+
+from investment_calculator.market_assumptions import (
+    MarketAssumptions,
+    load_market_assumptions,
+)
+from investment_calculator.tax_regime import load_regime
 
 # Journalisation : logger nommé d'après le module, il hérite donc de la
 # configuration posée par investment_calculator.logging_config.configure_logging().
@@ -93,96 +92,18 @@ class AccountType(Enum):
     TAX_FREE = "tax_free"
 
 
-class TaxJurisdiction(Enum):
-    """Supported tax jurisdictions"""
-    US = "US"
-    FR = "FR"
-    UK = "UK"
-    DE = "DE"
-    CA = "CA"
-
-
-@dataclass
-class TaxConfigPreset:
+def _default_tax_config() -> dict:
     """
-    Accès aux anciennes configurations fiscales par juridiction.
+    Configuration fiscale par défaut : le régime français le plus récent disponible.
 
-    .. deprecated::
-        Cette classe ne survit que le temps de la transition. Les valeurs
-        qu'elle sert proviennent désormais de
-        ``investment_calculator/tax_regimes/_legacy_presets.json``, un fichier
-        gelé qui reproduit à l'identique le dictionnaire autrefois codé en dur
-        ici — erreurs comprises, notamment le double comptage du prélèvement
-        forfaitaire et des prélèvements sociaux en France.
-
-        Le contrat cible est :mod:`investment_calculator.tax_regime` : la
-        fiscalité est une donnée d'entrée, décrite par pays et par millésime
-        dans ``tax_regimes/*.json`` et validée par ``tax_regimes/schema.json``.
-        Voir ``docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md``.
-
-        Cette classe et son fichier de données disparaissent à la fin de
-        l'étape 1.A, lorsque le moteur consommera directement les régimes.
+    La France est aujourd'hui le seul pays dont le régime a été confronté à
+    des cas d'or — voir ``investment_calculator/tax_regimes/README.md``. Un
+    autre pays devient disponible en y déposant un régime, pas en modifiant
+    cette fonction.
     """
-
-    #: Emplacement des valeurs héritées, gelées hors du code.
-    LEGACY_DATA_PATH: ClassVar[Path] = (
-        Path(__file__).resolve().parent.parent / "tax_regimes" / "_legacy_presets.json"
-    )
-
-    @staticmethod
-    @lru_cache(maxsize=1)
-    def _load_legacy_presets() -> dict[str, dict[str, Any]]:
-        """Lire une fois pour toutes le fichier de valeurs héritées."""
-        path = TaxConfigPreset.LEGACY_DATA_PATH
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except OSError as exc:
-            raise FileNotFoundError(
-                f"Fichier de configurations fiscales héritées introuvable : {path}. "
-                f"Il fait partie des données du paquet et doit être installé avec lui."
-            ) from exc
-
-        # `json.loads` renvoie Any : on annote la variable intermédiaire pour que
-        # le type de retour soit vérifié plutôt que propagé en Any.
-        presets: dict[str, dict[str, Any]] = raw["presets"]
-        # L'infini n'est pas représentable en JSON strict : il est stocké à null
-        # et restauré ici, pour que le comportement reste celui de l'ancien code.
-        for preset in presets.values():
-            tax_free = preset.get("account_types", {}).get("tax_free", {})
-            if tax_free.get("contribution_limit", 0) is None:
-                tax_free["contribution_limit"] = float("inf")
-        return presets
-
-    @staticmethod
-    def get_preset(jurisdiction: str) -> dict:
-        """
-        Configuration fiscale héritée pour une juridiction.
-
-        .. deprecated::
-            Utilisez :func:`investment_calculator.tax_regime.load_regime`.
-
-        Args:
-            jurisdiction: code pays, par exemple ``"FR"``.
-
-        Returns:
-            Le dictionnaire de configuration, dans sa forme historique.
-
-        Raises:
-            ValueError: la juridiction n'a pas de configuration héritée.
-        """
-        warnings.warn(
-            "TaxConfigPreset.get_preset est obsolète : la fiscalité est une donnée "
-            "d'entrée du modèle. Utilisez investment_calculator.tax_regime.load_regime, "
-            "qui charge un régime validé par pays et par millésime.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        presets = TaxConfigPreset._load_legacy_presets()
-        if jurisdiction not in presets:
-            raise ValueError(
-                f"Unknown jurisdiction: {jurisdiction}. Supported: {list(presets.keys())}"
-            )
-        return copy.deepcopy(presets[jurisdiction])
+    regime = load_regime("FR")
+    reference_income = load_market_assumptions().reference_household_income
+    return regime.to_scenario_tax_config(reference_household_income=reference_income)
 
 
 class TaxEngine:
@@ -198,7 +119,8 @@ class TaxEngine:
         >>> scenarios = gen.generate({'num_scenarios': 100, 'time_horizon': 30, 'timestep': 1.0})
         >>> # Apply taxes
         >>> tax_eng = tax_engine.TaxEngine()
-        >>> tax_config = tax_engine.TaxConfigPreset.get_preset('US')
+        >>> from investment_calculator.tax_regime import load_regime
+        >>> tax_config = load_regime('FR').to_scenario_tax_config(reference_household_income=50_000)
         >>> allocation = {'stocks': {'taxable': 0.6, 'tax_deferred': 0.3, 'tax_free': 0.1}}
         >>> results = tax_eng.apply_taxes({
         ...     'scenarios': scenarios['scenarios'],
@@ -209,7 +131,6 @@ class TaxEngine:
 
     def __init__(self) -> None:
         """Initialize the Tax Engine."""
-        pass
 
     def apply_taxes(self, config: dict) -> dict:
         """
@@ -237,8 +158,9 @@ class TaxEngine:
         )
 
         # Calculate after-tax returns for each account type
+        market_assumptions = load_market_assumptions()
         after_tax_scenarios = self._calculate_after_tax_scenarios(
-            scenarios_df, tax_config, allocation
+            scenarios_df, tax_config, allocation, market_assumptions
         )
 
         # Calculate tax tables
@@ -283,8 +205,7 @@ class TaxEngine:
             raise ValueError("Missing required field: scenarios")
 
         if 'tax_config' not in config:
-            # Use default US configuration
-            config['tax_config'] = TaxConfigPreset.get_preset('US')
+            config['tax_config'] = _default_tax_config()
 
         if 'investment_allocation' not in config:
             # Default: all in taxable account
@@ -300,7 +221,8 @@ class TaxEngine:
         self,
         scenarios_df: pd.DataFrame,
         tax_config: dict,
-        allocation: dict
+        allocation: dict,
+        market_assumptions: MarketAssumptions,
     ) -> pd.DataFrame:
         """
         Calculate after-tax returns for all scenarios.
@@ -309,6 +231,11 @@ class TaxEngine:
             scenarios_df: Economic scenarios from Module 1
             tax_config: Tax configuration
             allocation: Asset allocation across account types
+            market_assumptions: hypothèses de marché et de comportement
+                (rendement du dividende, répartition loyer/appréciation,
+                fraction de plus-value réalisée annuellement) — voir
+                investment_calculator.market_assumptions. Ce ne sont pas des
+                paramètres fiscaux.
 
         Returns:
             DataFrame with after-tax return columns added
@@ -328,7 +255,7 @@ class TaxEngine:
         )
 
         # Taxable: dividends taxed annually, capital gains deferred
-        dividend_yield = 0.02
+        dividend_yield = market_assumptions.dividend_yield
         dividend_tax = taxable_config['dividend_tax_rate'] + social_charges
         stock_taxable_drag = dividend_yield * dividend_tax
 
@@ -366,11 +293,13 @@ class TaxEngine:
             'real_estate', {'taxable': 1.0, 'tax_deferred': 0.0, 'tax_free': 0.0}
         )
 
-        # Taxable: rental income (40%) + appreciation (60%)
-        rental_portion = 0.4
-        appreciation_portion = 0.6
+        # Taxable: rental income + appreciation, split per market_assumptions
+        rental_portion = market_assumptions.rental_income_share
+        appreciation_portion = market_assumptions.appreciation_share
         rental_tax = taxable_config['income_tax_rate'] + social_charges
-        appreciation_tax = taxable_config['capital_gains_rate'] * 0.2  # Only 20% realized annually
+        appreciation_tax = (
+            taxable_config['capital_gains_rate'] * market_assumptions.annual_realized_fraction
+        )
 
         re_taxable_drag = (
             rental_portion * rental_tax +
@@ -589,16 +518,23 @@ class TaxEngine:
 # Convenience functions
 def apply_taxes_simple(
     scenarios_df: pd.DataFrame,
-    jurisdiction: str = 'US',
-    allocation: dict | None = None
+    jurisdiction: str = 'FR',
+    allocation: dict | None = None,
+    reference_household_income: float | None = None,
 ) -> dict:
     """
     Apply taxes with simple configuration.
 
     Args:
         scenarios_df: Scenarios DataFrame from Module 1
-        jurisdiction: Tax jurisdiction ('US', 'FR', 'UK', etc.)
+        jurisdiction: Tax jurisdiction — see
+            investment_calculator.tax_regime.list_regimes for what is
+            actually available. Only 'FR' is validated today.
         allocation: Asset allocation (optional)
+        reference_household_income: revenu de foyer utilisé pour réduire le
+            barème progressif à un taux moyen — voir
+            TaxRegime.to_scenario_tax_config. Par défaut, celui des
+            hypothèses de marché (investment_calculator.market_assumptions).
 
     Returns:
         Tax results dictionary
@@ -606,7 +542,13 @@ def apply_taxes_simple(
     Example:
         >>> results = apply_taxes_simple(scenarios_df, jurisdiction='FR')
     """
-    tax_config = TaxConfigPreset.get_preset(jurisdiction)
+    if reference_household_income is None:
+        reference_household_income = load_market_assumptions().reference_household_income
+
+    regime = load_regime(jurisdiction)
+    tax_config = regime.to_scenario_tax_config(
+        reference_household_income=reference_household_income
+    )
 
     if allocation is None:
         allocation = {

@@ -27,7 +27,7 @@ Exemple
 -------
 >>> from investment_calculator.tax_regime import list_regimes
 >>> sorted(r.id for r in list_regimes())
-['fr-2026', 'uk-2026', 'us-2026']
+['fr-2026']
 """
 
 from __future__ import annotations
@@ -43,19 +43,19 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "TaxRegime",
-    "RegimeDescriptor",
-    "TaxRegimeError",
-    "RegimeNotFoundError",
-    "RegimeValidationError",
-    "DraftRegimeError",
-    "load_regime",
-    "list_regimes",
-    "search_paths",
-    "apply_brackets",
+    "ENV_REGIME_PATH",
     "PACKAGE_REGIME_DIR",
     "SCHEMA_PATH",
-    "ENV_REGIME_PATH",
+    "DraftRegimeError",
+    "RegimeDescriptor",
+    "RegimeNotFoundError",
+    "RegimeValidationError",
+    "TaxRegime",
+    "TaxRegimeError",
+    "apply_brackets",
+    "list_regimes",
+    "load_regime",
+    "search_paths",
 ]
 
 
@@ -429,14 +429,26 @@ class TaxRegime:
             )
         return float(flat.get("income_tax_rate", 0.0)) + float(flat.get("social_rate", 0.0))
 
-    def income_tax_due(self, taxable_income: float, *, shares: float = 1.0) -> float:
+    def income_tax_due(
+        self, taxable_income: float, *, shares: float = 1.0, dependent_shares: float = 0.0
+    ) -> float:
         """
         Impôt sur le revenu dû pour un revenu imposable donné.
 
-        ``shares`` est le nombre de parts du foyer lorsque le régime pratique le
-        quotient familial ; il est ignoré sinon. Le plafonnement de l'avantage
-        par demi-part n'est pas appliqué ici : il sera introduit avec les cas
-        d'or de l'étape 1.A.
+        ``shares`` est le nombre de parts total du foyer lorsque le régime
+        pratique le quotient familial ; il est ignoré sinon. ``dependent_shares``
+        est la fraction de ``shares`` attribuable aux personnes à charge
+        (enfants), par opposition aux parts de base du foyer (1 pour un
+        célibataire, 2 pour un couple) : elle sert à appliquer le
+        plafonnement général de l'avantage du quotient familial
+        (``household_quotient.cap_per_half_share``), quand le régime en
+        prévoit un.
+
+        Ne modélise que le cas général du plafonnement (CGI art. 197 I-2°).
+        Les cas particuliers (parent isolé, veuf avec enfant à charge, garde
+        alternée au quart de part, invalides) portent des plafonds ou des
+        réductions complémentaires distincts, non modélisés ici — voir les
+        ``known_gaps`` du régime.
         """
         income_tax = self.document["income_tax"]
         mode = income_tax["mode"]
@@ -450,7 +462,58 @@ class TaxRegime:
         if effective_shares <= 0:
             raise ValueError("Le nombre de parts doit être strictement positif.")
         per_share = taxable_income / effective_shares
-        return apply_brackets(per_share, income_tax["brackets"]) * effective_shares
+        tax_with_full_quotient = (
+            apply_brackets(per_share, income_tax["brackets"]) * effective_shares
+        )
+
+        cap = quotient.get("cap_per_half_share")
+        if not quotient.get("enabled") or not cap or dependent_shares <= 0:
+            return tax_with_full_quotient
+
+        base_shares = effective_shares - dependent_shares
+        if base_shares <= 0:
+            raise ValueError(
+                "dependent_shares ne peut pas atteindre ni dépasser le nombre total de parts."
+            )
+        per_base_share = taxable_income / base_shares
+        tax_at_base_shares = apply_brackets(per_base_share, income_tax["brackets"]) * base_shares
+
+        advantage = tax_at_base_shares - tax_with_full_quotient
+        if advantage <= 0:
+            return tax_with_full_quotient
+        max_advantage = (dependent_shares / 0.5) * float(cap)
+        return tax_at_base_shares - min(advantage, max_advantage)
+
+    def surtax_due(self, taxable_amount: float, *, married: bool = False) -> float:
+        """
+        Total des contributions additionnelles sur le revenu (``income_tax.surtaxes``),
+        par exemple la contribution exceptionnelle sur les hauts revenus (CEHR).
+
+        ``taxable_amount`` est l'assiette de la contribution (le revenu
+        fiscal de référence pour la CEHR) : elle n'est jamais divisée par le
+        nombre de parts, contrairement à l'impôt sur le revenu — ces
+        contributions ne pratiquent pas le quotient familial. ``married``
+        double les seuils du barème quand le régime le prévoit
+        (``threshold_multiplier_married``).
+        """
+        total = 0.0
+        for surtax in self.document["income_tax"].get("surtaxes", []):
+            multiplier = float(surtax.get("threshold_multiplier_married", 1.0)) if married else 1.0
+            brackets = surtax["brackets"]
+            if multiplier != 1.0:
+                brackets = [
+                    {
+                        **bracket,
+                        "lower": float(bracket.get("lower", 0.0)) * multiplier,
+                        "upper": (
+                            None if bracket.get("upper") is None
+                            else float(bracket["upper"]) * multiplier
+                        ),
+                    }
+                    for bracket in brackets
+                ]
+            total += apply_brackets(taxable_amount, brackets)
+        return total
 
     def wealth_tax_due(self, net_taxable_wealth: float) -> float:
         """
@@ -470,6 +533,94 @@ class TaxRegime:
                 f"Le régime {self.id} active l'impôt sur la fortune sans fournir de barème."
             )
         return apply_brackets(net_taxable_wealth, brackets)
+
+    # -- pont vers l'ancien moteur de scénarios ------------------------------ #
+
+    def to_scenario_tax_config(self, *, reference_household_income: float) -> dict[str, Any]:
+        """
+        Traduire ce régime dans la forme historique attendue par
+        :class:`investment_calculator.modules.tax_engine.TaxEngine`.
+
+        C'est un pont vers un moteur plus grossier qu'un régime, pas une
+        nouvelle vérité fiscale : ``TaxEngine`` raisonne par grande catégorie
+        de compte (taxable / tax_deferred / tax_free) et par classe d'actif,
+        pas par enveloppe ni par barème progressif complet. Ce que ce pont
+        fait, précisément :
+
+        * ``dividend_tax_rate``, ``interest_tax_rate`` et ``capital_gains_rate``
+          reçoivent la part *impôt sur le revenu* du prélèvement forfaitaire
+          (:attr:`flat_tax_income_rate`), jamais son taux global. C'est
+          exactement le point qui portait le taux français à 47,2 % au lieu
+          de 30 % dans l'ancien moteur : celui-ci ajoute ``social_charges``
+          par-dessus, et additionner un taux déjà global aurait recompté les
+          prélèvements sociaux une seconde fois.
+        * ``income_tax_rate`` (utilisé par le moteur pour les revenus fonciers,
+          imposés au barème et non au forfait) reçoit un taux moyen obtenu en
+          divisant :meth:`income_tax_due` à ``reference_household_income`` par
+          ce revenu. ``reference_household_income`` n'est pas une donnée du
+          régime : c'est un revenu de foyer choisi par l'appelant pour réduire
+          un barème progressif à un taux unique, faute de connaître le revenu
+          réel du foyer simulé à ce stade du calcul — une hypothèse de
+          modélisation du moteur de scénarios, pas une règle fiscale (voir
+          ``investment_calculator/modules/tax_engine.py`` et
+          ``docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md``,
+          section « ce qui n'est pas de la fiscalité »).
+        * ``wealth_tax.rate`` reçoit le taux marginal de la première tranche
+          non nulle du barème IFI : ``TaxEngine`` ne sait pas appliquer un
+          barème par tranches, seulement un taux unique au-delà d'un seuil.
+
+        Cette méthode ne couvre donc qu'une fraction de ce qu'un régime peut
+        exprimer (aucune règle par enveloppe, aucun quotient familial, aucune
+        CEHR). Elle existe pour que ``TaxEngine`` cesse de lire
+        ``_legacy_presets.json`` ; elle ne prétend pas remplacer le calcul par
+        enveloppe que porte le reste de ce module.
+        """
+        if reference_household_income <= 0:
+            raise ValueError("reference_household_income doit être strictement positif.")
+
+        if self.flat_tax_enabled:
+            capital_income_rate = self.flat_tax_income_rate
+        else:
+            capital_income_rate = (
+                self.income_tax_due(reference_household_income) / reference_household_income
+            )
+
+        earned_income_rate = (
+            self.income_tax_due(reference_household_income) / reference_household_income
+        )
+
+        wealth = self.document.get("wealth_tax", {})
+        wealth_rate = 0.0
+        for bracket in wealth.get("brackets", []) or []:
+            if float(bracket["rate"]) > 0:
+                wealth_rate = float(bracket["rate"])
+                break
+
+        return {
+            "jurisdiction": self.country_code,
+            "account_types": {
+                "taxable": {
+                    "income_tax_rate": earned_income_rate,
+                    "capital_gains_rate": capital_income_rate,
+                    "dividend_tax_rate": capital_income_rate,
+                    "interest_tax_rate": capital_income_rate,
+                },
+                "tax_deferred": {
+                    "contribution_deduction": True,
+                    "withdrawal_tax_rate": earned_income_rate,
+                },
+                "tax_free": {
+                    "contribution_limit": None,
+                    "age_restrictions": {},
+                },
+            },
+            "social_charges": self.social_rate,
+            "wealth_tax": {
+                "enabled": bool(wealth.get("enabled", False)),
+                "threshold": float(wealth.get("threshold", 0.0)),
+                "rate": wealth_rate,
+            },
+        }
 
     # -- enveloppes --------------------------------------------------------- #
 

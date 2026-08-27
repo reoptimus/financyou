@@ -6,6 +6,16 @@ Chaque fichier de ce répertoire décrit l'imposition d'un pays pour un millési
 Ajouter un pays consiste à déposer un fichier JSON. Cela ne demande aucune
 modification de code, et ne doit jamais en demander.
 
+**Seule la France (`fr-2026`) est supportée aujourd'hui.** Des régimes `us-2026`
+et `uk-2026` ont existé un temps : c'étaient des portages mécaniques des
+constantes qui figuraient en dur dans `tax_engine.TaxConfigPreset`, jamais
+vérifiés contre une source officielle (leur propre champ `sources` le disait
+explicitement : *« AUCUNE »*). Ils ont été retirés à l'étape 1.A plutôt que
+complétés : mieux vaut un pays juste qu'un menu de plusieurs drapeaux dont
+certains mentent. Un pays s'ajoute en déposant un fichier conforme à
+`schema.json`, sourcé, et confronté à des cas d'or — voir « Ajouter un pays »
+ci-dessous — pas en réintroduisant une constante non vérifiée.
+
 ## Contenu
 
 | Fichier | Rôle |

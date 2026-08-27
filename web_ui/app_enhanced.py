@@ -17,6 +17,7 @@ import streamlit as st
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from investment_calculator import tax_regime
 from investment_calculator.modules import optimizer, scenario_generator, tax_engine, user_profile
 
 # Page configuration
@@ -73,9 +74,13 @@ def render_sidebar():
         st.markdown("---")
         st.markdown("### ⚙️ Settings")
 
+        # La liste des pays proposés se déduit des régimes fiscaux livrés,
+        # jamais d'une énumération figée — voir
+        # investment_calculator/tax_regimes/README.md.
+        available_regimes = tax_regime.list_regimes(include_draft=False)
         st.session_state.jurisdiction = st.selectbox(
             "Tax Jurisdiction",
-            ["US", "FR", "UK"],
+            [r.country_code for r in available_regimes],
             key="jurisdiction_select"
         )
 
@@ -605,12 +610,11 @@ def run_comprehensive_analysis():
             'use_stochastic': False
         })
 
+        regime = tax_regime.load_regime(st.session_state.get('jurisdiction', 'FR'))
         tax_eng = tax_engine.TaxEngine()
         tax_results = tax_eng.apply_taxes({
             'scenarios': scenario_results['scenarios'],
-            'tax_config': tax_engine.TaxConfigPreset.get_preset(
-                st.session_state.get('jurisdiction', 'US')
-            ),
+            'tax_config': regime.to_scenario_tax_config(reference_household_income=50_000),
             'investment_allocation': {
                 'stocks': {'taxable': 0.6, 'tax_deferred': 0.3, 'tax_free': 0.1},
                 'bonds': {'taxable': 0.5, 'tax_deferred': 0.4, 'tax_free': 0.1},

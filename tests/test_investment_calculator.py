@@ -32,6 +32,7 @@ from investment_calculator import (
     validate_allocation,
     validate_inputs,
 )
+from investment_calculator.tax_regime import load_regime
 
 
 class TestPersonalVariables(unittest.TestCase):
@@ -200,6 +201,28 @@ class TestGlobalScenarioEngine(unittest.TestCase):
         self.assertIn("stock_return", df.columns)
 
 
+class TestTaxConfigFromRegime(unittest.TestCase):
+    """
+    Test TaxConfig.from_regime : le pont entre gse_plus.TaxConfig et un
+    régime fiscal réel (investment_calculator.tax_regime), ajouté à l'étape
+    1.A.5 pour que ce module cesse de dépendre uniquement de constantes
+    illustratives codées dans la dataclass.
+    """
+
+    def test_from_regime_ne_double_compte_pas_le_prelevement_forfaitaire(self):
+        regime = load_regime("FR")
+        tax_config = TaxConfig.from_regime(regime, reference_household_income=50_000)
+
+        effective_pfu_rate = tax_config.long_term_cap_gains_rate + tax_config.social_security_rate
+        self.assertAlmostEqual(effective_pfu_rate, 0.30, places=6)
+        self.assertLess(effective_pfu_rate, 0.40)
+
+    def test_from_regime_rejette_un_revenu_de_reference_invalide(self):
+        regime = load_regime("FR")
+        with self.assertRaises(ValueError):
+            TaxConfig.from_regime(regime, reference_household_income=0)
+
+
 class TestTaxIntegratedScenarioEngine(unittest.TestCase):
     """Test TaxIntegratedScenarioEngine class"""
 
@@ -290,7 +313,9 @@ class TestMOCA(unittest.TestCase):
         self.profile = InvestmentProfile(personal_vars=pv)
 
         self.gse = GlobalScenarioEngine(random_seed=42)
-        self.tax_config = TaxConfig()
+        self.tax_config = TaxConfig.from_regime(
+            load_regime("FR"), reference_household_income=50_000
+        )
         self.gse_plus = TaxIntegratedScenarioEngine(tax_config=self.tax_config)
 
         # Generate test scenarios
@@ -493,7 +518,7 @@ class TestIntegration(unittest.TestCase):
         scenarios = gse.generate_standard_scenarios(years=30)
 
         # Step 3: Apply taxes
-        tax_config = TaxConfig()
+        tax_config = TaxConfig.from_regime(load_regime("FR"), reference_household_income=50_000)
         gse_plus = TaxIntegratedScenarioEngine(tax_config=tax_config)
 
         tax_scenarios = [

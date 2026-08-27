@@ -2,9 +2,8 @@
 Comprehensive Unit Tests for Module 2: Tax-Integrated Scenario Engine
 
 Tests cover:
-- TaxConfigPreset functionality
+- Tax configuration built from investment_calculator.tax_regime
 - Tax configuration validation
-- Tax calculations for different jurisdictions
 - After-tax scenario generation
 - Tax tables and metrics
 - Account balance simulation
@@ -12,6 +11,14 @@ Tests cover:
 - Different asset allocations
 - Edge cases
 - Convenience functions
+
+Depuis l'étape 1.A.5, ce moteur ne contient plus aucun taux fiscal en dur :
+il consomme investment_calculator.tax_regime.load_regime. Voir
+docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md et
+tests/test_tax_regime_contract.py pour le contrat qui rend cela exécutoire.
+Seule la France est un régime vérifié aujourd'hui ; les tests qui portaient
+sur les États-Unis et le Royaume-Uni testaient un dictionnaire hérité, pas
+un régime réel, et ont été retirés avec lui.
 """
 
 import os
@@ -25,6 +32,7 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from investment_calculator.modules import scenario_generator, tax_engine
+from investment_calculator.tax_regime import load_regime
 
 
 # Helper function to create simple test scenarios
@@ -41,14 +49,13 @@ def create_test_scenarios(num_scenarios=10, time_horizon=5):
     return results['scenarios']
 
 
-class TestTaxConfigPreset:
-    """Test TaxConfigPreset functionality."""
+class TestTaxConfigFromRegime:
+    """Test the bridge from a TaxRegime to the engine's legacy tax_config shape."""
 
-    def test_get_preset_us(self):
-        """Test US tax configuration preset."""
-        config = tax_engine.TaxConfigPreset.get_preset('US')
+    def test_default_tax_config_is_the_french_regime(self):
+        config = tax_engine._default_tax_config()
 
-        assert config['jurisdiction'] == 'US'
+        assert config['jurisdiction'] == 'FR'
         assert 'account_types' in config
         assert 'taxable' in config['account_types']
         assert 'tax_deferred' in config['account_types']
@@ -56,49 +63,23 @@ class TestTaxConfigPreset:
         assert 'social_charges' in config
         assert 'wealth_tax' in config
 
-    def test_get_preset_france(self):
-        """Test French tax configuration preset."""
-        config = tax_engine.TaxConfigPreset.get_preset('FR')
+    def test_france_social_charges_and_wealth_tax(self):
+        regime = load_regime('FR')
+        config = regime.to_scenario_tax_config(reference_household_income=50_000)
 
-        assert config['jurisdiction'] == 'FR'
         assert config['social_charges'] == 0.172  # Prélèvements sociaux
         assert config['wealth_tax']['enabled'] is True
         assert config['wealth_tax']['threshold'] == 1_300_000
 
-    def test_get_preset_uk(self):
-        """Test UK tax configuration preset."""
-        config = tax_engine.TaxConfigPreset.get_preset('UK')
+    def test_unknown_jurisdiction_raises_a_clear_error(self):
+        from investment_calculator.tax_regime import RegimeNotFoundError
 
-        assert config['jurisdiction'] == 'UK'
-        assert config['account_types']['taxable']['capital_gains_rate'] == 0.20
-        assert config['account_types']['tax_free']['contribution_limit'] == 20000  # ISA
-
-    def test_get_preset_invalid_jurisdiction(self):
-        """Test that invalid jurisdiction raises error."""
-        with pytest.raises(ValueError, match="Unknown jurisdiction"):
-            tax_engine.TaxConfigPreset.get_preset('XYZ')
-
-    def test_all_presets_have_required_fields(self):
-        """Test that all presets have required fields."""
-        jurisdictions = ['US', 'FR', 'UK']
-
-        for jurisdiction in jurisdictions:
-            config = tax_engine.TaxConfigPreset.get_preset(jurisdiction)
-
-            # Check required top-level fields
-            assert 'jurisdiction' in config
-            assert 'account_types' in config
-            assert 'social_charges' in config
-            assert 'wealth_tax' in config
-
-            # Check account types
-            assert 'taxable' in config['account_types']
-            assert 'tax_deferred' in config['account_types']
-            assert 'tax_free' in config['account_types']
+        with pytest.raises(RegimeNotFoundError, match="Disponibles"):
+            load_regime('XYZ')
 
     def test_taxable_account_fields(self):
-        """Test taxable account configuration fields."""
-        config = tax_engine.TaxConfigPreset.get_preset('US')
+        regime = load_regime('FR')
+        config = regime.to_scenario_tax_config(reference_household_income=50_000)
         taxable = config['account_types']['taxable']
 
         assert 'income_tax_rate' in taxable
@@ -111,14 +92,35 @@ class TestTaxConfigPreset:
         assert 0 <= taxable['capital_gains_rate'] <= 1
 
     def test_tax_deferred_account_fields(self):
-        """Test tax-deferred account configuration fields."""
-        config = tax_engine.TaxConfigPreset.get_preset('US')
+        regime = load_regime('FR')
+        config = regime.to_scenario_tax_config(reference_household_income=50_000)
         tax_deferred = config['account_types']['tax_deferred']
 
         assert 'contribution_deduction' in tax_deferred
         assert 'withdrawal_tax_rate' in tax_deferred
         assert isinstance(tax_deferred['contribution_deduction'], bool)
         assert 0 <= tax_deferred['withdrawal_tax_rate'] <= 1
+
+    def test_le_double_comptage_du_prelevement_forfaitaire_a_disparu(self):
+        """
+        Régression du défaut le plus coûteux de l'ancien moteur, vérifiée au
+        niveau du moteur lui-même (pas seulement de TaxRegime).
+
+        L'ancien TaxConfigPreset.get_preset('FR') portait un
+        dividend_tax_rate de 0.30 (déjà le taux global du PFU), auquel le
+        moteur ajoutait ensuite social_charges (0.172), portant le taux
+        effectif à 47,2 % au lieu de 30 %. Le pont TaxRegime.to_scenario_tax_config
+        doit fournir la part impôt sur le revenu seule (12,8 %), pas le taux
+        global, pour que l'addition faite par le moteur retombe sur 30 %.
+        """
+        regime = load_regime('FR')
+        config = regime.to_scenario_tax_config(reference_household_income=50_000)
+
+        effective_pfu_rate = (
+            config['account_types']['taxable']['dividend_tax_rate'] + config['social_charges']
+        )
+        assert effective_pfu_rate == pytest.approx(0.30)
+        assert effective_pfu_rate < 0.40, "47,2 % ne doit plus jamais réapparaître ici."
 
 
 class TestTaxEngineInitialization:
@@ -165,7 +167,9 @@ class TestConfigurationValidation:
         scenarios_df = create_test_scenarios()
         engine = tax_engine.TaxEngine()
 
-        custom_tax_config = tax_engine.TaxConfigPreset.get_preset('FR')
+        custom_tax_config = load_regime('FR').to_scenario_tax_config(
+            reference_household_income=50_000
+        )
         config = {
             'scenarios': scenarios_df,
             'tax_config': custom_tax_config
@@ -220,7 +224,7 @@ class TestAfterTaxScenarios:
         scenarios_df = create_test_scenarios()
         engine = tax_engine.TaxEngine()
 
-        tax_config = tax_engine.TaxConfigPreset.get_preset('US')
+        tax_config = load_regime('FR').to_scenario_tax_config(reference_household_income=50_000)
         allocation = {
             'stocks': {'taxable': 0.6, 'tax_deferred': 0.3, 'tax_free': 0.1},
             'bonds': {'taxable': 0.6, 'tax_deferred': 0.3, 'tax_free': 0.1},
@@ -453,58 +457,27 @@ class TestOptimizationInsights:
             assert 'reason' in item
 
 
-class TestDifferentJurisdictions:
-    """Test tax calculations for different jurisdictions."""
+class TestJurisdictions:
+    """
+    Test des juridictions disponibles.
 
-    def test_us_vs_fr_tax_burden(self):
-        """Test tax differences between US and FR jurisdictions."""
-        scenarios_df = create_test_scenarios(num_scenarios=100)
-        engine = tax_engine.TaxEngine()
+    Seule la France a un régime vérifié aujourd'hui (voir
+    investment_calculator/tax_regimes/README.md) : il n'y a donc plus de
+    comparaison US/FR/UK à tester ici, seulement le comportement attendu
+    face à une juridiction absente.
+    """
 
-        allocation = {
-            'stocks': {'taxable': 1.0, 'tax_deferred': 0.0, 'tax_free': 0.0},
-            'bonds': {'taxable': 1.0, 'tax_deferred': 0.0, 'tax_free': 0.0},
-            'real_estate': {'taxable': 1.0, 'tax_deferred': 0.0, 'tax_free': 0.0}
-        }
-
-        # US results
-        us_results = engine.apply_taxes({
-            'scenarios': scenarios_df,
-            'tax_config': tax_engine.TaxConfigPreset.get_preset('US'),
-            'investment_allocation': allocation
-        })
-
-        # FR results
-        fr_results = engine.apply_taxes({
-            'scenarios': scenarios_df,
-            'tax_config': tax_engine.TaxConfigPreset.get_preset('FR'),
-            'investment_allocation': allocation
-        })
-
-        # Both should have valid results
-        assert 'after_tax_scenarios' in us_results
-        assert 'after_tax_scenarios' in fr_results
-
-        # FR has higher social charges
-        fr_config = tax_engine.TaxConfigPreset.get_preset('FR')
-        us_config = tax_engine.TaxConfigPreset.get_preset('US')
-        assert fr_config['social_charges'] > us_config['social_charges']
-
-    def test_uk_jurisdiction(self):
-        """Test UK jurisdiction calculations."""
+    def test_une_juridiction_sans_regime_leve_une_erreur_claire(self):
         scenarios_df = create_test_scenarios()
         engine = tax_engine.TaxEngine()
 
-        uk_config = tax_engine.TaxConfigPreset.get_preset('UK')
-
-        results = engine.apply_taxes({
-            'scenarios': scenarios_df,
-            'tax_config': uk_config
-        })
-
-        # Should complete without errors
-        assert 'after_tax_scenarios' in results
-        assert results['tax_tables']['effective_tax_rate']['effective_tax_rate'].mean() > 0
+        with pytest.raises(Exception, match="Disponibles"):
+            engine.apply_taxes({
+                'scenarios': scenarios_df,
+                'tax_config': load_regime('UK').to_scenario_tax_config(
+                    reference_household_income=50_000
+                ),
+            })
 
 
 class TestDifferentAllocations:
@@ -615,11 +588,11 @@ class TestEdgeCases:
 class TestConvenienceFunctions:
     """Test convenience functions."""
 
-    def test_apply_taxes_simple_us(self):
-        """Test apply_taxes_simple with US jurisdiction."""
+    def test_apply_taxes_simple_default_jurisdiction_is_fr(self):
+        """FR est la seule juridiction vérifiée : c'est le défaut de la fonction."""
         scenarios_df = create_test_scenarios()
 
-        results = tax_engine.apply_taxes_simple(scenarios_df, jurisdiction='US')
+        results = tax_engine.apply_taxes_simple(scenarios_df)
 
         assert 'after_tax_scenarios' in results
         assert 'tax_tables' in results
@@ -645,7 +618,7 @@ class TestConvenienceFunctions:
 
         results = tax_engine.apply_taxes_simple(
             scenarios_df,
-            jurisdiction='US',
+            jurisdiction='FR',
             allocation=custom_allocation
         )
 
@@ -692,7 +665,9 @@ class TestDataQuality:
 
         config = {
             'scenarios': scenarios_df,
-            'tax_config': tax_engine.TaxConfigPreset.get_preset('US')
+            'tax_config': load_regime('FR').to_scenario_tax_config(
+                reference_household_income=50_000
+            )
         }
 
         results1 = engine.apply_taxes(config.copy())

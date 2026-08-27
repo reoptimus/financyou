@@ -548,7 +548,7 @@ class ScenarioGenerator:
             warnings.warn(f"Unknown currency {currency}, using EUR curve", stacklevel=2)
             spot_rates = 0.015 + 0.020 * (1 - np.exp(-maturities / 10))
 
-        return spot_rates
+        return np.asarray(spot_rates)
 
     def _calculate_diagnostics(self, scenarios_df: pd.DataFrame, method: str) -> dict:
         """

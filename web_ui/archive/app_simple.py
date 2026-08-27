@@ -15,6 +15,7 @@ import streamlit as st
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from investment_calculator import tax_regime
 from investment_calculator.modules import (
     optimizer,
     reporting,
@@ -286,7 +287,8 @@ def run_analysis(profile_config, jurisdiction, num_scenarios=100):
 
         # Step 2: Apply taxes (40%)
         status_text.text("💰 Applying tax treatment...")
-        tax_config = tax_engine.TaxConfigPreset.get_preset(jurisdiction)
+        regime = tax_regime.load_regime(jurisdiction)
+        tax_config = regime.to_scenario_tax_config(reference_household_income=50_000)
 
         tax_allocation = {
             'stocks': {'taxable': 0.6, 'tax_deferred': 0.3, 'tax_free': 0.1},
@@ -505,7 +507,15 @@ def main():
         st.markdown("---")
 
         st.markdown("### Settings")
-        jurisdiction = st.selectbox("Tax Jurisdiction", ["US", "FR", "UK"], index=0)
+        # La liste des pays proposés se déduit des régimes fiscaux livrés,
+        # jamais d'une énumération figée — voir
+        # investment_calculator/tax_regimes/README.md.
+        available_regimes = tax_regime.list_regimes(include_draft=False)
+        jurisdiction = st.selectbox(
+            "Tax Jurisdiction",
+            [r.country_code for r in available_regimes],
+            index=0,
+        )
         num_scenarios = st.slider("Number of Scenarios", 10, 500, 100, 10)
 
         st.markdown("---")

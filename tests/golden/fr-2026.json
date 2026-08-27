@@ -1,0 +1,391 @@
+{
+  "$schema": "./schema.json",
+  "schema_version": "0.1",
+  "regime_id": "fr-2026",
+
+  "cases": [
+    {
+      "id": "ir_bareme_celibataire_tranche_30",
+      "description": "Un célibataire sans enfant déclare un revenu imposable de 40 000 € : impôt sur le revenu au barème 2026, une part.",
+      "kind": "income_tax",
+      "status": "ready",
+      "inputs": { "taxable_income": 40000, "shares": 1.0 },
+      "expected": { "income_tax": 5103.99, "social_contributions": 0.0, "total": 5103.99, "net": 34896.01 },
+      "sources": [
+        {
+          "label": "Service-public.fr — Impôt sur le revenu : tranches et taux d'imposition 2026",
+          "url": "https://www.service-public.gouv.fr/particuliers/actualites/A18045",
+          "consulted_on": "2026-08-25"
+        }
+      ],
+      "confidence": "high",
+      "notes": "Valeur recalculée à la main tranche par tranche à partir du barème sourcé : (29 579-11 600)×11 % + (40 000-29 579)×30 % = 1 977,69 + 3 126,30 = 5 103,99 €."
+    },
+    {
+      "id": "ir_bareme_couple_deux_enfants",
+      "description": "Un couple marié avec deux enfants à charge (3 parts) déclare un revenu imposable de 80 000 € : impôt sur le revenu au barème 2026 avec quotient familial, avant tout plafonnement.",
+      "kind": "income_tax",
+      "status": "ready",
+      "inputs": { "taxable_income": 80000, "shares": 3.0 },
+      "expected": { "income_tax": 4972.00, "social_contributions": 0.0, "total": 4972.00, "net": 75028.00 },
+      "sources": [
+        {
+          "label": "Service-public.fr — Impôt sur le revenu : tranches et taux d'imposition 2026",
+          "url": "https://www.service-public.gouv.fr/particuliers/actualites/A18045",
+          "consulted_on": "2026-08-25"
+        }
+      ],
+      "confidence": "high",
+      "notes": "Revenu par part = 80 000 / 3 = 26 666,67 € ; impôt par part = (26 666,67-11 600)×11 % = 1 657,33 € ; ×3 parts = 4 972,00 €. Ce cas ne teste pas le plafonnement du quotient familial (l'avantage par rapport à 2 parts est ici très inférieur au plafond) : voir le cas ir_plafonnement_quotient_familial_general pour un revenu qui le dépasse."
+    },
+    {
+      "id": "ifi_patrimoine_deux_millions",
+      "description": "Un foyer détient 2 000 000 € de patrimoine immobilier net taxable : impôt sur la fortune immobilière (IFI) dû.",
+      "kind": "wealth_tax",
+      "status": "ready",
+      "inputs": { "net_taxable_wealth": 2000000 },
+      "expected": { "income_tax": 0.0, "social_contributions": 0.0, "total": 7400.00, "net": 1992600.00 },
+      "sources": [
+        {
+          "label": "Légifrance — Code général des impôts, article 977 (barème de l'IFI)",
+          "url": "https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000036385041",
+          "consulted_on": "2026-08-27"
+        },
+        {
+          "label": "BOFiP BOI-PAT-IFI-40-10 — Calcul de l'IFI",
+          "url": "https://bofip.impots.gouv.fr/bofip/11319-PGP.html/identifiant=BOI-PAT-IFI-40-10-20180608",
+          "consulted_on": "2026-08-27"
+        }
+      ],
+      "confidence": "high",
+      "notes": "Barème confirmé inchangé pour le millésime 2026 (en vigueur depuis 2018). Calcul : 500 000×0,5 % + 700 000×0,7 % = 2 500 + 4 900 = 7 400 €. Un patrimoine de 2 M€ est loin au-dessus du couloir de décote d'entrée (1,3-1,4 M€, art. 977 CGI) : ce cas ne le teste donc pas — cette décote n'est pas implémentée par TaxRegime.wealth_tax_due (nouveau known_gap déclaré)."
+    },
+    {
+      "id": "cto_pfu_plus_value",
+      "description": "Un compte-titres ordinaire réalise une plus-value de 10 000 € lors d'une cession : prélèvement forfaitaire unique (PFU), sans option pour le barème.",
+      "kind": "wrapper_withdrawal",
+      "status": "pending_regime_data",
+      "inputs": {
+        "wrapper_id": "cto",
+        "withdrawal_amount": 10000,
+        "gain_amount": 10000,
+        "shares": 1.0
+      },
+      "sources": [
+        {
+          "label": "Code général des impôts, article 200 A — Prélèvement forfaitaire unique",
+          "url": "https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000038611688",
+          "consulted_on": "2026-08-27"
+        }
+      ],
+      "confidence": "low",
+      "notes": "DÉCOUVERTE TARDIVE (étape 1.A.3), NON CORRIGÉE DANS CETTE ITÉRATION : la LFSS pour 2026 (adoptée le 16/12/2025) porte la CSG sur les plus-values mobilières et dividendes de 9,2 % à 10,6 %, soit des prélèvements sociaux de 18,6 % au lieu de 17,2 %, APPLICABLE AUX PLUS-VALUES RÉALISÉES DÈS 2025 (déclaration 2026). Le PFU réel sur une cession de titres en 2025 serait donc de 12,8+18,6 = 31,4 %, pas 30 %. fr-2026.json applique encore uniformément 17,2 % (flat_tax.social_rate). Corriger ce cas suppose de distinguer, dans le régime, les catégories de revenu concernées par la hausse (plus-values mobilières, dividendes, PEA, PER, compte-titres) de celles qui ne le sont pas (assurance-vie, épargne réglementée, immobilier non meublé) — voir le known_gap prelevements_sociaux_18_6_pourcent_2025 et docs/validation/1a-cas-d-or.md. Valeur retirée plutôt que de laisser un chiffre probablement faux au statut « ready »."
+    },
+    {
+      "id": "pea_retrait_apres_cinq_ans",
+      "description": "Un PEA détenu depuis 6 ans (valeur totale 100 000 €, dont 40 000 € de plus-value latente) fait l'objet d'un retrait de 20 000 € : exonération d'impôt sur le revenu, prélèvements sociaux dus sur la quote-part de plus-value retirée.",
+      "kind": "wrapper_withdrawal",
+      "status": "pending_regime_data",
+      "inputs": {
+        "wrapper_id": "pea",
+        "withdrawal_amount": 20000,
+        "account_value": 100000,
+        "total_gain": 40000,
+        "holding_years": 6,
+        "shares": 1.0
+      },
+      "sources": [
+        {
+          "label": "Code général des impôts, article 150-0 A — Exonération du PEA après 5 ans",
+          "url": "https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000006302382",
+          "consulted_on": "2026-08-27"
+        }
+      ],
+      "confidence": "low",
+      "notes": "DÉCOUVERTE TARDIVE, NON CORRIGÉE : le PEA figure explicitement parmi les enveloppes concernées par la hausse de CSG de la LFSS 2026 (17,2 % → 18,6 % dès un retrait 2025). Quote-part de gain = 8 000 € ; à 18,6 % les prélèvements sociaux seraient de 1 488 € et non 1 376 €. Voir le known_gap prelevements_sociaux_18_6_pourcent_2025."
+    },
+    {
+      "id": "pea_retrait_avant_cinq_ans",
+      "description": "Le même PEA fait l'objet d'un retrait avant cinq ans de détention (2 ans) : imposition à 12,8 % sur la quote-part de plus-value, prélèvements sociaux dus.",
+      "kind": "wrapper_withdrawal",
+      "status": "pending_regime_data",
+      "inputs": {
+        "wrapper_id": "pea",
+        "withdrawal_amount": 20000,
+        "account_value": 100000,
+        "total_gain": 40000,
+        "holding_years": 2,
+        "shares": 1.0
+      },
+      "sources": [
+        {
+          "label": "Code général des impôts, article 150-0 A — Retrait du PEA avant 5 ans",
+          "url": "https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000006302382",
+          "consulted_on": "2026-08-27"
+        }
+      ],
+      "confidence": "low",
+      "notes": "DÉCOUVERTE TARDIVE, NON CORRIGÉE : même réserve que pea_retrait_apres_cinq_ans sur le taux social. IR = 8 000 × 12,8 % = 1 024 € (non affecté, c'est un taux d'impôt sur le revenu) ; PS à 17,2 % donnerait 1 376 €, à 18,6 % réel 1 488 €. Voir le known_gap prelevements_sociaux_18_6_pourcent_2025."
+    },
+    {
+      "id": "assurance_vie_rachat_primes_sous_seuil",
+      "description": "Rachat sur une assurance-vie de plus de 8 ans, primes versées de 100 000 € (sous le seuil de 150 000 €), pour un célibataire : abattement annuel de 4 600 €, taux réduit de 7,5 %, prélèvements sociaux dus.",
+      "kind": "wrapper_withdrawal",
+      "status": "ready",
+      "inputs": {
+        "wrapper_id": "assurance_vie",
+        "withdrawal_amount": 15000,
+        "account_value": 130000,
+        "total_gain": 30000,
+        "holding_years": 10,
+        "premiums_paid": 100000,
+        "household_status": "single",
+        "shares": 1.0
+      },
+      "expected": { "income_tax": 0.0, "social_contributions": 595.38, "total": 595.38, "net": 14404.62 },
+      "sources": [
+        {
+          "label": "Code général des impôts, article 125-0 A, I ter — Rachat après 8 ans, primes sous le seuil",
+          "url": "https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000044989424",
+          "consulted_on": "2026-08-27"
+        }
+      ],
+      "confidence": "high",
+      "notes": "Quote-part de gain = 15 000 × 30 000/130 000 = 3 461,54 € ; l'abattement annuel de 4 600 € (contre l'IR seulement) l'absorbe entièrement : IR = 0. Les prélèvements sociaux, non concernés par cet abattement, restent dus sur la totalité de la quote-part : 3 461,54 × 17,2 % = 595,38 €."
+    },
+    {
+      "id": "assurance_vie_rachat_primes_au_dela_du_seuil",
+      "description": "Rachat de 50 000 € sur une assurance-vie de plus de 8 ans (valeur totale 230 000 €, dont 100 000 € de plus-value), avec 200 000 € de primes versées (au-delà du seuil de 150 000 €), pour un célibataire : abattement annuel de 4 600 €, taux de 12,8 % sur le solde, prélèvements sociaux dus.",
+      "kind": "wrapper_withdrawal",
+      "status": "ready",
+      "inputs": {
+        "wrapper_id": "assurance_vie",
+        "withdrawal_amount": 50000,
+        "account_value": 230000,
+        "total_gain": 100000,
+        "holding_years": 10,
+        "premiums_paid": 200000,
+        "household_status": "single",
+        "shares": 1.0
+      },
+      "expected": { "income_tax": 2193.81, "social_contributions": 3739.13, "total": 5932.94, "net": 44067.06 },
+      "sources": [
+        {
+          "label": "Code général des impôts, article 125-0 A, I ter — Rachat après 8 ans, primes au-delà du seuil",
+          "url": "https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000044989424",
+          "consulted_on": "2026-08-27"
+        }
+      ],
+      "confidence": "medium",
+      "notes": "Montants du cas augmentés par rapport à une première version (retrait de 15 000 € sur 30 000 € de plus-value) : avec des montants trop petits, l'abattement de 4 600 € absorbait tout le gain et le cas ne distinguait plus 7,5 % de 12,8 %. Quote-part de gain = 50 000×100 000/230 000 = 21 739,13 € ; après abattement : 17 139,13 € × 12,8 % = 2 193,81 € ; PS = 21 739,13 × 17,2 % = 3 739,13 €. Confiance « medium » et non « high » : ce calcul applique le taux de 12,8 % à la totalité de la quote-part de gain, alors que la règle réelle (BOI-RPPM-RCM-20-15) ne l'applique qu'à la fraction du gain rattachée aux primes excédant 150 000 €, calculée proportionnellement — voir le known_gap assurance_vie_encours_primes_net_de_rachats. La valeur ci-dessus est donc celle produite par la simplification actuelle du régime, pas la valeur réellement due par un contribuable dans cette situation."
+    },
+    {
+      "id": "assurance_vie_rachat_avant_huit_ans",
+      "description": "Rachat sur une assurance-vie détenue depuis 3 ans (avant 8 ans) : taux de 12,8 % sur la quote-part de gain, sans abattement, prélèvements sociaux dus.",
+      "kind": "wrapper_withdrawal",
+      "status": "ready",
+      "inputs": {
+        "wrapper_id": "assurance_vie",
+        "withdrawal_amount": 15000,
+        "account_value": 130000,
+        "total_gain": 30000,
+        "holding_years": 3,
+        "premiums_paid": 100000,
+        "household_status": "single",
+        "shares": 1.0
+      },
+      "expected": { "income_tax": 443.08, "social_contributions": 595.38, "total": 1038.46, "net": 13961.54 },
+      "sources": [
+        {
+          "label": "Code général des impôts, article 125-0 A — Rachat avant 8 ans",
+          "url": "https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000044989424",
+          "consulted_on": "2026-08-27"
+        }
+      ],
+      "confidence": "high",
+      "notes": "Quote-part de gain = 3 461,54 € (identique au cas sous-seuil) ; sans abattement : IR = 3 461,54 × 12,8 % = 443,08 € ; PS = 3 461,54 × 17,2 % = 595,38 €."
+    },
+    {
+      "id": "per_sortie_capital_retraite",
+      "description": "Sortie en capital d'un PER à la retraite, pour un célibataire (une part) : la totalité du retrait est imposée au barème progressif, prélèvements sociaux dus sur la totalité du retrait.",
+      "kind": "wrapper_withdrawal",
+      "status": "pending_regime_data",
+      "inputs": {
+        "wrapper_id": "per",
+        "withdrawal_amount": 50000,
+        "exit_form": "lump_sum",
+        "shares": 1.0
+      },
+      "sources": [
+        {
+          "label": "Service-public.fr — Impôt sur le revenu : tranches et taux d'imposition 2026",
+          "url": "https://www.service-public.gouv.fr/particuliers/actualites/A18045",
+          "consulted_on": "2026-08-25"
+        }
+      ],
+      "confidence": "low",
+      "notes": "IR seul (non affecté par la hausse de CSG) : (29 579-11 600)×11 % + (50 000-29 579)×30 % = 8 103,99 €. Mais le PER figure parmi les enveloppes concernées par la hausse de CSG de la LFSS 2026 : PS à 17,2 % donnerait 8 600 €, à 18,6 % réel 9 300 €. DÉCOUVERTE TARDIVE, NON CORRIGÉE — voir le known_gap prelevements_sociaux_18_6_pourcent_2025. S'ajoute la limitation déjà connue : ce modèle n'ajoute pas le retrait à un revenu existant (TaxRegime.resolve_income_tax_rate)."
+    },
+    {
+      "id": "livret_a_retrait_exonere",
+      "description": "Retrait sur un Livret A : exonération totale d'impôt sur le revenu et de prélèvements sociaux.",
+      "kind": "wrapper_withdrawal",
+      "status": "ready",
+      "inputs": {
+        "wrapper_id": "livret_a",
+        "withdrawal_amount": 5000,
+        "gain_amount": 200,
+        "shares": 1.0
+      },
+      "expected": { "income_tax": 0.0, "social_contributions": 0.0, "total": 0.0, "net": 5000.00 },
+      "sources": [
+        {
+          "label": "Code monétaire et financier, article L221-5 — Exonération des intérêts du Livret A",
+          "url": "https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000006654322",
+          "consulted_on": "2026-08-27"
+        }
+      ],
+      "confidence": "high",
+      "notes": "Exonération totale, quel que soit le montant du gain : rien à calculer."
+    },
+    {
+      "id": "immobilier_direct_cession_apres_abattements",
+      "description": "Cession d'un bien locatif détenu en direct, plus-value nette de 30 000 € déjà après abattements pour durée de détention : imposition à 19 % au titre de l'impôt sur le revenu, prélèvements sociaux dus.",
+      "kind": "wrapper_withdrawal",
+      "status": "ready",
+      "inputs": {
+        "wrapper_id": "immobilier_direct",
+        "withdrawal_amount": 30000,
+        "gain_amount": 30000,
+        "shares": 1.0
+      },
+      "expected": { "income_tax": 5700.00, "social_contributions": 5160.00, "total": 10860.00, "net": 19140.00 },
+      "sources": [
+        {
+          "label": "impots.gouv.fr — Je vends un bien immobilier : comment et à quel taux suis-je imposé",
+          "url": "https://www.impots.gouv.fr/particulier/questions/je-vends-un-bien-immobilier-comment-et-quel-taux-suis-je-impose",
+          "consulted_on": "2026-08-27"
+        }
+      ],
+      "confidence": "high",
+      "notes": "IR = 30 000 × 19 % = 5 700 € ; PS = 30 000 × 17,2 % = 5 160 €. La plus-value de 30 000 € est fournie déjà nette des abattements pour durée de détention (capital_gains.real_estate.holding_allowances) : ce cas ne teste pas le calcul de l'abattement lui-même, qui n'est mis en œuvre par aucune méthode de TaxRegime à ce stade — le champ existe mais n'est pas consommé (known_gap implicite, à expliciter)."
+    },
+    {
+      "id": "ir_plafonnement_quotient_familial_general",
+      "description": "Un couple marié avec deux enfants à charge (3 parts, dont 1 part attribuable aux enfants) déclare un revenu imposable de 300 000 € : l'avantage du quotient familial est plafonné au cas général (1 807 € par demi-part).",
+      "kind": "income_tax",
+      "status": "ready",
+      "inputs": { "taxable_income": 300000, "shares": 3.0, "dependent_shares": 1.0 },
+      "expected": { "income_tax": 86987.04, "social_contributions": 0.0, "total": 86987.04, "net": 213012.96 },
+      "sources": [
+        {
+          "label": "BOFiP BOI-IR-LIQ-20-20-20 — Plafonnement des effets du quotient familial",
+          "url": "https://bofip.impots.gouv.fr/bofip/2494-PGP.html/identifiant=BOI-IR-LIQ-20-20-20-20260407",
+          "consulted_on": "2026-08-27"
+        }
+      ],
+      "confidence": "medium",
+      "notes": "Impôt à 2 parts (base, sans les enfants) = 90 601,04 € ; impôt à 3 parts (quotient plein) = 74 401,56 € ; avantage brut = 16 199,48 € ; plafond = 2 demi-parts × 1 807 € = 3 614 € ; impôt final = 90 601,04 − 3 614 = 86 987,04 €. Confiance « medium » plutôt que « high » : le montant du plafond lui-même (1 807 €) n'a été confirmé que par des sources secondaires concordantes, pas relu directement sur le texte BOFiP brut — voir docs/validation/1a-cas-d-or.md."
+    },
+    {
+      "id": "cehr_celibataire_hauts_revenus",
+      "description": "Un célibataire déclare un revenu fiscal de référence de 600 000 € : contribution exceptionnelle sur les hauts revenus (CEHR) due, en plus de l'impôt sur le revenu au barème.",
+      "kind": "income_tax",
+      "status": "ready",
+      "inputs": {
+        "taxable_income": 600000,
+        "shares": 1.0,
+        "apply_surtax": true,
+        "household_status": "single"
+      },
+      "expected": { "income_tax": 258023.84, "social_contributions": 0.0, "total": 258023.84, "net": 341976.16 },
+      "sources": [
+        {
+          "label": "Légifrance — Code général des impôts, article 223 sexies (CEHR)",
+          "url": "https://www.legifrance.gouv.fr/codes/id/LEGISCTA000025049019",
+          "consulted_on": "2026-08-27"
+        }
+      ],
+      "confidence": "high",
+      "notes": "IR au barème sur 600 000 € (1 part) = 246 523,84 € ; CEHR = (500 000-250 000)×3 % + (600 000-500 000)×4 % = 7 500+4 000 = 11 500 € ; total = 258 023,84 €. Le revenu fiscal de référence et le revenu imposable sont supposés identiques dans ce cas, par simplification."
+    },
+    {
+      "id": "cehr_couple_hauts_revenus",
+      "description": "Un couple soumis à imposition commune déclare un revenu fiscal de référence de 600 000 € : les seuils de la CEHR sont doublés par rapport à une personne seule.",
+      "kind": "income_tax",
+      "status": "ready",
+      "inputs": {
+        "taxable_income": 600000,
+        "shares": 2.0,
+        "apply_surtax": true,
+        "household_status": "couple"
+      },
+      "expected": { "income_tax": 226047.68, "social_contributions": 0.0, "total": 226047.68, "net": 373952.32 },
+      "sources": [
+        {
+          "label": "Légifrance — Code général des impôts, article 223 sexies (CEHR)",
+          "url": "https://www.legifrance.gouv.fr/codes/id/LEGISCTA000025049019",
+          "consulted_on": "2026-08-27"
+        }
+      ],
+      "confidence": "high",
+      "notes": "IR au barème sur 600 000 € (2 parts, 300 000 €/part) = 223 047,68 € ; CEHR = (600 000-500 000)×3 % = 3 000 € (seuils doublés pour un couple, le RFR de 600 000 € ne dépasse pas 1 000 000 €) ; total = 226 047,68 €. Le revenu fiscal de référence et le revenu imposable sont supposés identiques, par simplification."
+    },
+    {
+      "id": "quotient_familial_plafonnement_cas_particuliers",
+      "description": "Plafonnement du quotient familial pour les cas particuliers (parent isolé, veuf avec enfant à charge, garde alternée au quart de part, invalides/anciens combattants), chacun portant un plafond ou une réduction complémentaire distincts du plafond général.",
+      "kind": "known_gap",
+      "status": "pending_schema_extension",
+      "blocked_reason": "Le régime ne porte qu'un plafond général unique par demi-part (household_quotient.cap_per_half_share) ; les mécanismes à deux étages des cas particuliers (CGI art. 197 I-3°) ne sont pas représentables par ce seul champ."
+    },
+    {
+      "id": "cdhr_hauts_revenus",
+      "description": "Contribution différentielle sur les hauts revenus (CDHR, art. 224 CGI) applicable aux revenus 2025.",
+      "kind": "known_gap",
+      "status": "pending_regime_data",
+      "blocked_reason": "Non renseignée dans le régime : son existence et ses paramètres pour les revenus 2025 (reconduite ou non par la loi de finances pour 2026) n'ont pas pu être confirmés auprès d'une source primaire consultée directement au moment de la rédaction — voir docs/validation/1a-cas-d-or.md. La CEHR (art. 223 sexies), elle, est modélisée — voir les cas cehr_celibataire_hauts_revenus et cehr_couple_hauts_revenus."
+    },
+    {
+      "id": "per_plafond_deduction",
+      "description": "Plafond de déduction des versements volontaires sur un PER, dépendant des revenus professionnels de l'année précédente du contribuable.",
+      "kind": "known_gap",
+      "status": "pending_schema_extension",
+      "blocked_reason": "Le plafond n'est pas une constante du régime : il dépend d'une donnée personnelle (revenu professionnel N-1) que ce banc ne modélise pas. Une extension de schéma est proposée pour porter les paramètres de la formule (taux, multiplicateur de PASS) ; le calcul lui-même relève du moteur."
+    },
+    {
+      "id": "assurance_vie_encours_primes_net_de_rachats",
+      "description": "Calcul de l'encours de primes versées net des rachats déjà effectués, qui détermine la part du seuil de 150 000 € consommée par les rachats antérieurs sur un même contrat.",
+      "kind": "known_gap",
+      "status": "pending_schema_extension",
+      "blocked_reason": "Ce calcul nécessite de suivre l'historique des versements et rachats d'un contrat dans le temps ; un régime fiscal, lu sans état, ne peut pas porter cette information — elle relève du moteur de simulation (étape 1.B)."
+    },
+    {
+      "id": "revenus_fonciers_micro_et_reel",
+      "description": "Imposition des revenus fonciers (location nue) selon le régime micro-foncier (abattement forfaitaire) ou le régime réel (déduction des charges), y compris le déficit foncier imputable sur le revenu global.",
+      "kind": "known_gap",
+      "status": "pending_schema_extension",
+      "blocked_reason": "Le régime ne modélise aujourd'hui que la plus-value de cession de l'enveloppe « immobilier direct », pas le revenu locatif annuel récurrent, qui est une autre catégorie de revenu imposable non encore représentée dans le schéma."
+    },
+    {
+      "id": "prelevements_sociaux_18_6_pourcent_2025",
+      "description": "Taux réel des prélèvements sociaux sur les plus-values mobilières, dividendes, PEA, PER, compte-titres et épargne salariale perçus ou réalisés en 2025 : 18,6 % (et non 17,2 %), par l'effet de la LFSS pour 2026.",
+      "kind": "known_gap",
+      "status": "pending_regime_data",
+      "blocked_reason": "DÉCOUVERTE MAJEURE ET TARDIVE (étape 1.A.3), NON CORRIGÉE DANS CETTE ITÉRATION. La loi de financement de la sécurité sociale pour 2026 (adoptée définitivement le 16/12/2025) porte la CSG sur certains revenus du capital de 9,2 % à 10,6 %, portant le total des prélèvements sociaux de 17,2 % à 18,6 % — applicable dès les plus-values et revenus 2025 (déclaration 2026) pour : plus-values mobilières, dividendes, compte-titres, PEA, PER, épargne salariale, LMNP, crypto-actifs. Restent à 17,2 % : assurance-vie, épargne réglementée (Livret A...), immobilier non meublé (revenus fonciers et plus-values immobilières). fr-2026.json applique aujourd'hui un taux unique de 17,2 % à toutes les enveloppes (social_contributions.investment_income.rate, flat_tax.social_rate), ce qui SOUS-ESTIME l'impôt dû sur cto, pea et per. Corriger ce point suppose de faire porter le taux social par enveloppe (ou par catégorie de revenu), ce qui dépasse le périmètre des cinq lacunes traitées à l'étape 1.A.2 et doit faire l'objet d'une itération dédiée — voir docs/validation/1a-cas-d-or.md, section « incertitude majeure »."
+    },
+    {
+      "id": "ifi_decote_entree_1_3_a_1_4_million",
+      "description": "Décote d'entrée de l'IFI pour un patrimoine net taxable compris entre 1,3 M€ et 1,4 M€ (montant réduit de 17 500 € − 1,25 % du patrimoine).",
+      "kind": "known_gap",
+      "status": "pending_schema_extension",
+      "blocked_reason": "TaxRegime.wealth_tax_due applique le barème marginal dès le seuil de 1 300 000 €, sans le mécanisme de décote qui lisse l'entrée dans l'IFI jusqu'à 1 400 000 € (CGI art. 977) ; le schéma ne porte pas aujourd'hui les paramètres de cette décote. Sans effet sur ifi_patrimoine_deux_millions (bien au-dessus du couloir concerné), mais produirait un montant trop élevé pour un patrimoine situé entre 1,3 et 1,4 M€."
+    },
+    {
+      "id": "surtaxe_plus_value_immobiliere_seuil_a_verifier",
+      "description": "Surtaxe sur les plus-values immobilières élevées (CGI art. 1609 nonies G) : seuil et mécanisme du dernier palier à revérifier.",
+      "kind": "known_gap",
+      "status": "pending_regime_data",
+      "blocked_reason": "capital_gains.real_estate.surtax_brackets place le dernier seuil à 250 000 € ; une vérification indique que le texte (art. 1609 nonies G) fixe ce seuil à 260 000 € et prévoit un mécanisme de décote à chaque palier intermédiaire, que de simples tranches marginales ne reproduisent pas. Ce champ n'est de toute façon consommé par aucune méthode de TaxRegime à ce stade (aucun calcul n'en dépend), mais la valeur doit être corrigée avant qu'un calcul ne s'y appuie."
+    }
+  ]
+}

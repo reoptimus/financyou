@@ -19,12 +19,12 @@ from __future__ import annotations
 
 import ast
 import json
-import warnings
 from pathlib import Path
 
 import pytest
 
 from investment_calculator.tax_regime import (
+    ENV_REGIME_PATH,
     PACKAGE_REGIME_DIR,
     SCHEMA_PATH,
     DraftRegimeError,
@@ -37,6 +37,33 @@ from investment_calculator.tax_regime import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TAX_ENGINE = REPO_ROOT / "investment_calculator" / "modules" / "tax_engine.py"
+
+#: Régime minimal, valide selon le schéma, utilisé pour tester le MÉCANISME de
+#: refus des brouillons sans dépendre du statut d'un régime livré (fr-2026 est
+#: aujourd'hui validated, et il est le seul régime du paquet depuis le retrait
+#: de us-2026/uk-2026 — voir docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md).
+_REGIME_JOUET = {
+    "schema_version": "0.1",
+    "id": "zz-2026",
+    "country": {"code": "ZZ", "name": "Zzedland"},
+    "fiscal_year": 2026,
+    "currency": "EUR",
+    "status": "draft",
+    "known_gaps": ["Régime jouet, pour les tests uniquement."],
+    "social_contributions": {"investment_income": {"rate": 0.1}},
+    "income_tax": {"mode": "flat", "flat_rate": 0.2},
+    "wrappers": [
+        {"id": "cto", "label": "Compte-titres", "tax_treatment": "taxable"}
+    ],
+}
+
+
+@pytest.fixture
+def regime_jouet_brouillon(tmp_path, monkeypatch):
+    """Dépose un régime brouillon minimal dans un répertoire pointé par FINANCYOU_TAX_REGIMES."""
+    (tmp_path / "zz-2026.json").write_text(json.dumps(_REGIME_JOUET), encoding="utf-8")
+    monkeypatch.setenv(ENV_REGIME_PATH, str(tmp_path))
+    return "ZZ", 2026
 
 
 # --------------------------------------------------------------------------- #
@@ -111,16 +138,18 @@ def test_un_regime_valide_est_source_et_signe(path: Path):
 # 2. Comportement du chargeur
 # --------------------------------------------------------------------------- #
 
-def test_un_brouillon_est_refuse_par_defaut():
+def test_un_brouillon_est_refuse_par_defaut(regime_jouet_brouillon):
     """La protection centrale : un chiffre non validé ne peut pas atteindre un utilisateur."""
+    country, year = regime_jouet_brouillon
     with pytest.raises(DraftRegimeError) as excinfo:
-        load_regime("FR", 2026)
+        load_regime(country, year)
     assert "draft" in str(excinfo.value)
 
 
-def test_un_brouillon_est_chargeable_explicitement():
-    regime = load_regime("FR", 2026, allow_draft=True)
-    assert regime.country_code == "FR"
+def test_un_brouillon_est_chargeable_explicitement(regime_jouet_brouillon):
+    country, year = regime_jouet_brouillon
+    regime = load_regime(country, year, allow_draft=True)
+    assert regime.country_code == country
     assert regime.is_draft
 
 
@@ -146,7 +175,7 @@ def test_l_inventaire_est_la_source_des_pays_proposes():
     de code.
     """
     inventaire = list_regimes()
-    assert {r.country_code for r in inventaire} >= {"FR", "US"}
+    assert {r.country_code for r in inventaire} >= {"FR"}
     assert all(r.path.exists() for r in inventaire)
 
 
@@ -192,6 +221,46 @@ def test_le_quotient_familial_reduit_l_impot():
     couple = fr.income_tax_due(60000, shares=2.0)
     assert couple < seul, "Le quotient familial doit alléger l'impôt à revenu égal."
     assert fr.income_tax_due(0) == 0.0
+
+
+def test_le_plafonnement_du_quotient_limite_l_avantage_des_enfants():
+    """
+    Cas général du plafonnement (CGI art. 197 I-2°) : au-delà d'un certain
+    revenu, l'avantage procuré par les parts d'enfants est plafonné à un
+    montant par demi-part, pas illimité.
+    """
+    fr = load_regime("FR", 2026, allow_draft=True)
+    revenu = 300_000
+    sans_enfants = fr.income_tax_due(revenu, shares=2.0)
+    avec_plafonnement = fr.income_tax_due(revenu, shares=3.0, dependent_shares=1.0)
+    sans_plafonnement = fr.income_tax_due(revenu, shares=3.0)
+
+    assert avec_plafonnement > sans_plafonnement, (
+        "Le plafonnement doit renchérir l'impôt par rapport au quotient plein, "
+        "à ce niveau de revenu où l'avantage dépasse le plafond."
+    )
+    avantage_plafonne = sans_enfants - avec_plafonnement
+    plafond = fr.document["income_tax"]["household_quotient"]["cap_per_half_share"]
+    # dependent_shares=1.0 équivaut à deux demi-parts (2 enfants à 0.5 part chacun).
+    assert avantage_plafonne == pytest.approx(2 * plafond)
+
+
+def test_l_appel_sans_dependent_shares_reste_retrocompatible():
+    """dependent_shares est optionnel : l'appel historique doit produire le même résultat."""
+    fr = load_regime("FR", 2026, allow_draft=True)
+    assert fr.income_tax_due(60_000, shares=2.0) == pytest.approx(4_207.98, abs=0.01)
+
+
+def test_la_cehr_double_ses_seuils_pour_un_couple():
+    """La CEHR (art. 223 sexies CGI) : mêmes taux, seuils doublés pour un couple."""
+    fr = load_regime("FR", 2026, allow_draft=True)
+    celibataire = fr.surtax_due(600_000, married=False)
+    couple = fr.surtax_due(600_000, married=True)
+    assert celibataire > couple > 0, (
+        "À RFR égal, un couple doit payer moins de CEHR qu'une personne seule : "
+        "ses seuils sont doublés."
+    )
+    assert fr.surtax_due(200_000, married=False) == 0.0, "Sous 250 000 €, la CEHR n'est pas due."
 
 
 def test_l_impot_sur_la_fortune_respecte_son_seuil():
@@ -249,16 +318,10 @@ def test_l_absence_de_plafond_s_ecrit_null_et_non_infini():
 #: leur disparition. Toute nouvelle valeur non listée ici fait échouer la CI.
 #: Clé : ``"<fonction>:<valeur>"``.
 LITTERAUX_TOLERES: dict[str, str] = {
-    # Hypothèses de MARCHÉ égarées dans le moteur fiscal. Ce ne sont pas des
-    # paramètres d'imposition : elles doivent rejoindre les hypothèses de
-    # scénario en 1.B, pas un régime fiscal.
-    "_calculate_after_tax_scenarios:0.02":
-        "hypothèse de marché (rendement du dividende) — à déplacer en 1.B",
-    "_calculate_after_tax_scenarios:0.4": "hypothèse de marché (part de loyer) — à déplacer en 1.B",
-    "_calculate_after_tax_scenarios:0.6":
-        "hypothèse de marché (part d'appréciation) — à déplacer en 1.B",
-    "_calculate_after_tax_scenarios:0.2":
-        "hypothèse comportementale (part réalisée annuellement) — à déplacer en 1.B",
+    # Les hypothèses de marché (rendement du dividende, répartition
+    # loyer/appréciation, part réalisée annuellement) ont déménagé à l'étape
+    # 1.A.6 dans investment_calculator/market_assumptions/ ; elles ne sont
+    # plus des littéraux de ce fichier et n'ont donc plus leur place ici.
     # Garde-fous numériques, sans contenu fiscal.
     "_calculate_after_tax_scenarios:0.01": "epsilon de division, pas un taux",
     "_calculate_tax_tables:0.001": "epsilon de division, pas un taux",
@@ -373,28 +436,29 @@ def test_aucune_juridiction_en_dur_dans_le_moteur():
             )
 
 
-def test_l_ancienne_interface_previent_de_son_obsolescence():
+def test_taxconfigpreset_a_disparu():
+    """
+    Fin de la transition (étape 1.A.5) : TaxConfigPreset et son fichier de
+    valeurs gelées devaient disparaître une fois le moteur branché sur les
+    régimes. Ce test échoue si quelqu'un les réintroduit.
+    """
     from investment_calculator.modules import tax_engine
 
-    with warnings.catch_warnings(record=True) as captures:
-        warnings.simplefilter("always")
-        config = tax_engine.TaxConfigPreset.get_preset("FR")
-
-    assert any(issubclass(c.category, DeprecationWarning) for c in captures), (
-        "get_preset doit signaler son obsolescence, sinon personne ne migrera."
+    assert not hasattr(tax_engine, "TaxConfigPreset"), (
+        "TaxConfigPreset devait disparaître à la fin de l'étape 1.A ; voir "
+        "docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md."
     )
-    # Le comportement numérique hérité reste strictement identique.
+    legacy_path = REPO_ROOT / "investment_calculator" / "tax_regimes" / "_legacy_presets.json"
+    assert not legacy_path.exists(), (
+        "_legacy_presets.json devait être supprimé avec TaxConfigPreset."
+    )
+
+
+def test_le_moteur_consomme_directement_un_regime():
+    """Le pont vers l'ancien moteur passe par TaxRegime, pas par un preset."""
+    from investment_calculator.modules import tax_engine
+
+    config = tax_engine._default_tax_config()
+    assert config["jurisdiction"] == "FR"
     assert config["social_charges"] == 0.172
     assert config["wealth_tax"]["threshold"] == 1_300_000
-
-
-def test_les_valeurs_heritees_sont_gelees_hors_du_code():
-    from investment_calculator.modules import tax_engine
-
-    chemin = tax_engine.TaxConfigPreset.LEGACY_DATA_PATH
-    assert chemin.exists(), "Le fichier de valeurs héritées doit être livré avec le paquet."
-    document = json.loads(chemin.read_text(encoding="utf-8"))
-    assert document["_status"] == "frozen-legacy"
-    assert "1.A" in document["_comment"], (
-        "Le fichier doit porter l'échéance de sa suppression."
-    )
