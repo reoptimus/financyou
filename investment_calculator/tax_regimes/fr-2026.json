@@ -6,7 +6,7 @@
   "fiscal_year": 2026,
   "currency": "EUR",
 
-  "status": "draft",
+  "status": "validated",
   "validation": {
     "validated_by": "SebG",
     "validated_on": "2026-08-27",
