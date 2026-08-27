@@ -57,6 +57,13 @@ class TaxConfig:
         standard_deduction (float): Standard deduction amount
     """
 
+    #: Valeurs par défaut ci-dessous : un exemple illustratif US, PAS une
+    #: fiscalité vérifiée. ``standard_deduction`` date même de 2023, donc
+    #: obsolète y compris pour son propre usage. Pour un calcul réel, utilisez
+    #: :meth:`from_regime`, qui construit cette configuration depuis un régime
+    #: fiscal chargé par :func:`investment_calculator.tax_regime.load_regime`
+    #: (sourcé, versionné par millésime) plutôt que depuis ces constantes.
+    #: Voir docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md.
     country_code: str = "US"
     ordinary_income_rate: float = 0.25
     long_term_cap_gains_rate: float = 0.15
@@ -81,6 +88,82 @@ class TaxConfig:
 
         if self.tax_deferred_withdrawal_rate is None:
             self.tax_deferred_withdrawal_rate = self.ordinary_income_rate
+
+    @classmethod
+    def from_regime(cls, regime, *, reference_household_income: float) -> "TaxConfig":
+        """
+        Construire une configuration à partir d'un régime fiscal réel.
+
+        Comme :meth:`investment_calculator.tax_regime.TaxRegime.to_scenario_tax_config`,
+        c'est un pont vers une taxonomie plus grossière qu'un régime :
+        ``TaxConfig`` raisonne par catégorie de revenu générique calquée sur
+        le système américain (revenu ordinaire, plus-value long terme,
+        dividende qualifié, sécurité sociale, taxe d'état), qui ne
+        correspond pas terme à terme à la fiscalité d'un autre pays.
+        Correspondances retenues pour un régime comme le français :
+
+        * ``long_term_cap_gains_rate``, ``short_term_cap_gains_rate``,
+          ``qualified_dividend_rate`` et ``non_qualified_dividend_rate``
+          reçoivent tous la part *impôt sur le revenu* du prélèvement
+          forfaitaire (``flat_tax_income_rate``), jamais son taux global —
+          pour la même raison que dans ``to_scenario_tax_config`` : ne pas
+          recompter les prélèvements sociaux, déjà portés séparément par
+          ``social_security_rate``.
+        * ``ordinary_income_rate`` et ``tax_deferred_withdrawal_rate``
+          reçoivent un taux moyen déduit du barème progressif à
+          ``reference_household_income`` (voir ``to_scenario_tax_config``
+          pour la justification de ce paramètre).
+        * ``social_security_rate`` reçoit le taux des prélèvements sociaux du
+          régime ; ``medicare_rate`` est mis à 0 (notion sans équivalent
+          français, déjà couverte ici par ``social_security_rate``).
+        * ``state_tax_rate`` est mis à 0 : pas d'équivalent français de
+          l'impôt d'état américain.
+        * ``wealth_tax_rate`` reçoit le taux marginal de la première tranche
+          non nulle de l'IFI, comme dans ``to_scenario_tax_config``.
+        * ``standard_deduction`` est mis à 0 : le quotient familial français
+          divise le revenu, il ne le diminue pas comme une déduction
+          forfaitaire — les deux mécanismes ne sont pas équivalents.
+        * ``early_withdrawal_penalty`` est mis à 0 : la pénalité de retrait
+          anticipé américaine (10 % avant 59 ans et demi) n'a pas
+          d'équivalent générique en France, où chaque enveloppe porte ses
+          propres règles de sortie (voir
+          ``investment_calculator.tax_regime.TaxRegime.select_withdrawal_rule``).
+        """
+        if reference_household_income <= 0:
+            raise ValueError("reference_household_income doit être strictement positif.")
+
+        if regime.flat_tax_enabled:
+            capital_income_rate = regime.flat_tax_income_rate
+        else:
+            capital_income_rate = (
+                regime.income_tax_due(reference_household_income) / reference_household_income
+            )
+        ordinary_rate = (
+            regime.income_tax_due(reference_household_income) / reference_household_income
+        )
+
+        wealth = regime.document.get("wealth_tax", {})
+        wealth_rate = 0.0
+        for bracket in wealth.get("brackets", []) or []:
+            if float(bracket["rate"]) > 0:
+                wealth_rate = float(bracket["rate"])
+                break
+
+        return cls(
+            country_code=regime.country_code,
+            ordinary_income_rate=ordinary_rate,
+            long_term_cap_gains_rate=capital_income_rate,
+            short_term_cap_gains_rate=capital_income_rate,
+            qualified_dividend_rate=capital_income_rate,
+            non_qualified_dividend_rate=capital_income_rate,
+            state_tax_rate=0.0,
+            social_security_rate=regime.social_rate,
+            medicare_rate=0.0,
+            wealth_tax_rate=wealth_rate,
+            tax_deferred_withdrawal_rate=ordinary_rate,
+            early_withdrawal_penalty=0.0,
+            standard_deduction=0.0,
+        )
 
     @property
     def total_payroll_tax_rate(self) -> float:
