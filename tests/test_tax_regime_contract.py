@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import ast
 import json
-import warnings
 from pathlib import Path
 
 import pytest
@@ -443,28 +442,29 @@ def test_aucune_juridiction_en_dur_dans_le_moteur():
             )
 
 
-def test_l_ancienne_interface_previent_de_son_obsolescence():
+def test_taxconfigpreset_a_disparu():
+    """
+    Fin de la transition (étape 1.A.5) : TaxConfigPreset et son fichier de
+    valeurs gelées devaient disparaître une fois le moteur branché sur les
+    régimes. Ce test échoue si quelqu'un les réintroduit.
+    """
     from investment_calculator.modules import tax_engine
 
-    with warnings.catch_warnings(record=True) as captures:
-        warnings.simplefilter("always")
-        config = tax_engine.TaxConfigPreset.get_preset("FR")
-
-    assert any(issubclass(c.category, DeprecationWarning) for c in captures), (
-        "get_preset doit signaler son obsolescence, sinon personne ne migrera."
+    assert not hasattr(tax_engine, "TaxConfigPreset"), (
+        "TaxConfigPreset devait disparaître à la fin de l'étape 1.A ; voir "
+        "docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md."
     )
-    # Le comportement numérique hérité reste strictement identique.
+    legacy_path = REPO_ROOT / "investment_calculator" / "tax_regimes" / "_legacy_presets.json"
+    assert not legacy_path.exists(), (
+        "_legacy_presets.json devait être supprimé avec TaxConfigPreset."
+    )
+
+
+def test_le_moteur_consomme_directement_un_regime():
+    """Le pont vers l'ancien moteur passe par TaxRegime, pas par un preset."""
+    from investment_calculator.modules import tax_engine
+
+    config = tax_engine._default_tax_config()
+    assert config["jurisdiction"] == "FR"
     assert config["social_charges"] == 0.172
     assert config["wealth_tax"]["threshold"] == 1_300_000
-
-
-def test_les_valeurs_heritees_sont_gelees_hors_du_code():
-    from investment_calculator.modules import tax_engine
-
-    chemin = tax_engine.TaxConfigPreset.LEGACY_DATA_PATH
-    assert chemin.exists(), "Le fichier de valeurs héritées doit être livré avec le paquet."
-    document = json.loads(chemin.read_text(encoding="utf-8"))
-    assert document["_status"] == "frozen-legacy"
-    assert "1.A" in document["_comment"], (
-        "Le fichier doit porter l'échéance de sa suppression."
-    )

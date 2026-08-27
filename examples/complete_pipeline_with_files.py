@@ -22,7 +22,7 @@ USAGE:
 CUSTOMIZATION:
     Edit JSON files in examples/input_files/ to customize:
     - scenario_config.json - Economic assumptions
-    - tax_config_us.json - Tax configuration
+    - tax_config_fr.json - Tax configuration
     - user_profile_aggressive.json - Investor profile
     - optimization_config.json - Optimization parameters
 """
@@ -36,6 +36,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from investment_calculator import tax_regime
 from investment_calculator.modules import (
     scenario_generator,
     tax_engine,
@@ -123,12 +124,14 @@ def main():
 
     # Load all configs
     scenario_config = load_json_config('scenario_config.json')
-    tax_config_data = load_json_config('tax_config_us.json')
+    # Seul le régime français est vérifié aujourd'hui — voir
+    # investment_calculator/tax_regimes/README.md
+    tax_config_data = load_json_config('tax_config_fr.json')
     user_profile_data = load_json_config('user_profile_aggressive.json')
     optimization_config = load_json_config('optimization_config.json')
 
     print(f"  ✓ scenario_config.json")
-    print(f"  ✓ tax_config_us.json")
+    print(f"  ✓ tax_config_fr.json")
     print(f"  ✓ user_profile_aggressive.json")
     print(f"  ✓ optimization_config.json")
 
@@ -170,8 +173,10 @@ def main():
 
     engine = tax_engine.TaxEngine()
 
-    # Get preset tax configuration for jurisdiction
-    tax_config_preset = tax_engine.TaxConfigPreset.get_preset(tax_config_data['jurisdiction'])
+    # Charger le régime fiscal du pays et le traduire pour ce moteur
+    tax_config_preset = tax_regime.load_regime(
+        tax_config_data['jurisdiction']
+    ).to_scenario_tax_config(reference_household_income=50_000)
 
     # Apply taxes
     tax_results = engine.apply_taxes({

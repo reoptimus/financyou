@@ -15,6 +15,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from investment_calculator import tax_regime
 from investment_calculator.modules import (
     scenario_generator,
     tax_engine,
@@ -83,8 +84,11 @@ def main():
 
     engine = tax_engine.TaxEngine()
 
-    # Use US tax configuration
-    tax_config = tax_engine.TaxConfigPreset.get_preset('US')
+    # Use the French tax regime (seul régime vérifié aujourd'hui — voir
+    # investment_calculator/tax_regimes/README.md)
+    tax_config = tax_regime.load_regime('FR').to_scenario_tax_config(
+        reference_household_income=50_000
+    )
     print(f"\nUsing tax jurisdiction: {tax_config['jurisdiction']}")
     print(f"  Dividend tax rate: {tax_config['account_types']['taxable']['dividend_tax_rate']:.1%}")
     print(f"  Capital gains rate: {tax_config['account_types']['taxable']['capital_gains_rate']:.1%}")

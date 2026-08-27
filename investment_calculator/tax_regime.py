@@ -529,6 +529,94 @@ class TaxRegime:
             )
         return apply_brackets(net_taxable_wealth, brackets)
 
+    # -- pont vers l'ancien moteur de scénarios ------------------------------ #
+
+    def to_scenario_tax_config(self, *, reference_household_income: float) -> dict[str, Any]:
+        """
+        Traduire ce régime dans la forme historique attendue par
+        :class:`investment_calculator.modules.tax_engine.TaxEngine`.
+
+        C'est un pont vers un moteur plus grossier qu'un régime, pas une
+        nouvelle vérité fiscale : ``TaxEngine`` raisonne par grande catégorie
+        de compte (taxable / tax_deferred / tax_free) et par classe d'actif,
+        pas par enveloppe ni par barème progressif complet. Ce que ce pont
+        fait, précisément :
+
+        * ``dividend_tax_rate``, ``interest_tax_rate`` et ``capital_gains_rate``
+          reçoivent la part *impôt sur le revenu* du prélèvement forfaitaire
+          (:attr:`flat_tax_income_rate`), jamais son taux global. C'est
+          exactement le point qui portait le taux français à 47,2 % au lieu
+          de 30 % dans l'ancien moteur : celui-ci ajoute ``social_charges``
+          par-dessus, et additionner un taux déjà global aurait recompté les
+          prélèvements sociaux une seconde fois.
+        * ``income_tax_rate`` (utilisé par le moteur pour les revenus fonciers,
+          imposés au barème et non au forfait) reçoit un taux moyen obtenu en
+          divisant :meth:`income_tax_due` à ``reference_household_income`` par
+          ce revenu. ``reference_household_income`` n'est pas une donnée du
+          régime : c'est un revenu de foyer choisi par l'appelant pour réduire
+          un barème progressif à un taux unique, faute de connaître le revenu
+          réel du foyer simulé à ce stade du calcul — une hypothèse de
+          modélisation du moteur de scénarios, pas une règle fiscale (voir
+          ``investment_calculator/modules/tax_engine.py`` et
+          ``docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md``,
+          section « ce qui n'est pas de la fiscalité »).
+        * ``wealth_tax.rate`` reçoit le taux marginal de la première tranche
+          non nulle du barème IFI : ``TaxEngine`` ne sait pas appliquer un
+          barème par tranches, seulement un taux unique au-delà d'un seuil.
+
+        Cette méthode ne couvre donc qu'une fraction de ce qu'un régime peut
+        exprimer (aucune règle par enveloppe, aucun quotient familial, aucune
+        CEHR). Elle existe pour que ``TaxEngine`` cesse de lire
+        ``_legacy_presets.json`` ; elle ne prétend pas remplacer le calcul par
+        enveloppe que porte le reste de ce module.
+        """
+        if reference_household_income <= 0:
+            raise ValueError("reference_household_income doit être strictement positif.")
+
+        if self.flat_tax_enabled:
+            capital_income_rate = self.flat_tax_income_rate
+        else:
+            capital_income_rate = (
+                self.income_tax_due(reference_household_income) / reference_household_income
+            )
+
+        earned_income_rate = (
+            self.income_tax_due(reference_household_income) / reference_household_income
+        )
+
+        wealth = self.document.get("wealth_tax", {})
+        wealth_rate = 0.0
+        for bracket in wealth.get("brackets", []) or []:
+            if float(bracket["rate"]) > 0:
+                wealth_rate = float(bracket["rate"])
+                break
+
+        return {
+            "jurisdiction": self.country_code,
+            "account_types": {
+                "taxable": {
+                    "income_tax_rate": earned_income_rate,
+                    "capital_gains_rate": capital_income_rate,
+                    "dividend_tax_rate": capital_income_rate,
+                    "interest_tax_rate": capital_income_rate,
+                },
+                "tax_deferred": {
+                    "contribution_deduction": True,
+                    "withdrawal_tax_rate": earned_income_rate,
+                },
+                "tax_free": {
+                    "contribution_limit": None,
+                    "age_restrictions": {},
+                },
+            },
+            "social_charges": self.social_rate,
+            "wealth_tax": {
+                "enabled": bool(wealth.get("enabled", False)),
+                "threshold": float(wealth.get("threshold", 0.0)),
+                "rate": wealth_rate,
+            },
+        }
+
     # -- enveloppes --------------------------------------------------------- #
 
     @property
