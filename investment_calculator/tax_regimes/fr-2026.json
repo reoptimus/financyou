@@ -66,11 +66,18 @@
       "url": "https://bofip.impots.gouv.fr/bofip/4142-PGP.html/identifiant=BOI-RFPI-BASE-30-20-20250916",
       "consulted_on": "2026-08-27",
       "covers": ["rental_income_regimes.real_regime"]
+    },
+    {
+      "label": "impots.gouv.fr — Principales nouveautés Revenus 2025 (hausse de la CSG sur les revenus du capital, LFSS 2026)",
+      "url": "https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/nouveautes.pdf",
+      "consulted_on": "2026-08-27",
+      "covers": ["social_contributions.investment_income.rate", "flat_tax.social_rate"]
     }
   ],
 
   "known_gaps": [
     "STATUT BROUILLON : les valeurs de ce fichier ont été rédigées par un agent et n'ont pas encore été confrontées à des cas d'or par un humain. Ne pas utiliser en production (le chargeur le refuse par défaut).",
+    "INCERTITUDE MAJEURE, DÉCOUVERTE TARDIVE (étape 1.A.3), NON CORRIGÉE : la LFSS pour 2026 (adoptée le 16/12/2025) porte la CSG sur certains revenus du capital de 9,2 % à 10,6 %, soit des prélèvements sociaux de 18,6 % au lieu de 17,2 %, applicable dès les plus-values et revenus 2025 pour les plus-values mobilières, dividendes, CTO, PEA, PER, épargne salariale, LMNP et crypto-actifs. L'assurance-vie, l'épargne réglementée et l'immobilier non meublé restent à 17,2 %. social_contributions.investment_income.rate et flat_tax.social_rate valent ici 0,172 partout, ce qui sous-estime l'impôt dû sur cto, pea et per. Voir docs/validation/1a-cas-d-or.md et tests/golden/fr-2026.json (cas prelevements_sociaux_18_6_pourcent_2025).",
     "Plafonnement du quotient familial : seul le cas général (CGI art. 197 I-2°) est modélisé (household_quotient.cap_per_half_share, TaxRegime.income_tax_due). Les plafonds et réductions complémentaires des cas particuliers (parent isolé, veuf avec enfant à charge, garde alternée au quart de part, invalides ou anciens combattants) ne le sont pas.",
     "Contribution différentielle sur les hauts revenus (CDHR, art. 224 CGI) : son existence et ses paramètres pour les revenus 2025 n'ont pas pu être confirmés auprès d'une source primaire consultée directement — voir docs/validation/1a-cas-d-or.md. Elle n'est donc pas modélisée, à la différence de la CEHR (art. 223 sexies, income_tax.surtaxes) qui l'est.",
     "PER : le plafond de déduction dépend des revenus professionnels de l'année précédente et n'est pas modélisable par une constante ; une formule est proposée (wrappers[per].contribution_deduction_formula), mais les paramètres propres aux travailleurs non salariés (tns_base_rate, tns_upper_band_rate, année de référence du PASS retenue) n'ont pas pu être confirmés sur le texte BOFiP intégral — confiance faible sur ce point précis, voir le rapport de validation.",
