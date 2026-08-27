@@ -27,7 +27,7 @@ Exemple
 -------
 >>> from investment_calculator.tax_regime import list_regimes
 >>> sorted(r.id for r in list_regimes())
-['fr-2026', 'uk-2026', 'us-2026']
+['fr-2026']
 """
 
 from __future__ import annotations

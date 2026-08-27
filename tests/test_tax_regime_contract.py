@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 from investment_calculator.tax_regime import (
+    ENV_REGIME_PATH,
     PACKAGE_REGIME_DIR,
     SCHEMA_PATH,
     DraftRegimeError,
@@ -37,6 +38,33 @@ from investment_calculator.tax_regime import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TAX_ENGINE = REPO_ROOT / "investment_calculator" / "modules" / "tax_engine.py"
+
+#: Régime minimal, valide selon le schéma, utilisé pour tester le MÉCANISME de
+#: refus des brouillons sans dépendre du statut d'un régime livré (fr-2026 est
+#: aujourd'hui validated, et il est le seul régime du paquet depuis le retrait
+#: de us-2026/uk-2026 — voir docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md).
+_REGIME_JOUET = {
+    "schema_version": "0.1",
+    "id": "zz-2026",
+    "country": {"code": "ZZ", "name": "Zzedland"},
+    "fiscal_year": 2026,
+    "currency": "EUR",
+    "status": "draft",
+    "known_gaps": ["Régime jouet, pour les tests uniquement."],
+    "social_contributions": {"investment_income": {"rate": 0.1}},
+    "income_tax": {"mode": "flat", "flat_rate": 0.2},
+    "wrappers": [
+        {"id": "cto", "label": "Compte-titres", "tax_treatment": "taxable"}
+    ],
+}
+
+
+@pytest.fixture
+def regime_jouet_brouillon(tmp_path, monkeypatch):
+    """Dépose un régime brouillon minimal dans un répertoire pointé par FINANCYOU_TAX_REGIMES."""
+    (tmp_path / "zz-2026.json").write_text(json.dumps(_REGIME_JOUET), encoding="utf-8")
+    monkeypatch.setenv(ENV_REGIME_PATH, str(tmp_path))
+    return "ZZ", 2026
 
 
 # --------------------------------------------------------------------------- #
@@ -111,16 +139,18 @@ def test_un_regime_valide_est_source_et_signe(path: Path):
 # 2. Comportement du chargeur
 # --------------------------------------------------------------------------- #
 
-def test_un_brouillon_est_refuse_par_defaut():
+def test_un_brouillon_est_refuse_par_defaut(regime_jouet_brouillon):
     """La protection centrale : un chiffre non validé ne peut pas atteindre un utilisateur."""
+    country, year = regime_jouet_brouillon
     with pytest.raises(DraftRegimeError) as excinfo:
-        load_regime("FR", 2026)
+        load_regime(country, year)
     assert "draft" in str(excinfo.value)
 
 
-def test_un_brouillon_est_chargeable_explicitement():
-    regime = load_regime("FR", 2026, allow_draft=True)
-    assert regime.country_code == "FR"
+def test_un_brouillon_est_chargeable_explicitement(regime_jouet_brouillon):
+    country, year = regime_jouet_brouillon
+    regime = load_regime(country, year, allow_draft=True)
+    assert regime.country_code == country
     assert regime.is_draft
 
 
@@ -146,7 +176,7 @@ def test_l_inventaire_est_la_source_des_pays_proposes():
     de code.
     """
     inventaire = list_regimes()
-    assert {r.country_code for r in inventaire} >= {"FR", "US"}
+    assert {r.country_code for r in inventaire} >= {"FR"}
     assert all(r.path.exists() for r in inventaire)
 
 
