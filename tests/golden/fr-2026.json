@@ -1,0 +1,192 @@
+{
+  "$schema": "./schema.json",
+  "schema_version": "0.1",
+  "regime_id": "fr-2026",
+
+  "cases": [
+    {
+      "id": "ir_bareme_celibataire_tranche_30",
+      "description": "Un célibataire sans enfant déclare un revenu imposable de 40 000 € : impôt sur le revenu au barème 2026, une part.",
+      "kind": "income_tax",
+      "status": "pending_expected_value",
+      "inputs": { "taxable_income": 40000, "shares": 1.0 }
+    },
+    {
+      "id": "ir_bareme_couple_deux_enfants",
+      "description": "Un couple marié avec deux enfants à charge (3 parts) déclare un revenu imposable de 80 000 € : impôt sur le revenu au barème 2026 avec quotient familial, avant tout plafonnement.",
+      "kind": "income_tax",
+      "status": "pending_expected_value",
+      "inputs": { "taxable_income": 80000, "shares": 3.0 },
+      "notes": "Ce cas ne teste pas le plafonnement du quotient familial (lacune connue à ce stade). Voir le cas quotient_familial_plafonnement_cas_particuliers."
+    },
+    {
+      "id": "ifi_patrimoine_deux_millions",
+      "description": "Un foyer détient 2 000 000 € de patrimoine immobilier net taxable : impôt sur la fortune immobilière (IFI) dû.",
+      "kind": "wealth_tax",
+      "status": "pending_expected_value",
+      "inputs": { "net_taxable_wealth": 2000000 }
+    },
+    {
+      "id": "cto_pfu_plus_value",
+      "description": "Un compte-titres ordinaire réalise une plus-value de 10 000 € lors d'une cession : prélèvement forfaitaire unique (PFU), sans option pour le barème.",
+      "kind": "wrapper_withdrawal",
+      "status": "pending_expected_value",
+      "inputs": {
+        "wrapper_id": "cto",
+        "withdrawal_amount": 10000,
+        "gain_amount": 10000,
+        "shares": 1.0
+      }
+    },
+    {
+      "id": "pea_retrait_apres_cinq_ans",
+      "description": "Un PEA détenu depuis 6 ans (valeur totale 100 000 €, dont 40 000 € de plus-value latente) fait l'objet d'un retrait de 20 000 € : exonération d'impôt sur le revenu, prélèvements sociaux dus sur la quote-part de plus-value retirée.",
+      "kind": "wrapper_withdrawal",
+      "status": "pending_expected_value",
+      "inputs": {
+        "wrapper_id": "pea",
+        "withdrawal_amount": 20000,
+        "account_value": 100000,
+        "total_gain": 40000,
+        "holding_years": 6,
+        "shares": 1.0
+      }
+    },
+    {
+      "id": "pea_retrait_avant_cinq_ans",
+      "description": "Le même PEA fait l'objet d'un retrait avant cinq ans de détention (2 ans) : imposition à 12,8 % sur la quote-part de plus-value, prélèvements sociaux dus.",
+      "kind": "wrapper_withdrawal",
+      "status": "pending_expected_value",
+      "inputs": {
+        "wrapper_id": "pea",
+        "withdrawal_amount": 20000,
+        "account_value": 100000,
+        "total_gain": 40000,
+        "holding_years": 2,
+        "shares": 1.0
+      }
+    },
+    {
+      "id": "assurance_vie_rachat_primes_sous_seuil",
+      "description": "Rachat sur une assurance-vie de plus de 8 ans, primes versées de 100 000 € (sous le seuil de 150 000 €), pour un célibataire : abattement annuel de 4 600 €, taux réduit de 7,5 %, prélèvements sociaux dus.",
+      "kind": "wrapper_withdrawal",
+      "status": "pending_expected_value",
+      "inputs": {
+        "wrapper_id": "assurance_vie",
+        "withdrawal_amount": 15000,
+        "account_value": 130000,
+        "total_gain": 30000,
+        "holding_years": 10,
+        "premiums_paid": 100000,
+        "household_status": "single",
+        "shares": 1.0
+      }
+    },
+    {
+      "id": "assurance_vie_rachat_primes_au_dela_du_seuil",
+      "description": "Rachat sur une assurance-vie avec 200 000 € de primes versées (au-delà du seuil de 150 000 €) pour un célibataire : abattement annuel de 4 600 €, taux de 12,8 % sur la quote-part de gain, prélèvements sociaux dus.",
+      "kind": "wrapper_withdrawal",
+      "status": "pending_expected_value",
+      "inputs": {
+        "wrapper_id": "assurance_vie",
+        "withdrawal_amount": 15000,
+        "account_value": 230000,
+        "total_gain": 30000,
+        "holding_years": 10,
+        "premiums_paid": 200000,
+        "household_status": "single",
+        "shares": 1.0
+      },
+      "notes": "Simplification : ce cas applique le taux « au-delà du seuil » à la totalité du gain retiré. Le régime ne modélise pas encore la ventilation proportionnelle entre part de primes sous le seuil et part au-delà (voir le cas assurance_vie_encours_primes_net_de_rachats)."
+    },
+    {
+      "id": "assurance_vie_rachat_avant_huit_ans",
+      "description": "Rachat sur une assurance-vie détenue depuis 3 ans (avant 8 ans) : taux de 12,8 % sur la quote-part de gain, sans abattement, prélèvements sociaux dus.",
+      "kind": "wrapper_withdrawal",
+      "status": "pending_expected_value",
+      "inputs": {
+        "wrapper_id": "assurance_vie",
+        "withdrawal_amount": 15000,
+        "account_value": 130000,
+        "total_gain": 30000,
+        "holding_years": 3,
+        "premiums_paid": 100000,
+        "household_status": "single",
+        "shares": 1.0
+      }
+    },
+    {
+      "id": "per_sortie_capital_retraite",
+      "description": "Sortie en capital d'un PER à la retraite, pour un célibataire (une part) : la totalité du retrait est imposée au barème progressif, prélèvements sociaux dus sur la totalité du retrait.",
+      "kind": "wrapper_withdrawal",
+      "status": "pending_expected_value",
+      "inputs": {
+        "wrapper_id": "per",
+        "withdrawal_amount": 50000,
+        "exit_form": "lump_sum",
+        "shares": 1.0
+      },
+      "notes": "Le modèle actuel calcule l'impôt comme si ce retrait était le seul revenu du foyer cette année-là (voir TaxRegime.resolve_income_tax_rate) : il ne l'ajoute pas à un revenu existant. Simplification à signaler, pas une erreur de ce cas."
+    },
+    {
+      "id": "livret_a_retrait_exonere",
+      "description": "Retrait sur un Livret A : exonération totale d'impôt sur le revenu et de prélèvements sociaux.",
+      "kind": "wrapper_withdrawal",
+      "status": "pending_expected_value",
+      "inputs": {
+        "wrapper_id": "livret_a",
+        "withdrawal_amount": 5000,
+        "gain_amount": 200,
+        "shares": 1.0
+      }
+    },
+    {
+      "id": "immobilier_direct_cession_apres_abattements",
+      "description": "Cession d'un bien locatif détenu en direct, plus-value nette de 30 000 € déjà après abattements pour durée de détention : imposition à 19 % au titre de l'impôt sur le revenu, prélèvements sociaux dus.",
+      "kind": "wrapper_withdrawal",
+      "status": "pending_expected_value",
+      "inputs": {
+        "wrapper_id": "immobilier_direct",
+        "withdrawal_amount": 30000,
+        "gain_amount": 30000,
+        "shares": 1.0
+      },
+      "notes": "La plus-value de 30 000 € est fournie déjà nette des abattements pour durée de détention (capital_gains.real_estate.holding_allowances) : ce cas ne teste pas le calcul de l'abattement lui-même, qui n'est pas mis en œuvre par ce banc."
+    },
+    {
+      "id": "quotient_familial_plafonnement_cas_particuliers",
+      "description": "Plafonnement du quotient familial pour les cas particuliers (parent isolé, veuf avec enfant à charge, garde alternée au quart de part, invalides/anciens combattants), chacun portant un plafond ou une réduction complémentaire distincts du plafond général.",
+      "kind": "known_gap",
+      "status": "pending_schema_extension",
+      "blocked_reason": "Le régime ne porte qu'un plafond général unique par demi-part (household_quotient.cap_per_half_share) ; les mécanismes à deux étages des cas particuliers (CGI art. 197 I-3°) ne sont pas représentables par ce seul champ."
+    },
+    {
+      "id": "cehr_et_cdhr_hauts_revenus",
+      "description": "Contribution exceptionnelle sur les hauts revenus (CEHR) et contribution différentielle sur les hauts revenus (CDHR) applicables aux revenus 2025.",
+      "kind": "known_gap",
+      "status": "pending_regime_data",
+      "blocked_reason": "Non encore renseignées dans le régime. Le statut de la CDHR pour les revenus 2025 (reconduite ou non par la loi de finances pour 2026) n'a pas pu être confirmé auprès d'une source primaire au moment de la rédaction — voir docs/validation/1a-cas-d-or.md."
+    },
+    {
+      "id": "per_plafond_deduction",
+      "description": "Plafond de déduction des versements volontaires sur un PER, dépendant des revenus professionnels de l'année précédente du contribuable.",
+      "kind": "known_gap",
+      "status": "pending_schema_extension",
+      "blocked_reason": "Le plafond n'est pas une constante du régime : il dépend d'une donnée personnelle (revenu professionnel N-1) que ce banc ne modélise pas. Une extension de schéma est proposée pour porter les paramètres de la formule (taux, multiplicateur de PASS) ; le calcul lui-même relève du moteur."
+    },
+    {
+      "id": "assurance_vie_encours_primes_net_de_rachats",
+      "description": "Calcul de l'encours de primes versées net des rachats déjà effectués, qui détermine la part du seuil de 150 000 € consommée par les rachats antérieurs sur un même contrat.",
+      "kind": "known_gap",
+      "status": "pending_schema_extension",
+      "blocked_reason": "Ce calcul nécessite de suivre l'historique des versements et rachats d'un contrat dans le temps ; un régime fiscal, lu sans état, ne peut pas porter cette information — elle relève du moteur de simulation (étape 1.B)."
+    },
+    {
+      "id": "revenus_fonciers_micro_et_reel",
+      "description": "Imposition des revenus fonciers (location nue) selon le régime micro-foncier (abattement forfaitaire) ou le régime réel (déduction des charges), y compris le déficit foncier imputable sur le revenu global.",
+      "kind": "known_gap",
+      "status": "pending_schema_extension",
+      "blocked_reason": "Le régime ne modélise aujourd'hui que la plus-value de cession de l'enveloppe « immobilier direct », pas le revenu locatif annuel récurrent, qui est une autre catégorie de revenu imposable non encore représentée dans le schéma."
+    }
+  ]
+}

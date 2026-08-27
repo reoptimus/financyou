@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/reoptimus/financyou/schemas/golden_case-0.1.json",
+  "title": "Cas d'or FinancYou",
+  "description": "Forme d'un fichier de cas d'or : une situation fiscale concrète et le résultat qu'elle doit produire au centime près. Voir tests/golden/README.md. Ce schéma décrit la STRUCTURE du fichier ; il ne remplace pas la lecture humaine des valeurs, qui restent la responsabilité de qui les valide.",
+  "type": "object",
+  "required": ["schema_version", "regime_id", "cases"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+$" },
+    "regime_id": {
+      "type": "string",
+      "description": "Identifiant du régime fiscal testé, par exemple fr-2026."
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/case" }
+    }
+  },
+  "$defs": {
+    "case": {
+      "type": "object",
+      "required": ["id", "description", "kind", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$",
+          "description": "Identifiant stable du cas, utilisé comme nom de test."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Ce que représente le cas, en langage courant."
+        },
+        "kind": {
+          "enum": ["income_tax", "wealth_tax", "wrapper_withdrawal", "known_gap"],
+          "description": "Famille de calcul. Voir tests/golden/README.md."
+        },
+        "status": {
+          "enum": [
+            "pending_regime_data",
+            "pending_expected_value",
+            "pending_schema_extension",
+            "ready"
+          ]
+        },
+        "inputs": {
+          "type": "object",
+          "description": "Entrées du calcul. La forme dépend de kind ; voir README.md."
+        },
+        "expected": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "income_tax": { "type": ["number", "null"] },
+            "social_contributions": { "type": ["number", "null"] },
+            "total": { "type": ["number", "null"] },
+            "net": { "type": ["number", "null"] }
+          }
+        },
+        "blocked_reason": {
+          "type": "string",
+          "description": "Pour kind = known_gap : quelle lacune du régime empêche le calcul."
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string" },
+              "url": { "type": "string" },
+              "consulted_on": { "type": "string", "format": "date" }
+            }
+          }
+        },
+        "confidence": {
+          "enum": ["high", "medium", "low"],
+          "description": "Niveau de confiance dans la valeur attendue, déclaré par qui l'a établie."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Réserves, hypothèses simplificatrices, ou incertitudes à signaler explicitement."
+        }
+      }
+    }
+  }
+}
