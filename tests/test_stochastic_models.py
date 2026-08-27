@@ -432,6 +432,55 @@ class TestEIOPACalibrator(unittest.TestCase):
         self.assertGreater(len(P0t), 0)
 
 
+class TestEIOPACalibratorFromExcel(unittest.TestCase):
+    """
+    Régression de l'étape 1.B.2 : EIOPACalibrator.from_excel n'avait jamais
+    été appelée en pratique. Ses anciens défauts (sheet_name="RFR_spot_no_VA",
+    qui n'existe pas dans le classeur réel ; country_column=2, qui pointe
+    vers le choc de courbe "YCU" et non la courbe centrale "BaseLine";
+    start_row=10, qui saute neuf lignes de données valides) le prouvaient.
+    """
+
+    EIOPA_FILE = os.path.join(
+        os.path.dirname(__file__), "..", "legacy", "excel_files",
+        "EIOPA_avril_2018_FRANCE.xlsx",
+    )
+
+    def test_from_excel_loads_the_real_workbook(self):
+        calibrator = EIOPACalibrator.from_excel(self.EIOPA_FILE)
+
+        # Feuille "RFR" : 150 maturités (1 à 150 ans), une ligne d'en-tête.
+        self.assertEqual(len(calibrator.spot_rates), 150)
+        # Colonne "BaseLine" : la courbe d'avril 2018 démarre en taux négatif.
+        self.assertLess(calibrator.spot_rates[0], 0)
+        self.assertAlmostEqual(calibrator.spot_rates[0], -0.00358, places=5)
+
+    def test_from_excel_produces_a_coherent_curve(self):
+        calibrator = EIOPACalibrator.from_excel(self.EIOPA_FILE, dt=0.5)
+        calibrator.calibrate()
+
+        p0t = calibrator.P0t_interp
+        f0t = calibrator.f0t
+
+        self.assertTrue(np.isfinite(p0t).all())
+        self.assertTrue(np.isfinite(f0t).all())
+        self.assertAlmostEqual(p0t[0], 1.0, places=6)
+
+        # Taux courts négatifs en avril 2018 : P(0,t) peut légèrement
+        # dépasser 1 sur les premières maturités, mais pas déraisonnablement.
+        self.assertLess(p0t.max(), 1.10)
+        self.assertGreater(p0t.min(), 0)
+
+        # Une fois la zone de taux négatifs de court terme dépassée,
+        # P(0,t) doit décroître jusqu'à la fin de la courbe (150 ans).
+        tail = p0t[len(p0t) // 2:]
+        self.assertTrue((np.diff(tail) <= 1e-9).all())
+
+    def test_from_excel_wrong_sheet_name_raises_a_clear_error(self):
+        with self.assertRaises(ValueError):
+            EIOPACalibrator.from_excel(self.EIOPA_FILE, sheet_name="RFR_spot_no_VA")
+
+
 class TestIntegration(unittest.TestCase):
     """Integration tests combining multiple models."""
 

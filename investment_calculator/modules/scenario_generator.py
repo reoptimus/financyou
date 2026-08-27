@@ -203,6 +203,7 @@ class ScenarioGenerator:
             'use_stochastic': config.get('use_stochastic', False),
             'calibration_date': config.get('calibration_date', '2025-01-01'),
             'currency': config.get('currency', 'USD'),
+            'yield_curve_id': config.get('yield_curve_id'),
             'correlation_matrix': config.get('correlation_matrix', {}),
             'economic_params': {}
         }
@@ -368,14 +369,11 @@ class ScenarioGenerator:
 
         n_steps = int(T / dt)
 
-        # Step 1: Create or load EIOPA calibration curve
-        spot_rates = self._create_yield_curve(config['currency'])
-
-        calibrator = EIOPACalibrator(spot_rates=spot_rates, dt=dt)
-        calibrator.calibrate()
-
-        f0t = calibrator.get_forward_curve(n_steps=n_steps)
-        P0t = calibrator.get_bond_prices(n_steps=n_steps)
+        # Step 1: Load the yield curve — une donnée d'entrée versionnée (voir
+        # investment_calculator.yield_curve), pas une formule dans le moteur.
+        yield_curve_id, curve_vintage, f0t, P0t = self._load_yield_curve(
+            config['yield_curve_id'], config['currency'], dt, n_steps
+        )
 
         # Step 2: Generate Hull-White interest rate scenarios
         hw_model = HullWhiteModel(
@@ -514,6 +512,12 @@ class ScenarioGenerator:
                 'method': 'stochastic',
                 'currency': config['currency'],
                 'calibration_date': config['calibration_date'],
+                # Le millésime de la courbe est une donnée d'entrée : une
+                # simulation archivée doit pouvoir être rejouée en
+                # référençant l'identifiant exact de la courbe utilisée
+                # (voir investment_calculator.yield_curve).
+                'yield_curve_id': yield_curve_id,
+                'yield_curve_vintage_date': curve_vintage,
                 'forward_curve_range': (float(f0t.min()), float(f0t.max()))
             },
             'model_versions': {
@@ -531,6 +535,72 @@ class ScenarioGenerator:
             'metadata': metadata,
             'diagnostics': diagnostics
         }
+
+    #: Courbe réelle par défaut, utilisée quand l'appelant n'en spécifie pas.
+    #: Seule une courbe France/EUR est disponible aujourd'hui — voir
+    #: investment_calculator/yield_curves/README.md. Un autre millésime ou
+    #: un autre pays s'ajoute en déposant un nouveau fichier là-bas, jamais
+    #: en modifiant cette constante pour pointer ailleurs en place.
+    DEFAULT_YIELD_CURVE_ID = "eiopa-fr-2018-04"
+
+    def _load_yield_curve(
+        self,
+        yield_curve_id: str | None,
+        currency: str,
+        dt: float,
+        n_steps: int,
+    ) -> tuple[str, str | None, np.ndarray, np.ndarray]:
+        """
+        Charger la courbe des taux à utiliser pour cette simulation.
+
+        Priorité :
+        1. ``yield_curve_id`` explicite (voir
+           ``investment_calculator.yield_curve.list_yield_curves`` pour ce
+           qui est disponible) — permet de fournir une courbe courante sans
+           modifier le code, exactement comme un régime fiscal.
+        2. La courbe réelle par défaut (France/EUR, avril 2018) si la devise
+           demandée est EUR.
+        3. À défaut d'une courbe réelle pour la devise demandée, la formule
+           synthétique historique — un repli explicite et journalisé, pas
+           un silence : voir ``_create_yield_curve``.
+
+        Returns:
+            Tuple ``(yield_curve_id, vintage_date, f0t, P0t)``.
+            ``vintage_date`` vaut ``None`` pour la courbe synthétique : elle
+            ne correspond à aucun millésime réel, ce serait mentir que de
+            lui en inventer un.
+        """
+        from investment_calculator.yield_curve import load_yield_curve
+
+        curve_id = yield_curve_id or (
+            self.DEFAULT_YIELD_CURVE_ID if currency == 'EUR' else None
+        )
+
+        if curve_id is not None:
+            curve = load_yield_curve(curve_id, dt=dt)
+            return (
+                curve.id,
+                curve.vintage_date,
+                curve.get_forward_curve(n_steps=n_steps),
+                curve.get_bond_prices(n_steps=n_steps),
+            )
+
+        warnings.warn(
+            f"Aucune courbe des taux réelle disponible pour la devise {currency!r} : "
+            f"repli sur une courbe synthétique (formule paramétrique, aucun millésime "
+            f"réel). Fournissez yield_curve_id pour utiliser une courbe réelle — voir "
+            f"investment_calculator.yield_curve.list_yield_curves().",
+            stacklevel=3,
+        )
+        spot_rates = self._create_yield_curve(currency)
+        calibrator = EIOPACalibrator(spot_rates=spot_rates, dt=dt)
+        calibrator.calibrate()
+        return (
+            "synthetic-nelson-siegel",
+            None,
+            calibrator.get_forward_curve(n_steps=n_steps),
+            calibrator.get_bond_prices(n_steps=n_steps),
+        )
 
     def _create_yield_curve(self, currency: str) -> np.ndarray:
         """

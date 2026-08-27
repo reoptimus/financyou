@@ -78,38 +78,67 @@ class EIOPACalibrator:
     def from_excel(
         cls,
         filepath: str,
-        sheet_name: str = "RFR_spot_no_VA",
-        country_column: int = 2,
-        start_row: int = 10,
-        end_row: int = 160,
+        sheet_name: str = "RFR",
+        country_column: int = 1,
+        start_row: int = 1,
+        end_row: int | None = None,
         dt: float = 0.5
     ) -> 'EIOPACalibrator':
         """
         Load EIOPA curve from Excel file.
 
+        Les valeurs par défaut correspondent à la structure réelle des
+        classeurs EIOPA tels que publiés (voir
+        ``legacy/excel_files/EIOPA_avril_2018_FRANCE.xlsx``, feuille
+        « RFR ») : une ligne d'en-tête (« BaseLine », « YCU », « YCD »...),
+        puis une ligne par maturité de 1 à 150 ans, colonne 1 = courbe
+        centrale sans ajustement de volatilité (« BaseLine »). Avant l'étape
+        1.B.2, cette méthode n'avait jamais été appelée en pratique et ses
+        anciens défauts (feuille « RFR_spot_no_VA », qui n'existe pas dans
+        ce classeur ; colonne 2, qui pointe vers le choc de courbe « YCU »,
+        pas la courbe centrale) en étaient la preuve.
+
         Args:
             filepath: Path to EIOPA Excel file
-            sheet_name: Sheet name containing spot rates (default: "RFR_spot_no_VA")
-            country_column: Column index for the country (0-indexed)
-            start_row: Starting row for data (0-indexed)
-            end_row: Ending row for data (0-indexed)
+            sheet_name: Sheet name containing spot rates (default: "RFR")
+            country_column: Column index for the curve à utiliser (0-indexed) —
+                nommé « pays » car un fichier EIOPA est publié par pays, mais
+                l'index sélectionne en réalité la VARIANTE de courbe dans ce
+                fichier (BaseLine, YCU, YCD, avec/sans ajustement de
+                volatilité), pas un pays différent.
+            start_row: Starting row for data (0-indexed) ; 1 pour sauter la
+                ligne d'en-tête.
+            end_row: Ending row for data (0-indexed), exclusive. None pour
+                lire jusqu'à la fin de la feuille.
             dt: Time step for interpolation
 
         Returns:
             EIOPACalibrator instance
+
+        Raises:
+            ValueError: fichier illisible, feuille absente, ou courbe vide
+                une fois les valeurs non numériques retirées.
         """
         try:
             df = pd.read_excel(filepath, sheet_name=sheet_name, header=None)
 
             # Extract spot rates
-            spot_rates = df.iloc[start_row:end_row, country_column].values
+            spot_rates = df.iloc[start_row:end_row, country_column].to_numpy()
 
             # Convert to numeric, handling any errors
-            spot_rates = pd.to_numeric(spot_rates, errors='coerce')
+            spot_rates = pd.to_numeric(pd.Series(spot_rates), errors='coerce').to_numpy()
 
             # Remove NaN values
             valid_mask = ~np.isnan(spot_rates)
             spot_rates = spot_rates[valid_mask]
+
+            if len(spot_rates) == 0:
+                raise ValueError(
+                    f"Aucun taux numérique trouvé dans {filepath!r}, feuille "
+                    f"{sheet_name!r}, colonne {country_column}, lignes "
+                    f"[{start_row}:{end_row}]. Vérifiez la structure du "
+                    f"classeur (une ligne d'en-tête est généralement présente)."
+                )
 
             # Maturities (1, 2, 3, ... years)
             maturities = np.arange(1, len(spot_rates) + 1)

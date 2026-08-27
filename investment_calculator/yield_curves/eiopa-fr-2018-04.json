@@ -1,0 +1,37 @@
+{
+  "$schema": "./schema.json",
+  "schema_version": "0.1",
+  "id": "eiopa-fr-2018-04",
+  "label": "Courbe des taux sans risque EIOPA, France, avril 2018 (BaseLine, sans ajustement de volatilité)",
+
+  "country": { "code": "FR", "name": "France" },
+  "currency": "EUR",
+  "vintage_date": "2018-04-30",
+
+  "status": "draft",
+  "validation": {
+    "validated_by": null,
+    "validated_on": null
+  },
+
+  "source": {
+    "kind": "excel",
+    "path": "legacy/excel_files/EIOPA_avril_2018_FRANCE.xlsx",
+    "sheet_name": "RFR",
+    "column": 1,
+    "start_row": 1,
+    "end_row": null
+  },
+
+  "sources": [
+    {
+      "label": "EIOPA — Risk-free interest rate term structures (fichier hérité, avril 2018)",
+      "consulted_on": "2026-08-27"
+    }
+  ],
+
+  "known_gaps": [
+    "STATUT BROUILLON : le chargement (feuille, colonne, lignes) a été corrigé et vérifié cohérent à l'étape 1.B.2 (P(0,t) décroissant aux longues maturités après la zone de taux négatifs de court terme, courbe forward finie et d'ordre de grandeur plausible), mais aucune personne n'a relu la donnée elle-même contre la publication EIOPA d'origine.",
+    "Millésime de 2018 : ne reflète pas les conditions de marché actuelles. Fourni comme unique courbe disponible aujourd'hui (portage de la référence historique du dépôt) ; une courbe plus récente doit être ajoutée comme un nouveau fichier ici, jamais en modifiant celui-ci (voir schema.json et CLAUDE.md sur les millésimes)."
+  ]
+}
