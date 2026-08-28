@@ -6,7 +6,7 @@ prises, et les points à reprendre plus tard, au fil de l'étape 1.B.
 
 ---
 
-## 1. RealEstateModel : le processus auxiliaire explose (bug majeur, distinct du bug actions)
+## 1. RealEstateModel explose (deux bugs distincts — voir mise à jour du 2026-08-28 ci-dessous)
 
 - **Ouvert le** : 2026-08-27 (étape 1.B.1, en étendant le test de martingalité)
 - **Statut** : ouvert — hors périmètre de l'étape 1.B.3 telle que cadrée
@@ -43,6 +43,60 @@ prises, et les points à reprendre plus tard, au fil de l'étape 1.B.
   probablement être traité AVANT l'étape 1.B.3 pour l'immobilier
   spécifiquement : séparer risque-neutre et monde réel n'a pas de sens tant
   que le socle risque-neutre lui-même explose.
+
+### Mise à jour du 2026-08-28 — un second bug, distinct et dominant, découvert
+
+En préparant un diagnostic chiffré (demandé par l'utilisateur, avec graphiques
+à l'appui — voir l'artefact publié ce jour-là), la cause ci-dessus (« bug A »)
+s'est révélée **réelle mais très secondaire**. La cause dominante est un
+second bug, dans une fonction entièrement différente :
+
+- **Bug B — `RealEstateModel._generate_rental_returns`** : la contribution du
+  loyer à chaque rendement de période s'écrit
+  `rental_return[t] = base_rental + t * inflation_adjustment * dt`, où `t`
+  est le **numéro du pas de temps** (0, 1, 2, ... 119 pour 30 ans à pas
+  0,25 an), pas une durée en années, et surtout pas une grandeur censée
+  n'être ajoutée qu'une fois. Comme les rendements de période sont ensuite
+  cumulés (`cumsum`) pour construire l'indice, cette quantité croissante,
+  réinjectée à *chaque* période, produit une croissance **quadratique** du
+  rendement cumulé (≈ 36,6 en unités log sur l'échantillon testé,
+  soit un facteur ≈ 7,8 × 10¹⁵), là où une indexation correcte à
+  l'inflation donnerait une croissance linéaire du cumulé (`inflation_adjustment × dt`
+  constant à chaque pas, soit un facteur total ≈ exp(inflation_adjustment × T)
+  ≈ 1,8 sur 30 ans à 2 %).
+- **Poids relatif mesuré** (3 000 scénarios, courbe EIOPA France, mêmes
+  chocs) : corriger le bug A seul ne change presque rien (indice médian à
+  30 ans : 1,1 × 10¹⁶ avant contre 1,1 × 10¹⁶ après — inchangé, aux
+  arrondis près) ; corriger le bug B seul fait retomber l'indice médian à
+  30 ans à 6,6 (un ordre de grandeur immobilier plausible). Le bug B domine
+  donc très largement le bug A, qui était le seul documenté jusqu'ici.
+- **Biais résiduel après correction des deux bugs** : l'indice déflaté
+  `D(t)*Index(t)`, qui devrait rester proche de 1 sous la mesure
+  risque-neutre (comme pour les actions, où l'étape 1.B.3 atteint 0,46 %
+  d'écart), se stabilise plutôt autour de **×3,3** à 30 ans une fois les
+  bugs A et B corrigés. Ce résidu n'est pas expliqué par A ni B.
+- **Piste avancée par l'utilisateur pour ce résidu (2026-08-28), à vérifier
+  en priorité lors de la correction** : le résidu vient vraisemblablement
+  d'un **manque de frais/coût qui devrait annuler l'ajout du loyer** pour
+  retrouver l'équilibre risque-neutre — le même principe que
+  `BlackScholesEquity`, où `price_returns = total_returns - dividend_returns`
+  (le rendement de prix est DIMINUÉ du rendement du dividende, de sorte que
+  le rendement TOTAL, dividendes réinvestis, retombe exactement sur le
+  taux sans risque). Dans `RealEstateModel`, `total_returns = price_returns
+  + rental_returns` sans qu'aucun terme ne soit retranché du drift de
+  `price_returns` en contrepartie de cet ajout — si `price_returns` porte
+  déjà un drift ≈ `k(t)*dt` (le taux sans risque), ajouter `rental_returns`
+  (drift ≈ `rental_yield*dt`) par-dessus revient à compter deux fois le
+  rendement : une fois via le taux sans risque, une fois via le loyer.
+  Correction à valider : `drift = (kimmo + risk_premium - rental_yield)*dt`
+  dans `_generate_price_returns` (soustraire `rental_yield`, exactement comme
+  `dividend_yield` est soustrait pour les actions), de sorte que
+  `total_returns` retombe sur `kimmo*dt` (+ `risk_premium*dt` en monde réel)
+  une fois le loyer réinjecté.
+- **Décision (2026-08-28)** : reporté. Les bugs A, B et le résidu ×3,3
+  restent **non corrigés dans le code** — ce point reste un diagnostic, pas
+  une PR — en attendant une décision de priorisation. Voir le rapport
+  chiffré et les graphiques pour le détail complet des calculs.
 
 ## 2. Indexation des colonnes de `deflators_df` (t_1..t_N) vs convention interne (colonne i = D(i·dt))
 
