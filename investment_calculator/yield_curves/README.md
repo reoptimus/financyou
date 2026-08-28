@@ -24,13 +24,15 @@ calcul (bootstrap, interpolation, lissage) est délégué à
 France d'avril 2018 qui traînait dans `legacy/`, jamais réellement chargé
 avant l'étape 1.B.2 (`EIOPACalibrator.from_excel` n'avait aucun appelant, et
 ses paramètres par défaut ne correspondaient même pas à la structure réelle
-du classeur). Son statut reste `draft` : le chargement a été vérifié
-cohérent (voir `known_gaps` du fichier), mais personne n'a relu les valeurs
-elles-mêmes contre la publication EIOPA d'origine.
+du classeur). Son statut est `validated` depuis le 2026-08-28
+(`validation.validated_by`) : le chargement a été vérifié cohérent (voir
+`known_gaps` du fichier), et une personne a explicitement accepté la
+courbe en l'état pour la suite du projet.
 
 C'est un millésime de 2018 : il ne reflète pas les conditions de marché
-actuelles. C'est la seule courbe disponible aujourd'hui, pas une
-recommandation d'usage en production.
+actuelles. C'est la seule courbe disponible aujourd'hui ; en déposer une
+plus récente reste une opération de données (voir « Ajouter une courbe »
+ci-dessous), pas de code.
 
 ## Utilisation
 

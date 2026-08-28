@@ -11,9 +11,14 @@ Voir ``docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md``, section
 Avant l'étape 1.A.6, ces valeurs étaient des littéraux codés en dur dans
 ``investment_calculator/modules/tax_engine.py``, recensés explicitement dans
 ``tests/test_tax_regime_contract.py::LITTERAUX_TOLERES``. Elles vivent
-désormais ici, comme donnée versionnée — sans pour autant être vérifiées :
-voir le statut ``draft`` et les ``known_gaps`` de
-``market_assumptions/default-2026.json``.
+désormais ici, comme donnée versionnée. ``default-2026`` est passé au statut
+``validated`` le 2026-08-28 (voir ``validation.validated_by``), mais des
+lacunes précises subsistent et restent listées explicitement dans
+``known_gaps`` de ``market_assumptions/default-2026.json`` (primes de
+risque partiellement sourcées, paramètres Hull-White non calibrés,
+corrélations sans effet observable...) : une donnée ``validated`` n'est pas
+une donnée sans réserve, c'est une donnée dont les réserves sont assumées et
+déclarées plutôt que cachées.
 """
 
 from __future__ import annotations

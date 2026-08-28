@@ -8,10 +8,10 @@
   "currency": "EUR",
   "vintage_date": "2018-04-30",
 
-  "status": "draft",
+  "status": "validated",
   "validation": {
-    "validated_by": null,
-    "validated_on": null
+    "validated_by": "Sébastien Gallet",
+    "validated_on": "2026-08-28"
   },
 
   "source": {

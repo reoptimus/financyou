@@ -144,12 +144,13 @@ def load_yield_curve(curve_id: str, *, dt: float = 0.5, allow_draft: bool = True
         dt: pas de temps pour l'interpolation/calibration (voir ``EIOPACalibrator``).
         allow_draft: autorise le chargement d'une courbe au statut ``draft``.
             Vrai par défaut ici, à la différence de
-            :func:`investment_calculator.tax_regime.load_regime` : aucune
-            courbe n'a encore le statut ``validated`` au moment de l'écriture
-            (voir ``known_gaps`` de ``eiopa-fr-2018-04.json``) ; l'interdire
-            par défaut rendrait le chargeur inutilisable tant qu'une personne
-            n'a pas relu une courbe. À resserrer une fois une première
-            courbe validée.
+            :func:`investment_calculator.tax_regime.load_regime` :
+            ``eiopa-fr-2018-04`` est validée depuis le 2026-08-28 (voir son
+            ``validation.validated_by``), mais le défaut reste permissif pour
+            qu'une future courbe encore ``draft`` (nouveau pays, nouveau
+            millésime) ne bloque pas le développement avant sa relecture. À
+            resserrer à ``False`` si l'on veut qu'un ``yield_curve_id``
+            draft soit refusé par défaut, comme pour un régime fiscal.
 
     Raises:
         YieldCurveNotFoundError: aucun fichier ne correspond à ``curve_id``.

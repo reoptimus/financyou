@@ -38,7 +38,7 @@ def test_le_schema_est_un_json_schema_valide():
 def test_le_jeu_par_defaut_se_charge():
     assumptions = load_market_assumptions()
     assert assumptions.id == "default-2026"
-    assert assumptions.status == "draft"
+    assert assumptions.status == "validated"
 
 
 def test_un_identifiant_inconnu_leve_une_erreur_explicite():

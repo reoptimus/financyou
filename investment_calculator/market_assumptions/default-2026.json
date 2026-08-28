@@ -4,10 +4,10 @@
   "id": "default-2026",
   "label": "Hypothèses de marché et de comportement par défaut, moteur fiscal (GSE+)",
 
-  "status": "draft",
+  "status": "validated",
   "validation": {
-    "validated_by": null,
-    "validated_on": null
+    "validated_by": "Sébastien Gallet",
+    "validated_on": "2026-08-28"
   },
 
   "sources": [
