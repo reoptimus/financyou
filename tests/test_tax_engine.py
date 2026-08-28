@@ -37,13 +37,28 @@ from investment_calculator.tax_regime import load_regime
 
 # Helper function to create simple test scenarios
 def create_test_scenarios(num_scenarios=10, time_horizon=5):
-    """Create simple test scenarios for tax engine testing."""
+    """
+    Create simple test scenarios for tax engine testing.
+
+    equity_drift et real_estate_drift sont fixés explicitement plutôt que de
+    laisser ScenarioGenerator appliquer ses valeurs par défaut : depuis
+    l'étape 1.B.4, ces défauts viennent de market_assumptions (taux sans
+    risque + prime de risque) et peuvent changer indépendamment de ce test.
+    Ce module teste le calcul de l'impôt, pas les hypothèses de marché ; il
+    ne doit pas dépendre de leur valeur courante pour rester dans les bornes
+    de rendement moyen comfortablement positif que les assertions ci-dessous
+    supposent.
+    """
     gen = scenario_generator.ScenarioGenerator(random_seed=42)
     config = {
         'num_scenarios': num_scenarios,
         'time_horizon': time_horizon,
         'timestep': 1.0,
-        'use_stochastic': False
+        'use_stochastic': False,
+        'economic_params': {
+            'equity_drift': 0.10,
+            'real_estate_drift': 0.08,
+        },
     }
     results = gen.generate(config)
     return results['scenarios']

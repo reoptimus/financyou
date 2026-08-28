@@ -4,39 +4,125 @@
   "id": "default-2026",
   "label": "Hypothèses de marché et de comportement par défaut, moteur fiscal (GSE+)",
 
-  "status": "draft",
+  "status": "validated",
   "validation": {
-    "validated_by": null,
-    "validated_on": null
+    "validated_by": "Sébastien Gallet",
+    "validated_on": "2026-08-28"
   },
 
   "sources": [
     {
       "label": "AUCUNE — extraction fidèle des littéraux qui figuraient en dur dans investment_calculator/modules/tax_engine.py avant l'étape 1.A.6. Aucune de ces valeurs n'a été vérifiée contre une source de marché réelle.",
       "covers": ["equity.dividend_yield", "real_estate.rental_income_share", "real_estate.appreciation_share", "capital_gains_behavior.annual_realized_fraction"]
+    },
+    {
+      "label": "AUCUNE — extraction fidèle des littéraux 'US historical averages' qui figuraient en dur dans ScenarioGenerator.__init__ et GlobalScenarioEngine.__init__ (investment_calculator/modules/scenario_generator.py, investment_calculator/gse.py) avant l'étape 1.B.4. Aucune de ces valeurs n'a été vérifiée contre une source de marché réelle ; rates.hull_white n'est en outre pas calibré (voir known_gaps).",
+      "covers": ["equity.volatility", "real_estate.dynamics", "rates.risk_free_proxy", "rates.hull_white", "bond", "inflation", "gdp_growth", "correlations"]
+    },
+    {
+      "label": "Damodaran (NYU Stern) — Country Default Spreads and Risk Premiums, prime de risque actions implicite France",
+      "url": "https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/ctryprem.html",
+      "consulted_on": "2026-08-27",
+      "covers": ["risk_premia.equity"]
+    },
+    {
+      "label": "Vernimmen.net — FAQ, calcul de la prime de risque (moyenne historique France ~100 ans)",
+      "url": "https://www.vernimmen.net/Pratiquer/FAQ/evaluation/calcul_de_la_prime_de_risque.html",
+      "consulted_on": "2026-08-27",
+      "covers": ["risk_premia.equity"]
+    },
+    {
+      "label": "Newmark France, cité par MeilleureSCPI.com — Prime de risque immobilière (spread vs OAT 10 ans)",
+      "url": "https://www.meilleurescpi.com/conseils/quest-ce-que-la-prime-de-risque-en-immobilier/",
+      "consulted_on": "2026-08-27",
+      "covers": ["risk_premia.real_estate"]
     }
   ],
 
   "known_gaps": [
-    "STATUT BROUILLON : ces valeurs sont l'extraction fidèle de littéraux qui étaient codés en dur dans tax_engine.py, jamais vérifiées contre une source de marché (rendement du dividende réel d'un indice, répartition loyer/appréciation observée, comportement effectif de réalisation des plus-values). À sourcer avant tout usage présenté comme réaliste à un utilisateur.",
-    "Aucune de ces hypothèses ne varie par pays, par classe d'actif au sein d'une classe (par exemple actions US vs actions EU), ni par horizon : ce sont des constantes globales, ce qui était déjà le cas avant leur extraction du moteur.",
-    "reference_household_income (50 000 €) est un choix arbitraire destiné à approximer un barème progressif par un taux moyen ; il ne représente aucun foyer réel ni aucune médiane statistique sourcée."
+    "STATUT BROUILLON : les hypothèses de comportement (dividende, répartition loyer/appréciation, part réalisée) restent l'extraction fidèle de littéraux qui étaient codés en dur dans tax_engine.py, jamais vérifiées contre une source de marché réelle. À sourcer avant tout usage présenté comme réaliste à un utilisateur.",
+    "Aucune de ces hypothèses ne varie par pays, par classe d'actif au sein d'une classe (par exemple actions US vs actions EU), ni par horizon : ce sont des constantes globales.",
+    "reference_household_income (50 000 €) est un choix arbitraire destiné à approximer un barème progressif par un taux moyen ; il ne représente aucun foyer réel ni aucune médiane statistique sourcée.",
+    "risk_premia.equity (5 %) est sourcé (Damodaran, Vernimmen) mais la valeur France précise du Dimson-Marsh-Staunton Global Investment Returns Yearbook — la référence académique la plus rigoureuse pour un horizon 30 ans — n'a pas pu être extraite lors de la recherche ; seuls des agrégats mondiaux ont été confirmés (voir docs/validation/1b-hypotheses-monde-reel.md).",
+    "risk_premia.real_estate (1,5 %) repose sur une source professionnelle secondaire (Newmark/MeilleureSCPI), pas sur une étude académique ou IEIF de premier rang — aucun chiffre agrégé IEIF n'a été retrouvé lors de la recherche. À confirmer par recoupement avec les indices IEIF Immobilier d'Entreprise France ou l'Observatoire MSCI France.",
+    "risk_premia s'applique de façon identique quel que soit l'horizon de simulation ; la littérature distingue parfois prime court terme et prime long terme (30 ans), non modélisé ici.",
+    "Pour l'immobilier, la prime de risque ne compense pas l'instabilité numérique connue de RealEstateModel (voir docs/journal-1b-calibration.md, point 1) : tant que cette instabilité n'est pas corrigée, une projection immobilière monde réel hérite du même défaut que sa contrepartie risque-neutre.",
+    "equity.volatility, real_estate.dynamics, rates.risk_free_proxy, bond, inflation, gdp_growth et correlations (étape 1.B.4) restent l'extraction fidèle de littéraux 'US historical averages' codés en dur dans scenario_generator.py et gse.py, jamais vérifiés contre une source de marché réelle ni adaptés au marché français.",
+    "rates.hull_white (a=0.1, sigma=0.01) est un PLACEHOLDER (status='placeholder'), pas une calibration : l'étape 1.B.5 (calibration Hull-White sur des prix de swaption réels, portage de legacy/R_scripts/Calib_Taux_Swaptions_V2.R) est différée faute de données de marché disponibles dans ce dépôt (le script R référence un fichier 'Prix_swaptions_bloomberg.Rda' introuvable ici). Tant qu'elle n'est pas menée, le chemin stochastique de ScenarioGenerator utilise une dynamique de taux non calibrée sur le marché.",
+    "correlations n'est actuellement consommé par aucun des deux chemins de génération de ScenarioGenerator (_generate_simple, _generate_stochastic construit sa propre corrélation via CorrelatedRandomGenerator, qui ignore ce champ) : c'est une configuration sans effet observable, pas seulement une hypothèse non validée. Corrigé indépendamment de la présente extraction — voir docs/journal-1b-calibration.md."
   ],
 
   "equity": {
-    "dividend_yield": 0.02
+    "dividend_yield": 0.02,
+    "volatility": 0.18
   },
 
   "real_estate": {
     "rental_income_share": 0.4,
-    "appreciation_share": 0.6
+    "appreciation_share": 0.6,
+    "dynamics": {
+      "volatility": 0.12,
+      "mean_reversion": 0.15,
+      "rental_yield": 0.03,
+      "inflation_adjustment": 0.02
+    }
   },
 
   "capital_gains_behavior": {
     "annual_realized_fraction": 0.2
   },
 
+  "rates": {
+    "risk_free_proxy": {
+      "mean": 0.03,
+      "volatility": 0.02
+    },
+    "hull_white": {
+      "mean_reversion_speed": 0.1,
+      "volatility": 0.01,
+      "status": "placeholder"
+    }
+  },
+
+  "bond": {
+    "mean": 0.05,
+    "volatility": 0.07
+  },
+
+  "inflation": {
+    "mean": 0.025,
+    "volatility": 0.015
+  },
+
+  "gdp_growth": {
+    "mean": 0.025,
+    "volatility": 0.02
+  },
+
+  "correlations": [
+    { "pair": ["interest_rate", "inflation"], "value": 0.5 },
+    { "pair": ["stock_return", "gdp_growth"], "value": 0.6 },
+    { "pair": ["stock_return", "bond_return"], "value": -0.3 },
+    { "pair": ["real_estate_return", "stock_return"], "value": 0.5 },
+    { "pair": ["real_estate_return", "interest_rate"], "value": 0.3 }
+  ],
+
   "household_income_approximation": {
     "reference_household_income": 50000
+  },
+
+  "risk_premia": {
+    "equity": {
+      "value": 0.05,
+      "range_low": 0.035,
+      "range_high": 0.077,
+      "method": "Arithmétique. Convergence entre l'estimation implicite Damodaran pour la France (5,01 % au 05/01/2026 : 4,23 % de prime marché mature + 0,78 % de prime pays) et la moyenne historique française sur 100 ans citée par Vernimmen (5 %). La fourchette haute (7,7 %) correspond à l'estimation implicite courante Vernimmen, plus volatile ; la fourchette basse (3,5 %) à l'estimation implicite mature-market seule, hors prime pays."
+    },
+    "real_estate": {
+      "value": 0.015,
+      "range_low": 0.010,
+      "range_high": 0.020,
+      "method": "Spread direct vs OAT 10 ans (arithmétique). Résidentiel/mixte France, ≈150 points de base au-dessus du taux sans risque, source professionnelle (Newmark France, via MeilleureSCPI.com). Le marché immobilier professionnel dans son ensemble affiche des primes plus dispersées selon le segment (60 à plus de 300 pb) ; 150 pb correspond au résidentiel, pas aux bureaux prime ni aux segments les plus risqués."
+    }
   }
 }

@@ -456,21 +456,25 @@ def calibrate_hull_white(
     """
     Calibrate Hull-White parameters (a, sigma) to market data.
 
-    This is a simplified calibration. In practice, you would:
-    1. Match to swaption volatilities (for sigma)
-    2. Optimize mean reversion (a) to fit term structure
+    Heuristique de repli quand aucune surface de swaptions n'est disponible :
+    ``a`` reste une valeur typique en dur, ``sigma`` est estimé grossièrement
+    depuis la seule volatilité de la courbe des taux (``market_swaptions``
+    n'est en réalité pas utilisé). Quand une surface de swaptions EST
+    disponible (voir investment_calculator.swaption_surface), utiliser
+    investment_calculator.stochastic_models.calibration.SwaptionCalibrator à
+    la place : il price réellement des swaptions sous Hull-White
+    (décomposition de Jamshidian) et calibre (a, sigma) par moindres carrés
+    sur les volatilités de marché, au lieu de cette approximation.
 
     Args:
         yield_curve: Market yields
         maturities: Corresponding maturities
         market_swaptions: Optional swaption volatilities for calibration
+            (non utilisé par cette heuristique — voir SwaptionCalibrator)
 
     Returns:
         Tuple of (a, sigma)
     """
-    # Simplified calibration - use typical values
-    # In production, use optimization to match market prices
-
     # Typical mean reversion speed: 0.05 to 0.3
     a = 0.1
 

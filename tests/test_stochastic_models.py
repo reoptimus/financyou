@@ -294,6 +294,46 @@ class TestBlackScholesEquity(unittest.TestCase):
         # All prices should be positive
         self.assertTrue(np.all(prices > 0))
 
+    def test_drift_uses_short_rate_as_a_period_return_not_annualized(self):
+        """
+        Régression du bug corrigé à l'étape 1.B.3, vérifiée analytiquement
+        (chocs nuls, pas de bruit Monte-Carlo) : short_rates[:, t] est déjà
+        un rendement de période (voir HullWhiteModel._calculate_deflators,
+        qui l'accumule sans le multiplier par dt) ; seuls risk_premium et la
+        correction -σ²/2 sont des taux annualisés, à mettre à l'échelle par
+        dt. Avant l'étape 1.B.3, short_rates était multiplié par dt une
+        seconde fois, cassant la propriété de martingale même une fois le
+        signe de -σ²/2 corrigé isolément (vérifié empiriquement : ~1,18 de
+        déviation avec le signe seul corrigé, contre ~1,0003 avec les deux
+        corrections combinées — voir docs/journal-1b-calibration.md).
+        """
+        zero_shocks = np.zeros((100, 20))
+        results = self.model.generate_returns(self.short_rates, equity_shocks=zero_shocks)
+
+        # short_rates est constant à 0.03 (rendement de période) ; avec des
+        # chocs nuls, chaque pas (hors t=0) doit valoir exactement
+        # short_rates[t] + (0 - sigma^2/2)*dt, PAS (short_rates[t] - sigma^2/2)*dt.
+        # (total_returns, pas price_returns, pour ne pas mélanger avec le
+        # dividende constant qui s'ajoute séparément.)
+        expected_step = 0.03 + (0.0 - self.model.sigma**2 / 2) * self.model.dt
+        np.testing.assert_allclose(results['total_returns'][:, 1:], expected_step)
+
+    def test_risk_premium_adds_an_annualized_drift(self):
+        """risk_premium est un taux annualisé : mis à l'échelle par dt, comme -σ²/2."""
+        zero_shocks = np.zeros((100, 20))
+        risk_premium = 0.05
+
+        baseline = self.model.generate_returns(self.short_rates, equity_shocks=zero_shocks)
+        with_premium = self.model.generate_returns(
+            self.short_rates, equity_shocks=zero_shocks, risk_premium=risk_premium
+        )
+
+        expected_extra = risk_premium * self.model.dt
+        np.testing.assert_allclose(
+            with_premium['price_returns'][:, 1:] - baseline['price_returns'][:, 1:],
+            expected_extra,
+        )
+
     def test_calculate_percentiles(self):
         """Test percentile calculation."""
         results = self.model.generate_returns(self.short_rates)
@@ -430,6 +470,55 @@ class TestEIOPACalibrator(unittest.TestCase):
 
         self.assertIsInstance(P0t, np.ndarray)
         self.assertGreater(len(P0t), 0)
+
+
+class TestEIOPACalibratorFromExcel(unittest.TestCase):
+    """
+    Régression de l'étape 1.B.2 : EIOPACalibrator.from_excel n'avait jamais
+    été appelée en pratique. Ses anciens défauts (sheet_name="RFR_spot_no_VA",
+    qui n'existe pas dans le classeur réel ; country_column=2, qui pointe
+    vers le choc de courbe "YCU" et non la courbe centrale "BaseLine";
+    start_row=10, qui saute neuf lignes de données valides) le prouvaient.
+    """
+
+    EIOPA_FILE = os.path.join(
+        os.path.dirname(__file__), "..", "legacy", "excel_files",
+        "EIOPA_avril_2018_FRANCE.xlsx",
+    )
+
+    def test_from_excel_loads_the_real_workbook(self):
+        calibrator = EIOPACalibrator.from_excel(self.EIOPA_FILE)
+
+        # Feuille "RFR" : 150 maturités (1 à 150 ans), une ligne d'en-tête.
+        self.assertEqual(len(calibrator.spot_rates), 150)
+        # Colonne "BaseLine" : la courbe d'avril 2018 démarre en taux négatif.
+        self.assertLess(calibrator.spot_rates[0], 0)
+        self.assertAlmostEqual(calibrator.spot_rates[0], -0.00358, places=5)
+
+    def test_from_excel_produces_a_coherent_curve(self):
+        calibrator = EIOPACalibrator.from_excel(self.EIOPA_FILE, dt=0.5)
+        calibrator.calibrate()
+
+        p0t = calibrator.P0t_interp
+        f0t = calibrator.f0t
+
+        self.assertTrue(np.isfinite(p0t).all())
+        self.assertTrue(np.isfinite(f0t).all())
+        self.assertAlmostEqual(p0t[0], 1.0, places=6)
+
+        # Taux courts négatifs en avril 2018 : P(0,t) peut légèrement
+        # dépasser 1 sur les premières maturités, mais pas déraisonnablement.
+        self.assertLess(p0t.max(), 1.10)
+        self.assertGreater(p0t.min(), 0)
+
+        # Une fois la zone de taux négatifs de court terme dépassée,
+        # P(0,t) doit décroître jusqu'à la fin de la courbe (150 ans).
+        tail = p0t[len(p0t) // 2:]
+        self.assertTrue((np.diff(tail) <= 1e-9).all())
+
+    def test_from_excel_wrong_sheet_name_raises_a_clear_error(self):
+        with self.assertRaises(ValueError):
+            EIOPACalibrator.from_excel(self.EIOPA_FILE, sheet_name="RFR_spot_no_VA")
 
 
 class TestIntegration(unittest.TestCase):

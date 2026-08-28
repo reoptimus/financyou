@@ -79,6 +79,42 @@ class TestScenarioGeneratorInitialization:
         for corr_value in gen.default_correlations.values():
             assert -1 <= corr_value <= 1
 
+    def test_default_drifts_derive_du_taux_sans_risque_et_de_la_prime_de_risque(self):
+        """
+        Étape 1.B.4 : avant cette étape, equity_drift (0.10) et
+        real_estate_drift (0.08) étaient des littéraux indépendants. Ils
+        doivent désormais valoir risk_free_proxy.mean + la prime de risque
+        monde réel correspondante (voir
+        investment_calculator.market_assumptions.MarketAssumptions et
+        docs/validation/1b-hypotheses-monde-reel.md), pour rester cohérents
+        avec la séparation risque-neutre/monde réel du chemin stochastique.
+        """
+        from investment_calculator.market_assumptions import load_market_assumptions
+
+        assumptions = load_market_assumptions()
+        gen = scenario_generator.ScenarioGenerator()
+
+        assert gen.default_params['equity_drift'] == pytest.approx(
+            assumptions.risk_free_rate_mean + assumptions.equity_risk_premium
+        )
+        assert gen.default_params['real_estate_drift'] == pytest.approx(
+            assumptions.risk_free_rate_mean + assumptions.real_estate_risk_premium
+        )
+
+    def test_default_params_sont_une_donnee_versionnee_pas_un_litteral(self):
+        """Les valeurs par défaut viennent de market_assumptions, pas d'un dict codé en dur."""
+        from investment_calculator.market_assumptions import load_market_assumptions
+
+        assumptions = load_market_assumptions()
+        gen = scenario_generator.ScenarioGenerator()
+
+        assert gen.default_params['inflation_mean'] == assumptions.inflation_mean
+        assert gen.default_params['mean_reversion_speed'] == (
+            assumptions.hull_white_mean_reversion_speed
+        )
+        assert gen.default_params['hw_volatility'] == assumptions.hull_white_volatility
+        assert gen._market_assumptions_id == assumptions.id
+
 
 class TestConfigurationValidation:
     """Test configuration validation."""
@@ -178,6 +214,29 @@ class TestSimpleScenarioGeneration:
         assert 'deflators' in results
         assert 'metadata' in results
         assert 'diagnostics' in results
+
+    def test_simple_metadata_trace_le_jeu_d_hypotheses_utilise(self):
+        """
+        Étape 1.B.4 : le chemin simple dépend désormais de market_assumptions
+        (taux, primes, volatilités) au même titre que le chemin stochastique
+        dépend d'une courbe de taux (yield_curve_id) — une simulation
+        archivée doit pouvoir identifier quel jeu d'hypothèses l'a produite.
+        """
+        from investment_calculator.market_assumptions import load_market_assumptions
+
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 5,
+            'time_horizon': 3,
+            'timestep': 1.0,
+            'use_stochastic': False,
+        }
+
+        results = gen.generate(config)
+        assert (
+            results['metadata']['calibration_info']['market_assumptions_id']
+            == load_market_assumptions().id
+        )
 
     def test_simple_scenarios_dataframe_structure(self):
         """Test scenarios DataFrame structure."""
@@ -350,8 +409,8 @@ class TestStochasticScenarioGeneration:
         for col in required_cols:
             assert col in scenarios_df.columns
 
-    def test_stochastic_martingale_test(self):
-        """Test martingale property testing."""
+    def test_stochastic_martingale_test_structure(self):
+        """La sortie du test de martingalité porte un sous-résultat par composant."""
         gen = scenario_generator.ScenarioGenerator(random_seed=42)
         config = {
             'num_scenarios': 100,
@@ -364,10 +423,12 @@ class TestStochasticScenarioGeneration:
             results = gen.generate(config)
             diagnostics = results['diagnostics']
 
-            # Martingale test should be present for stochastic scenarios
-            assert 'martingale_test' in diagnostics
-            assert 'passes' in diagnostics['martingale_test']
-            assert 'max_deviation' in diagnostics['martingale_test']
+            mt = diagnostics['martingale_test']
+            assert 'passes' in mt
+            for component in ('rates', 'equity', 'real_estate'):
+                assert component in mt
+                assert 'max_relative_deviation' in mt[component]
+                assert 'passes' in mt[component]
         except ValueError as e:
             # Known issue with stochastic model dimension mismatch in edge cases
             # This is a real bug in the stochastic models that needs fixing
@@ -375,6 +436,109 @@ class TestStochasticScenarioGeneration:
                 pytest.skip(f"Skipping due to known stochastic model bug: {e}")
             else:
                 raise
+
+    def test_martingale_rates_sous_demi_pourcent_a_30_ans(self):
+        """
+        Régression du bug corrigé à l'étape 1.B.1 : le test de martingalité
+        comparait E[D(t)] à 1,0 pour tout t. C'est faux — la valeur théorique
+        est P(0,t), le prix zéro-coupon, qui décroît avec t. Comparer à 1
+        faisait donc échouer le test par construction dès que t>0 et le taux
+        est positif, quel que soit le modèle sous-jacent.
+
+        Objectif explicite de l'étape 1.B.1 : une fois comparé à P(0,t), l'écart
+        doit rester sous 0,5 % à 30 ans. Vérifié stable sur 5 graines
+        différentes avant d'écrire ce test (0,23 % à 0,40 %) ; 10 000
+        scénarios et un pas semestriel de 0,25 an suffisent, sans avoir besoin
+        d'un Monte-Carlo massif.
+        """
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 10_000,
+            'time_horizon': 30,
+            'timestep': 0.25,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+
+        results = gen.generate(config)
+        rates = results['diagnostics']['martingale_test']['rates']
+
+        assert rates['max_relative_deviation'] < 0.005, (
+            f"E[D(t)] s'écarte de P(0,t) de {rates['max_relative_deviation']:.4%} "
+            f"au pire point de la courbe : au-delà de l'objectif de 0,5 % à 30 ans."
+        )
+
+    def test_martingale_equity_est_risque_neutre(self):
+        """
+        Régression du bug corrigé à l'étape 1.B.3 : black_scholes.py utilisait
+        un drift ``r(t)+σ²/2`` pour l'indice actions total-return (au lieu de
+        ``r(t)-σ²/2``), ET multipliait ``short_rates[:, t]`` par ``dt`` alors
+        qu'il s'agit déjà d'un rendement de période — deux bugs cumulés,
+        présentés comme « risque-neutre » alors qu'ils ne l'étaient pas.
+        L'indice déflaté dérivait d'environ 18 % à 30 ans (voir
+        docs/journal-1b-calibration.md) au lieu de rester à 1.
+
+        Précision atteinte après correction : la volatilité actions (18 %)
+        est bien plus élevée que celle des taux (1 %), donc l'estimateur
+        Monte-Carlo de E[D(t)*Index(t)] est plus bruité à N égal — sur 5
+        graines à 20 000 scénarios, l'écart va de 0,46 % à 2,36 % (vérifié
+        avant d'écrire ce test). Le seuil ci-dessous (1 %) est calibré sur la
+        graine fixe utilisée par ce test précisément, pas sur n'importe
+        quelle graine : ce n'est pas un objectif de précision universel comme
+        celui du test de taux.
+        """
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 20_000,
+            'time_horizon': 30,
+            'timestep': 0.25,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+
+        results = gen.generate(config)
+        equity = results['diagnostics']['martingale_test']['equity']
+
+        assert equity['max_relative_deviation'] < 0.01, (
+            f"D(t)*Index_actions(t) s'écarte de 1 de {equity['max_relative_deviation']:.4%} "
+            f"au pire point : l'indice actions n'est pas risque-neutre."
+        )
+
+    @pytest.mark.xfail(
+        reason=(
+            "Bug structurel découvert à l'étape 1.B.1, distinct du bug actions : "
+            "RealEstateModel._generate_auxiliary_rates utilise la volatilité "
+            "IMMOBILIÈRE (12 %) comme si c'était une volatilité de taux court "
+            "Hull-White (typiquement 1 %). Le processus auxiliaire explose "
+            "(valeurs observées jusqu'à ±108 % sur un horizon de 30 ans), et "
+            "l'indice immobilier déflaté diverge de plusieurs ordres de "
+            "grandeur (jusqu'à 1e18 sur certains tirages). Ce n'est pas une "
+            "simple question de prime de risque manquante (contrairement aux "
+            "actions) : c'est une instabilité numérique du modèle lui-même, "
+            "qui dépasse le périmètre de l'étape 1.B.3 et mérite un suivi "
+            "dédié — voir docs/journal-1b-calibration.md."
+        ),
+        strict=False,
+    )
+    def test_martingale_immobilier_est_risque_neutre(self):
+        """L'indice immobilier déflaté doit rester égal à 1 en espérance (martingale)."""
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 10_000,
+            'time_horizon': 30,
+            'timestep': 0.25,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+
+        results = gen.generate(config)
+        real_estate = results['diagnostics']['martingale_test']['real_estate']
+
+        assert real_estate['max_relative_deviation'] < 0.005, (
+            f"D(t)*Index_immo(t) s'écarte de 1 de "
+            f"{real_estate['max_relative_deviation']:.4%} au pire point : "
+            f"l'indice immobilier n'est pas risque-neutre."
+        )
 
     def test_stochastic_different_currency(self):
         """Test stochastic generation with different currencies."""

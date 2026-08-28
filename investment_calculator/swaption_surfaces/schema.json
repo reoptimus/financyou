@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/reoptimus/financyou/schemas/swaption_surface-0.1.json",
+  "title": "Surface de volatilité swaptions FinancYou",
+  "description": "Donnée d'entrée versionnée pour la calibration Hull-White (paramètre sigma), au même titre que le régime fiscal (investment_calculator/tax_regimes/) et la courbe des taux (investment_calculator/yield_curves/). Voir investment_calculator/swaption_surfaces/README.md.",
+  "type": "object",
+  "required": [
+    "schema_version", "id", "status", "synthetic", "currency",
+    "observation_date", "vol_convention", "fixed_leg_convention", "grid"
+  ],
+  "additionalProperties": false,
+
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+$" },
+    "id": {
+      "type": "string",
+      "description": "Identifiant de la surface, par exemple eur-synthetic-2026-08."
+    },
+    "label": { "type": "string" },
+
+    "status": {
+      "enum": ["draft", "validated"],
+      "description": "draft : jamais relue par une personne. validated : relue et nommée dans validation.validated_by. Une surface synthetic=true ne peut pas être validated (voir known_gaps) : elle n'a de sens que comme fixture de développement."
+    },
+    "synthetic": {
+      "type": "boolean",
+      "description": "true : valeurs produites par un modèle paramétrique, PAS des cotations de marché — interdiction formelle d'en tirer une calibration publiée ou affichée à un utilisateur (voir investment_calculator.swaption_surface.load_swaption_surface, paramètre allow_synthetic, et SwaptionCalibrator.calibrate, paramètre allow_synthetic). false : cotations réelles d'une source de marché, nommée dans sources."
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "validated_by": { "type": ["string", "null"] },
+        "validated_on": { "type": ["string", "null"], "format": "date" }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["label"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": "string" },
+          "url": { "type": "string" },
+          "consulted_on": { "type": "string", "format": "date" }
+        }
+      }
+    },
+    "known_gaps": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+
+    "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+    "observation_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Date d'observation de la surface (millésime), à consigner dans les métadonnées de toute simulation qui en dépend, au même titre que yield_curve_vintage_date."
+    },
+    "vol_convention": {
+      "enum": ["normal", "lognormal"],
+      "description": "normal (Bachelier, points de base par an) ou lognormal (Black, en %). Ce dépôt ne sait pricer que la convention normale à ce jour — voir known_gaps."
+    },
+    "fixed_leg_convention": {
+      "type": "string",
+      "description": "Convention de la jambe fixe du swap sous-jacent, par exemple 'annuelle 30/360'."
+    },
+    "moneyness": {
+      "enum": ["atm"],
+      "default": "atm",
+      "description": "Seules des swaptions à la monnaie (strike = taux forward) sont supportées à ce jour — pas de smile/skew. Voir known_gaps."
+    },
+
+    "reference_curve": {
+      "type": "object",
+      "description": "Courbe Nelson-Siegel associée à la surface UNIQUEMENT pour reproduire les forwards ATM et les vérifications numériques qui accompagnent cette surface (voir known_gaps). Ne jamais l'utiliser pour projeter un patrimoine ou pricer en production : la vraie courbe (investment_calculator.yield_curve) doit être utilisée, et les strikes ATM recalculés à partir d'elle, sous peine de calibrer silencieusement sur des strikes qui ne sont plus à la monnaie.",
+      "required": ["beta0", "beta1", "beta2", "tau"],
+      "additionalProperties": false,
+      "properties": {
+        "beta0": { "type": "number" },
+        "beta1": { "type": "number" },
+        "beta2": { "type": "number" },
+        "tau": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+
+    "verification": {
+      "type": "object",
+      "description": "Résultats de calibration Hull-White de référence, fournis avec la surface pour permettre une vérification de non-régression sans dépendre d'un script R indisponible (voir docs/journal-1b-calibration.md, point 8).",
+      "additionalProperties": false,
+      "properties": {
+        "method": { "type": "string" },
+        "fits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label", "a", "sigma_bp", "rmse_bp"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string" },
+              "a": { "type": "number" },
+              "sigma_bp": { "type": "number" },
+              "rmse_bp": { "type": "number" },
+              "max_error_bp": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+
+    "grid": {
+      "type": "object",
+      "required": ["expiries", "tenors", "vol_normal_bp"],
+      "additionalProperties": false,
+      "properties": {
+        "expiries": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Libellés d'échéance d'option, par exemple '1M', '1Y'."
+        },
+        "tenors": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Libellés de durée du swap sous-jacent, par exemple '1Y', '10Y'."
+        },
+        "vol_normal_bp": {
+          "type": "array",
+          "description": "Matrice expiries × tenors, volatilité normale en points de base par an.",
+          "items": {
+            "type": "array",
+            "items": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        }
+      }
+    }
+  }
+}

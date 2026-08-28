@@ -4,7 +4,7 @@
   "title": "Hypothèses de marché et de comportement FinancYou",
   "description": "Décrit des hypothèses de MARCHÉ et de COMPORTEMENT (rendement, répartition, comportement de réalisation), PAS de la fiscalité. Voir docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md, section « ce qui n'est pas de la fiscalité ». Le moteur fiscal (investment_calculator/modules/tax_engine.py) ne doit contenir aucune de ces valeurs en dur ; il charge ce document.",
   "type": "object",
-  "required": ["schema_version", "id", "status", "equity", "real_estate", "capital_gains_behavior", "household_income_approximation"],
+  "required": ["schema_version", "id", "status", "equity", "real_estate", "capital_gains_behavior", "household_income_approximation", "risk_premia", "rates", "bond", "inflation", "gdp_growth", "correlations"],
   "additionalProperties": false,
 
   "properties": {
@@ -49,7 +49,7 @@
 
     "equity": {
       "type": "object",
-      "required": ["dividend_yield"],
+      "required": ["dividend_yield", "volatility"],
       "additionalProperties": false,
       "properties": {
         "dividend_yield": {
@@ -57,13 +57,18 @@
           "minimum": 0,
           "maximum": 1,
           "description": "Rendement du dividende supposé, en fraction du cours."
+        },
+        "volatility": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Volatilité annualisée du rendement total actions (écart-type de σ dans le modèle Black-Scholes). Extraction fidèle de l'ancien littéral BlackScholesEquity/scenario_generator.py, jamais confrontée à une source de marché — voir known_gaps."
         }
       }
     },
 
     "real_estate": {
       "type": "object",
-      "required": ["rental_income_share", "appreciation_share"],
+      "required": ["rental_income_share", "appreciation_share", "dynamics"],
       "additionalProperties": false,
       "properties": {
         "rental_income_share": {
@@ -77,6 +82,119 @@
           "minimum": 0,
           "maximum": 1,
           "description": "Part du rendement immobilier supposée provenir de l'appréciation. Doit compléter rental_income_share à 1."
+        },
+        "dynamics": {
+          "type": "object",
+          "required": ["volatility", "mean_reversion", "rental_yield", "inflation_adjustment"],
+          "additionalProperties": false,
+          "description": "Paramètres du modèle stochastique immobilier (RealEstateModel). Extraction fidèle des littéraux de scenario_generator.py, jamais confrontée à une source de marché. Voir docs/journal-1b-calibration.md, point 1 : le modèle reste numériquement instable à 30 ans indépendamment de ces valeurs.",
+          "properties": {
+            "volatility": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Volatilité annualisée du prix immobilier."
+            },
+            "mean_reversion": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Vitesse de retour à la moyenne du processus immobilier (paramètre 'a' de RealEstateModel)."
+            },
+            "rental_yield": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Rendement locatif annuel supposé."
+            },
+            "inflation_adjustment": {
+              "type": "number",
+              "description": "Ajustement du loyer à l'inflation."
+            }
+          }
+        }
+      }
+    },
+
+    "rates": {
+      "type": "object",
+      "required": ["risk_free_proxy", "hull_white"],
+      "additionalProperties": false,
+      "description": "Paramètres de taux utilisés hors courbe EIOPA réelle : la moyenne historique sans risque (chemin de génération 'simple', voir ScenarioGenerator._generate_simple) et la calibration Hull-White (chemin 'stochastique').",
+      "properties": {
+        "risk_free_proxy": {
+          "type": "object",
+          "required": ["mean", "volatility"],
+          "additionalProperties": false,
+          "description": "Taux sans risque constant utilisé par le chemin de génération simple (pas de courbe EIOPA ni de modèle Hull-White dans ce chemin) — sert aussi de base au drift actions/immobilier monde réel de ce chemin (risk_free_proxy.mean + risk_premia.<classe>.value).",
+          "properties": {
+            "mean": { "type": "number", "description": "Extraction fidèle de l'ancien littéral 'interest_mean' (0.03), jamais confrontée à une source de marché." },
+            "volatility": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "hull_white": {
+          "type": "object",
+          "required": ["mean_reversion_speed", "volatility", "status"],
+          "additionalProperties": false,
+          "description": "Paramètres a/sigma du modèle Hull-White utilisés par le chemin stochastique. PAS calibrés sur des prix de swaption réels (étape 1.B.5, différée faute de données de marché disponibles dans ce dépôt — voir docs/journal-1b-calibration.md) : ce sont les anciens littéraux de scenario_generator.py, portés ici tels quels en attendant cette calibration.",
+          "properties": {
+            "mean_reversion_speed": { "type": "number", "exclusiveMinimum": 0, "description": "Paramètre 'a' de Hull-White." },
+            "volatility": { "type": "number", "exclusiveMinimum": 0, "description": "Paramètre 'sigma' de Hull-White." },
+            "status": {
+              "enum": ["placeholder", "calibrated"],
+              "description": "placeholder : littéral non calibré. calibrated : issu d'une calibration sur swaptions réels (étape 1.B.5)."
+            }
+          }
+        }
+      }
+    },
+
+    "bond": {
+      "type": "object",
+      "required": ["mean", "volatility"],
+      "additionalProperties": false,
+      "description": "Rendement obligataire utilisé par le chemin de génération simple. Extraction fidèle des anciens littéraux, jamais confrontée à une source de marché.",
+      "properties": {
+        "mean": { "type": "number" },
+        "volatility": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+
+    "inflation": {
+      "type": "object",
+      "required": ["mean", "volatility"],
+      "additionalProperties": false,
+      "description": "Extraction fidèle des anciens littéraux, jamais confrontée à une source de marché.",
+      "properties": {
+        "mean": { "type": "number" },
+        "volatility": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+
+    "gdp_growth": {
+      "type": "object",
+      "required": ["mean", "volatility"],
+      "additionalProperties": false,
+      "description": "Extraction fidèle des anciens littéraux, jamais confrontée à une source de marché.",
+      "properties": {
+        "mean": { "type": "number" },
+        "volatility": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+
+    "correlations": {
+      "type": "array",
+      "description": "Matrice de corrélation entre classes d'actifs, extraction fidèle de l'ancien littéral scenario_generator.py::default_correlations. Note : à l'écriture, validated['correlation_matrix'] n'est consommé par aucun des deux chemins de génération (_generate_simple, _generate_stochastic) — c'est une donnée de configuration actuellement sans effet, pas seulement une hypothèse non validée. Voir docs/journal-1b-calibration.md.",
+      "items": {
+        "type": "object",
+        "required": ["pair", "value"],
+        "additionalProperties": false,
+        "properties": {
+          "pair": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "value": { "type": "number", "minimum": -1, "maximum": 1 }
         }
       }
     },
@@ -104,6 +222,43 @@
           "type": "number",
           "minimum": 0,
           "description": "Revenu de foyer utilisé pour réduire un barème progressif de l'impôt sur le revenu à un taux moyen unique, faute de connaître le revenu réel du foyer simulé à ce stade du calcul. N'est pas une donnée fiscale : c'est un choix de modélisation du moteur de scénarios. Voir investment_calculator.tax_regime.TaxRegime.to_scenario_tax_config."
+        }
+      }
+    },
+
+    "risk_premia": {
+      "type": "object",
+      "description": "Primes de risque MONDE RÉEL, ajoutées au taux sans risque pour projeter un patrimoine (jamais pour un pricing ou un test de martingalité, qui restent risque-neutres — voir docs/adr/0001, étape 1.B.3, et docs/validation/1b-hypotheses-monde-reel.md). Ce sont des choix engageants qui affectent directement les résultats présentés à un utilisateur, pas des paramètres techniques : chaque valeur porte sa fourchette, la valeur retenue, et la méthode ou la source.",
+      "required": ["equity", "real_estate"],
+      "additionalProperties": false,
+      "properties": {
+        "equity": { "$ref": "#/$defs/riskPremium" },
+        "real_estate": { "$ref": "#/$defs/riskPremium" }
+      }
+    }
+  },
+
+  "$defs": {
+    "riskPremium": {
+      "type": "object",
+      "required": ["value", "range_low", "range_high", "method"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "number",
+          "description": "Prime de risque retenue, en fraction annualisée (0.05 = 5 %), à ajouter au taux sans risque dans le drift monde réel."
+        },
+        "range_low": {
+          "type": "number",
+          "description": "Borne basse de la fourchette raisonnable trouvée dans la littérature/les sources professionnelles."
+        },
+        "range_high": {
+          "type": "number",
+          "description": "Borne haute de la fourchette raisonnable."
+        },
+        "method": {
+          "type": "string",
+          "description": "Arithmétique ou géométrique, et brève description de la méthode (implicite, historique...). Important : ce moteur applique déjà une correction de convexité (-σ²/2) séparément, donc la prime doit être ARITHMÉTIQUE, pas géométrique, sous peine de compter deux fois l'effet de la volatilité."
         }
       }
     }

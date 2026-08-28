@@ -26,6 +26,13 @@ INPUT STRUCTURE:
     }
 }
 
+Toute valeur absente de 'economic_params' est complétée par
+investment_calculator.market_assumptions (étape 1.B.4), pas par un littéral
+codé en dur : voir ScenarioGenerator.__init__. equity_drift et
+real_estate_drift par défaut valent risk_free_proxy.mean + la prime de
+risque monde réel correspondante (voir docs/validation/1b-hypotheses-monde-reel.md) ;
+un economic_params['equity_drift'] fourni explicitement reste prioritaire.
+
 OUTPUT STRUCTURE:
 {
     'scenarios': pd.DataFrame,      # Shape: (num_scenarios * time_steps, n_columns)
@@ -60,6 +67,8 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+
+from investment_calculator.market_assumptions import load_market_assumptions
 
 # Import from existing modules
 from investment_calculator.stochastic_models import (
@@ -107,37 +116,47 @@ class ScenarioGenerator:
         if random_seed is not None:
             np.random.seed(random_seed)
 
-        # Default economic parameters (US historical averages)
+        # Valeurs par défaut : données d'entrée versionnées (étape 1.B.4), plus
+        # des littéraux codés en dur. Avant cette étape, equity_drift (0.10) et
+        # real_estate_drift (0.08) étaient des constantes indépendantes du taux
+        # sans risque ; elles sont désormais dérivées (taux sans risque + prime
+        # de risque monde réel), pour rester cohérentes avec la séparation
+        # risque-neutre/monde réel introduite à l'étape 1.B.3 même sur le
+        # chemin de génération simple (qui n'a ni courbe EIOPA ni Hull-White).
+        # Voir MarketAssumptions.equity_expected_return et
+        # docs/journal-1b-calibration.md pour le détail. mean_reversion_speed
+        # et hw_volatility restent un PLACEHOLDER non calibré (voir
+        # rates.hull_white.status) tant que l'étape 1.B.5 n'est pas menée.
+        assumptions = load_market_assumptions()
+        self._market_assumptions_id = assumptions.id
         self.default_params = {
-            'inflation_mean': 0.025,
-            'inflation_volatility': 0.015,
-            'interest_mean': 0.03,
-            'interest_volatility': 0.02,
-            'equity_drift': 0.10,
-            'equity_volatility': 0.18,
-            'bond_return_mean': 0.05,
-            'bond_return_std': 0.07,
-            'real_estate_drift': 0.08,
-            'real_estate_volatility': 0.12,
-            'gdp_growth_mean': 0.025,
-            'gdp_growth_std': 0.02,
+            'inflation_mean': assumptions.inflation_mean,
+            'inflation_volatility': assumptions.inflation_volatility,
+            'interest_mean': assumptions.risk_free_rate_mean,
+            'interest_volatility': assumptions.risk_free_rate_volatility,
+            'equity_drift': assumptions.equity_expected_return,
+            'equity_volatility': assumptions.equity_volatility,
+            'bond_return_mean': assumptions.bond_return_mean,
+            'bond_return_std': assumptions.bond_return_volatility,
+            'real_estate_drift': assumptions.real_estate_expected_return,
+            'real_estate_volatility': assumptions.real_estate_volatility,
+            'gdp_growth_mean': assumptions.gdp_growth_mean,
+            'gdp_growth_std': assumptions.gdp_growth_volatility,
             # Advanced model parameters
-            'mean_reversion_speed': 0.1,  # Hull-White a parameter
-            'hw_volatility': 0.01,        # Hull-White sigma
-            'equity_dividend_yield': 0.02,
-            're_mean_reversion': 0.15,
-            're_rental_yield': 0.03,
-            're_inflation_adj': 0.02
+            'mean_reversion_speed': assumptions.hull_white_mean_reversion_speed,
+            'hw_volatility': assumptions.hull_white_volatility,
+            'equity_dividend_yield': assumptions.dividend_yield,
+            're_mean_reversion': assumptions.real_estate_mean_reversion,
+            're_rental_yield': assumptions.real_estate_rental_yield,
+            're_inflation_adj': assumptions.real_estate_inflation_adjustment,
         }
 
-        # Default correlation matrix
-        self.default_correlations = {
-            ('interest_rate', 'inflation'): 0.5,
-            ('stock_return', 'gdp_growth'): 0.6,
-            ('stock_return', 'bond_return'): -0.3,
-            ('real_estate_return', 'stock_return'): 0.5,
-            ('real_estate_return', 'interest_rate'): 0.3
-        }
+        # Défaut versionné (étape 1.B.4). Note : à l'écriture, aucun des deux
+        # chemins de génération ne consomme validated['correlation_matrix']
+        # (_generate_stochastic construit sa propre corrélation via
+        # CorrelatedRandomGenerator, qui l'ignore) — voir known_gaps de
+        # market_assumptions/default-2026.json et docs/journal-1b-calibration.md.
+        self.default_correlations = assumptions.correlations
 
     def generate(self, config: dict) -> dict:
         """
@@ -203,6 +222,7 @@ class ScenarioGenerator:
             'use_stochastic': config.get('use_stochastic', False),
             'calibration_date': config.get('calibration_date', '2025-01-01'),
             'currency': config.get('currency', 'USD'),
+            'yield_curve_id': config.get('yield_curve_id'),
             'correlation_matrix': config.get('correlation_matrix', {}),
             'economic_params': {}
         }
@@ -332,7 +352,12 @@ class ScenarioGenerator:
             'calibration_info': {
                 'method': 'simple',
                 'currency': config['currency'],
-                'calibration_date': config['calibration_date']
+                'calibration_date': config['calibration_date'],
+                # Les constantes par défaut de ce chemin (taux, primes de
+                # risque, volatilités) sont une donnée d'entrée versionnée
+                # depuis l'étape 1.B.4 : traçabilité au même titre que
+                # yield_curve_id pour le chemin stochastique.
+                'market_assumptions_id': self._market_assumptions_id,
             },
             'model_versions': {
                 'gse': '2.0.0',
@@ -368,14 +393,11 @@ class ScenarioGenerator:
 
         n_steps = int(T / dt)
 
-        # Step 1: Create or load EIOPA calibration curve
-        spot_rates = self._create_yield_curve(config['currency'])
-
-        calibrator = EIOPACalibrator(spot_rates=spot_rates, dt=dt)
-        calibrator.calibrate()
-
-        f0t = calibrator.get_forward_curve(n_steps=n_steps)
-        P0t = calibrator.get_bond_prices(n_steps=n_steps)
+        # Step 1: Load the yield curve — une donnée d'entrée versionnée (voir
+        # investment_calculator.yield_curve), pas une formule dans le moteur.
+        yield_curve_id, curve_vintage, f0t, P0t = self._load_yield_curve(
+            config['yield_curve_id'], config['currency'], dt, n_steps
+        )
 
         # Step 2: Generate Hull-White interest rate scenarios
         hw_model = HullWhiteModel(
@@ -399,6 +421,13 @@ class ScenarioGenerator:
 
         corr_results = corr_gen.generate(rate_residuals=hw_results['residuals'])
 
+        # Deux univers, explicitement séparés (étape 1.B.3) : le monde réel
+        # (taux sans risque + prime de risque) alimente les scénarios
+        # projetés à l'utilisateur ; le risque-neutre (prime nulle) n'existe
+        # que pour le test de martingalité, jamais pour une projection —
+        # voir docs/validation/1b-hypotheses-monde-reel.md.
+        assumptions = load_market_assumptions()
+
         # Step 4: Generate equity scenarios
         equity_model = BlackScholesEquity(
             sigma=params['equity_volatility'],
@@ -411,7 +440,15 @@ class ScenarioGenerator:
         equity_shocks = corr_gen.get_asset_shocks(corr_results['shocks'], 'equity')
         equity_results = equity_model.generate_returns(
             hw_results['Rt'],
-            equity_shocks=equity_shocks
+            equity_shocks=equity_shocks,
+            risk_premium=assumptions.equity_risk_premium,
+        )
+        # Même diffusion (equity_shocks), prime nulle : sert uniquement au
+        # test de martingalité ci-dessous, jamais à une projection.
+        equity_results_rn = equity_model.generate_returns(
+            hw_results['Rt'],
+            equity_shocks=equity_shocks,
+            risk_premium=0.0,
         )
 
         # Step 5: Generate real estate scenarios
@@ -432,7 +469,19 @@ class ScenarioGenerator:
             hw_results['Rt'],
             f0t,
             re_price_shocks=re_price_shocks,
-            re_rental_shocks=re_rental_shocks
+            re_rental_shocks=re_rental_shocks,
+            risk_premium=assumptions.real_estate_risk_premium,
+        )
+        # Risque-neutre, mêmes chocs : voir la réserve dans
+        # RealEstateModel.generate_returns — n'apporte pas de propriété de
+        # martingale tant que le bug documenté n'est pas corrigé, mais garde
+        # l'interface cohérente avec les actions.
+        re_results_rn = re_model.generate_returns(
+            hw_results['Rt'],
+            f0t,
+            re_price_shocks=re_price_shocks,
+            re_rental_shocks=re_rental_shocks,
+            risk_premium=0.0,
         )
 
         # Step 6: Generate bond returns (simplified - use interest rates)
@@ -493,8 +542,22 @@ class ScenarioGenerator:
 
         # Calculate diagnostics
         diagnostics = self._calculate_diagnostics(scenarios_df, method='stochastic')
+
+        # Indices de rendement total RISQUE-NEUTRES (dividendes/loyers
+        # réinvestis, prime de risque nulle), normalisés à 1 en t=0, mêmes
+        # conventions d'indexation que les déflateurs. Construits à partir de
+        # equity_results_rn / re_results_rn, PAS des séries monde réel
+        # utilisées dans scenarios_df : un indice qui inclut une prime de
+        # risque n'a aucune raison d'être martingale une fois déflaté (voir
+        # _test_martingale et docs/validation/1b-hypotheses-monde-reel.md).
+        equity_index = np.exp(np.cumsum(equity_results_rn['total_returns'], axis=1))
+        real_estate_index = np.exp(np.cumsum(re_results_rn['total_returns'], axis=1))
+
         diagnostics['martingale_test'] = self._test_martingale(
-            hw_results['deflators'], hw_results['Rt'], dt
+            hw_results['deflators'],
+            P0t,
+            equity_index=equity_index,
+            real_estate_index=real_estate_index,
         )
 
         # Metadata
@@ -504,7 +567,19 @@ class ScenarioGenerator:
                 'method': 'stochastic',
                 'currency': config['currency'],
                 'calibration_date': config['calibration_date'],
-                'forward_curve_range': (float(f0t.min()), float(f0t.max()))
+                # Le millésime de la courbe est une donnée d'entrée : une
+                # simulation archivée doit pouvoir être rejouée en
+                # référençant l'identifiant exact de la courbe utilisée
+                # (voir investment_calculator.yield_curve).
+                'yield_curve_id': yield_curve_id,
+                'yield_curve_vintage_date': curve_vintage,
+                'forward_curve_range': (float(f0t.min()), float(f0t.max())),
+                # Les rendements projetés (scenarios_df) sont monde réel :
+                # taux sans risque + cette prime. Voir
+                # docs/validation/1b-hypotheses-monde-reel.md.
+                'market_assumptions_id': assumptions.id,
+                'equity_risk_premium': assumptions.equity_risk_premium,
+                'real_estate_risk_premium': assumptions.real_estate_risk_premium,
             },
             'model_versions': {
                 'gse': '2.0.0',
@@ -521,6 +596,72 @@ class ScenarioGenerator:
             'metadata': metadata,
             'diagnostics': diagnostics
         }
+
+    #: Courbe réelle par défaut, utilisée quand l'appelant n'en spécifie pas.
+    #: Seule une courbe France/EUR est disponible aujourd'hui — voir
+    #: investment_calculator/yield_curves/README.md. Un autre millésime ou
+    #: un autre pays s'ajoute en déposant un nouveau fichier là-bas, jamais
+    #: en modifiant cette constante pour pointer ailleurs en place.
+    DEFAULT_YIELD_CURVE_ID = "eiopa-fr-2018-04"
+
+    def _load_yield_curve(
+        self,
+        yield_curve_id: str | None,
+        currency: str,
+        dt: float,
+        n_steps: int,
+    ) -> tuple[str, str | None, np.ndarray, np.ndarray]:
+        """
+        Charger la courbe des taux à utiliser pour cette simulation.
+
+        Priorité :
+        1. ``yield_curve_id`` explicite (voir
+           ``investment_calculator.yield_curve.list_yield_curves`` pour ce
+           qui est disponible) — permet de fournir une courbe courante sans
+           modifier le code, exactement comme un régime fiscal.
+        2. La courbe réelle par défaut (France/EUR, avril 2018) si la devise
+           demandée est EUR.
+        3. À défaut d'une courbe réelle pour la devise demandée, la formule
+           synthétique historique — un repli explicite et journalisé, pas
+           un silence : voir ``_create_yield_curve``.
+
+        Returns:
+            Tuple ``(yield_curve_id, vintage_date, f0t, P0t)``.
+            ``vintage_date`` vaut ``None`` pour la courbe synthétique : elle
+            ne correspond à aucun millésime réel, ce serait mentir que de
+            lui en inventer un.
+        """
+        from investment_calculator.yield_curve import load_yield_curve
+
+        curve_id = yield_curve_id or (
+            self.DEFAULT_YIELD_CURVE_ID if currency == 'EUR' else None
+        )
+
+        if curve_id is not None:
+            curve = load_yield_curve(curve_id, dt=dt)
+            return (
+                curve.id,
+                curve.vintage_date,
+                curve.get_forward_curve(n_steps=n_steps),
+                curve.get_bond_prices(n_steps=n_steps),
+            )
+
+        warnings.warn(
+            f"Aucune courbe des taux réelle disponible pour la devise {currency!r} : "
+            f"repli sur une courbe synthétique (formule paramétrique, aucun millésime "
+            f"réel). Fournissez yield_curve_id pour utiliser une courbe réelle — voir "
+            f"investment_calculator.yield_curve.list_yield_curves().",
+            stacklevel=3,
+        )
+        spot_rates = self._create_yield_curve(currency)
+        calibrator = EIOPACalibrator(spot_rates=spot_rates, dt=dt)
+        calibrator.calibrate()
+        return (
+            "synthetic-nelson-siegel",
+            None,
+            calibrator.get_forward_curve(n_steps=n_steps),
+            calibrator.get_bond_prices(n_steps=n_steps),
+        )
 
     def _create_yield_curve(self, currency: str) -> np.ndarray:
         """
@@ -584,43 +725,88 @@ class ScenarioGenerator:
             'method': method
         }
 
-    def _test_martingale(self, deflators: np.ndarray, rates: np.ndarray, dt: float) -> dict:
+    def _test_martingale(
+        self,
+        deflators: np.ndarray,
+        P0t: np.ndarray,
+        equity_index: np.ndarray | None = None,
+        real_estate_index: np.ndarray | None = None,
+        tolerance: float = 0.01,
+    ) -> dict:
         """
-        Test martingale property of deflated assets.
+        Test the martingale property of deflated assets under the risk-neutral measure.
 
-        For risk-neutral pricing, deflated asset prices should be martingales.
+        Le déflateur D(t) = exp(-∫₀ᵗ r(s)ds) n'est pas un actif : c'est le prix
+        d'une obligation zéro-coupon virtuelle de maturité t. Son espérance sous
+        la mesure risque-neutre vaut donc P(0,t), le prix de marché de cette
+        obligation aujourd'hui — **pas 1**, sauf trivialement à t=0. C'est la
+        définition même du pricing risque-neutre : P(0,t) = E^Q[D(t)]. Comparer
+        E[D(t)] à 1 pour tout t>0 fait donc échouer le test dès que la courbe des
+        taux est positive, quelle que soit la qualité du modèle : ce n'est pas un
+        test de martingalité, c'est un test structurellement faux au-delà de t=0
+        (voir docs/validation/1b-hypotheses-monde-reel.md pour le détail).
+
+        Pour un actif risqué (action, immobilier), la propriété testée est
+        différente : c'est D(t)*Actif(t) qui doit être martingale, donc son
+        espérance doit rester égale à Actif(0) (normalisé à 1 ici) pour tout t —
+        pas à P(0,t), qui n'a rien à voir avec un actif risqué.
 
         Args:
-            deflators: Deflator array (n_scenarios, n_steps)
-            rates: Forward rate array (n_scenarios, n_steps)
-            dt: Time step
+            deflators: D(t), (n_scenarios, n_steps). La colonne i vaut D(i*dt) ;
+                en particulier deflators[:, 0] == 1 pour tout scénario (D(0)=1).
+            P0t: prix zéro-coupon P(0,t), même convention d'indexation que
+                deflators (P0t[i] == P(0, i*dt)) — typiquement
+                EIOPACalibrator.get_bond_prices(), sourcé de la même courbe que
+                celle utilisée pour calibrer le modèle de taux.
+            equity_index: indice de rendement total actions (dividendes
+                réinvestis), normalisé à 1 en t=0, même convention
+                d'indexation. Optionnel : composant ignoré si absent.
+            real_estate_index: idem pour l'immobilier (loyers réinvestis).
+            tolerance: écart relatif maximal toléré, par composant.
 
         Returns:
-            Dictionary with martingale test results
+            Un sous-résultat par composant testé (« rates », et « equity » /
+            « real_estate » si les index correspondants sont fournis), plus un
+            indicateur global ``passes``.
         """
         n_scenarios, n_steps = deflators.shape
+        p0t = np.asarray(P0t, dtype=float)[:n_steps]
 
-        # Test: E[D(t)] should equal 1.0 for all t under risk-neutral measure
-        # In practice, we test E[D(t) * exp(integral r(s)ds)] = 1
+        result: dict = {
+            'rates': self._martingale_deviation(deflators.mean(axis=0), p0t)
+        }
 
-        mean_deflator = deflators.mean(axis=0)
-        expected_value = 1.0  # Should be 1.0 theoretically
+        if equity_index is not None:
+            deflated_equity = (deflators * equity_index).mean(axis=0)
+            target = np.full(n_steps, float(equity_index[:, 0].mean()))
+            result['equity'] = self._martingale_deviation(deflated_equity, target)
 
-        # Calculate deviation from martingale property
-        deviations = np.abs(mean_deflator - expected_value)
-        max_deviation = float(deviations.max())
-        mean_deviation = float(deviations.mean())
+        if real_estate_index is not None:
+            deflated_re = (deflators * real_estate_index).mean(axis=0)
+            target = np.full(n_steps, float(real_estate_index[:, 0].mean()))
+            result['real_estate'] = self._martingale_deviation(deflated_re, target)
 
-        # Check if martingale property holds (within tolerance)
-        tolerance = 0.05
-        passes_test = max_deviation < tolerance
+        for component in result.values():
+            component['tolerance'] = tolerance
+            component['passes'] = component['max_relative_deviation'] < tolerance
 
+        result['tolerance'] = tolerance
+        result['passes'] = all(
+            component['passes'] for component in result.values() if isinstance(component, dict)
+        )
+        return result
+
+    @staticmethod
+    def _martingale_deviation(mean_process: np.ndarray, target: np.ndarray) -> dict:
+        """Écart entre un processus déflaté moyen et sa cible théorique, terme à terme."""
+        absolute = np.abs(mean_process - target)
+        relative = absolute / np.abs(target)
         return {
-            'passes': passes_test,
-            'max_deviation': max_deviation,
-            'mean_deviation': mean_deviation,
-            'tolerance': tolerance,
-            'mean_final_deflator': float(mean_deflator[-1])
+            'max_absolute_deviation': float(absolute.max()),
+            'max_relative_deviation': float(relative.max()),
+            'mean_relative_deviation': float(relative.mean()),
+            'final_value': float(mean_process[-1]),
+            'final_target': float(target[-1]),
         }
 
 

@@ -18,6 +18,8 @@ from enum import Enum
 import numpy as np
 import pandas as pd
 
+from investment_calculator.market_assumptions import load_market_assumptions
+
 # Journalisation : logger nommé d'après le module, il hérite donc de la
 # configuration posée par investment_calculator.logging_config.configure_logging().
 logger = logging.getLogger(__name__)
@@ -146,20 +148,35 @@ class GlobalScenarioEngine:
         if random_seed is not None:
             np.random.seed(random_seed)
 
-        # Historical average values (US-based, can be configured)
+        # Données d'entrée versionnées (étape 1.B.4), même source que
+        # investment_calculator.modules.scenario_generator.ScenarioGenerator —
+        # avant cette étape, ce module avait sa propre copie de ces
+        # littéraux ("US historical averages"), sous des noms de clé
+        # légèrement différents (stock_return_mean vs equity_drift...),
+        # désynchronisée de scenario_generator.py. stock_return_mean et
+        # real_estate_mean sont dérivés (taux sans risque + prime de risque
+        # monde réel), comme dans scenario_generator.py : voir
+        # MarketAssumptions.equity_expected_return et
+        # docs/journal-1b-calibration.md.
+        #
+        # generate_optimistic_scenario et generate_pessimistic_scenario,
+        # plus bas, gardent leurs propres littéraux ad hoc indépendants de
+        # self.default_params : hors périmètre de l'étape 1.B.4, non repris
+        # ici (voir docs/journal-1b-calibration.md).
+        assumptions = load_market_assumptions()
         self.default_params = {
-            "inflation_mean": 0.025,
-            "inflation_std": 0.015,
-            "interest_mean": 0.03,
-            "interest_std": 0.02,
-            "stock_return_mean": 0.10,
-            "stock_return_std": 0.18,
-            "bond_return_mean": 0.05,
-            "bond_return_std": 0.07,
-            "real_estate_mean": 0.08,
-            "real_estate_std": 0.12,
-            "gdp_growth_mean": 0.025,
-            "gdp_growth_std": 0.02,
+            "inflation_mean": assumptions.inflation_mean,
+            "inflation_std": assumptions.inflation_volatility,
+            "interest_mean": assumptions.risk_free_rate_mean,
+            "interest_std": assumptions.risk_free_rate_volatility,
+            "stock_return_mean": assumptions.equity_expected_return,
+            "stock_return_std": assumptions.equity_volatility,
+            "bond_return_mean": assumptions.bond_return_mean,
+            "bond_return_std": assumptions.bond_return_volatility,
+            "real_estate_mean": assumptions.real_estate_expected_return,
+            "real_estate_std": assumptions.real_estate_volatility,
+            "gdp_growth_mean": assumptions.gdp_growth_mean,
+            "gdp_growth_std": assumptions.gdp_growth_volatility,
         }
 
     def generate_baseline_scenario(self, years: int) -> EconomicScenario:

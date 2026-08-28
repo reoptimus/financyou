@@ -101,7 +101,8 @@ class RealEstateModel:
         short_rates: np.ndarray,
         f0t: np.ndarray,
         re_price_shocks: np.ndarray | None = None,
-        re_rental_shocks: np.ndarray | None = None
+        re_rental_shocks: np.ndarray | None = None,
+        risk_premium: float = 0.0,
     ) -> dict[str, np.ndarray]:
         """
         Generate real estate return scenarios.
@@ -111,6 +112,20 @@ class RealEstateModel:
             f0t: Forward rate curve for calibration (n_steps,)
             re_price_shocks: Optional pre-generated price shocks (n_scenarios × n_steps)
             re_rental_shocks: Optional pre-generated rental shocks (n_scenarios × n_steps)
+            risk_premium: prime de risque immobilière ajoutée au drift de
+                prix (monde réel), sur le même principe que
+                ``BlackScholesEquity.generate_returns``. 0 (défaut) =
+                risque-neutre.
+
+                ATTENTION — contrairement aux actions, ajouter une prime de
+                risque ici ne restaure PAS une propriété de martingale à
+                risk_premium=0 : ce modèle porte un bug distinct et non
+                corrigé (le processus auxiliaire r2(t) utilise la
+                volatilité immobilière comme s'il s'agissait d'une
+                volatilité de taux court, et explose — voir
+                docs/journal-1b-calibration.md, point 1). Une projection
+                monde réel construite ici hérite de la même instabilité
+                que sa contrepartie risque-neutre.
 
         Returns:
             Dictionary containing:
@@ -139,7 +154,9 @@ class RealEstateModel:
         r2 = self._generate_auxiliary_rates(short_rates, f0t, re_rental_shocks)
 
         # Generate price returns
-        price_returns = self._generate_price_returns(short_rates, f0t, r2, re_price_shocks)
+        price_returns = self._generate_price_returns(
+            short_rates, f0t, r2, re_price_shocks, risk_premium
+        )
 
         # Generate rental returns
         rental_returns = self._generate_rental_returns(n_scenarios, n_steps)
@@ -203,19 +220,27 @@ class RealEstateModel:
         short_rates: np.ndarray,
         f0t: np.ndarray,
         r2: np.ndarray,
-        shocks: np.ndarray
+        shocks: np.ndarray,
+        risk_premium: float = 0.0,
     ) -> np.ndarray:
         """
         Generate real estate price returns.
 
         Price dynamics:
-            dP/P = [k(t)*dt + (r2(t) - k(t))*K(dt) + η*dW(t)]
+            dP/P = [(k(t) + risk_premium)*dt + (r2(t) - k(t))*K(dt) + η*dW(t)]
+
+        risk_premium (0 par défaut = risque-neutre) est un taux annualisé,
+        mis à l'échelle par dt comme k(t) — voir
+        ``BlackScholesEquity._calculate_total_returns`` pour la distinction
+        entre un taux annualisé (mis à l'échelle par dt) et un rendement de
+        période déjà accumulé (qui ne doit pas l'être une seconde fois).
 
         Args:
             short_rates: Short rate paths (n_scenarios × n_steps)
             f0t: Forward rate curve (n_steps,)
             r2: Auxiliary rates (n_scenarios × n_steps)
             shocks: Random shocks (n_scenarios × n_steps)
+            risk_premium: prime de risque immobilière annualisée (monde réel).
 
         Returns:
             Price returns (n_scenarios × n_steps)
@@ -234,8 +259,9 @@ class RealEstateModel:
             # Drift calibration
             kimmo = f0t[t] if t < len(f0t) else f0t[-1]
 
-            # Price return formula (from R code ImmoHW_V2.R:114)
-            drift = kimmo * self.dt
+            # Price return formula (from R code ImmoHW_V2.R:114), avec la
+            # prime de risque monde réel ajoutée au même titre que k(t).
+            drift = (kimmo + risk_premium) * self.dt
             mean_reversion = (r2[:, t] - kimmo) * K2T_t
             diffusion = eta2 * shocks[:, t]
 

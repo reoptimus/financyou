@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/reoptimus/financyou/schemas/yield_curve-0.1.json",
+  "title": "Courbe des taux FinancYou",
+  "description": "Décrit UNE COURBE DES TAUX sans risque, par millésime, comme une donnée d'entrée du modèle — au même titre qu'un régime fiscal (voir docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md). Ce document ne contient pas les taux eux-mêmes : il référence le fichier source (typiquement dans legacy/, en lecture seule) et les paramètres de lecture, pour que le millésime utilisé soit traçable et rejouable.",
+  "type": "object",
+  "required": ["schema_version", "id", "country", "currency", "vintage_date", "status", "source"],
+  "additionalProperties": false,
+
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+$" },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "description": "Identifiant stable de la courbe, par exemple eiopa-fr-2018-04."
+    },
+    "label": { "type": "string" },
+    "country": {
+      "type": "object",
+      "required": ["code", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string", "pattern": "^[A-Z]{2}$" },
+        "name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "vintage_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Date de publication de la courbe (pas la date de consultation du fichier). C'est le millésime au sens de l'étape 1.B.2 : une simulation qui référence cet identifiant doit produire les mêmes résultats indéfiniment."
+    },
+    "status": {
+      "enum": ["draft", "validated"],
+      "description": "draft : chargement non encore vérifié pour la cohérence (P(0,t) décroissant aux longues maturités, bornes plausibles...). validated : vérifié et relu."
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "validated_by": { "type": ["string", "null"] },
+        "validated_on": { "type": ["string", "null"], "format": "date" }
+      }
+    },
+
+    "source": {
+      "type": "object",
+      "description": "Où et comment lire les taux. Le fichier référencé n'est jamais modifié par ce paquet (voir CLAUDE.md : legacy/ est en lecture seule).",
+      "required": ["kind", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["excel", "csv"] },
+        "path": {
+          "type": "string",
+          "description": "Chemin relatif à la racine du dépôt."
+        },
+        "sheet_name": { "type": "string" },
+        "column": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Index de colonne (0-indexé) de la variante de courbe à utiliser (kind=excel)."
+        },
+        "column_name": {
+          "type": "string",
+          "description": "Nom de colonne à utiliser (kind=csv)."
+        },
+        "start_row": { "type": "integer", "minimum": 0 },
+        "end_row": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+
+    "sources": {
+      "type": "array",
+      "description": "Références documentant la provenance de la courbe elle-même (pas du fichier informatique).",
+      "items": {
+        "type": "object",
+        "required": ["label"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": "string" },
+          "url": { "type": "string" },
+          "consulted_on": { "type": "string", "format": "date" }
+        }
+      }
+    },
+    "known_gaps": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}
