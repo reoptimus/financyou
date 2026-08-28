@@ -1,0 +1,203 @@
+{
+  "$schema": "./schema.json",
+  "schema_version": "0.1",
+  "id": "eur-synthetic-2026-08",
+  "label": "Surface de volatilité swaptions EUR — SYNTHÉTIQUE (fixture de développement)",
+  "status": "draft",
+  "synthetic": true,
+  "validation": {
+    "validated_by": null,
+    "validated_on": null
+  },
+  "sources": [
+    {
+      "label": "Aucune cotation de marché. Grille produite par un modèle paramétrique lissé, calée à l'œil sur l'ordre de grandeur des volatilités normales EUR en régime BCE ~2 %, fournie via HANDOFF_surface_swaptions.md (session Cowork du 2026-08-28) pour débloquer le portage de legacy/R_scripts/Calib_Taux_Swaptions_V2.R en attendant une source de marché payante (ICAP/Parameta, LSEG, Bloomberg VCUB...)."
+    }
+  ],
+  "known_gaps": [
+    "synthetic=true : ce ne sont PAS des cotations de marché. Interdiction formelle d'en tirer une calibration publiée ou affichée à un utilisateur — voir SwaptionCalibrator.calibrate(allow_synthetic=...) et load_swaption_surface(allow_synthetic=...).",
+    "Les deux scripts R dont dépendait Calib_Taux_Swaptions_V2.R pour le pricing (Prix_swaptions_M2_V2.R, méthode Monte-Carlo, et Prix_swaption_Normal_Uniroot.R, inversion en vol) sont absents de legacy/ : le portage exact par script R est impossible. investment_calculator.stochastic_models.calibration implémente à la place un pricer fermé (décomposition de Jamshidian, Hull-White 1 facteur), méthodologie standard et mathématiquement équivalente à la limite Monte-Carlo, mais PAS un portage ligne à ligne — voir docs/journal-1b-calibration.md, point 8.",
+    "Seules des swaptions à la monnaie (moneyness=atm) sont représentées ; aucun smile ni skew.",
+    "vol_convention=normal uniquement ; le pricer ne sait pas convertir depuis/vers une convention lognormale.",
+    "reference_curve (Nelson-Siegel) sert uniquement à reproduire les forwards ATM de cette surface et les résultats de verification ci-dessous. Ne jamais l'utiliser pour une courbe de production : voir investment_calculator.yield_curve, qui doit fournir les vrais forwards, recalculant alors les strikes ATM en conséquence (sous peine de calibrer sur des strikes qui ne sont plus à la monnaie).",
+    "Choix laissés à une décision humaine (voir docs/journal-1b-calibration.md, point 8, section « décisions ouvertes ») : valeur de a à fixer en production (0.05-0.10 evoqué pour l'EUR), horizon de la bande co-terminale à calibrer selon le passif visé, cadence de rafraîchissement de la surface une fois une source payante retenue."
+  ],
+  "currency": "EUR",
+  "observation_date": "2026-08-28",
+  "vol_convention": "normal",
+  "fixed_leg_convention": "annuelle 30/360",
+  "moneyness": "atm",
+  "reference_curve": {
+    "beta0": 0.032,
+    "beta1": -0.0135,
+    "beta2": -0.009,
+    "tau": 2.5
+  },
+  "verification": {
+    "method": "Hull-White 1F (décomposition de Jamshidian), moindres carrés sur a et sigma constants, référence fournie avec la surface (implémentation indépendante, voir HANDOFF_surface_swaptions.md section 4).",
+    "fits": [
+      {
+        "label": "cube_complet_99_points",
+        "a": 0.0026,
+        "sigma_bp": 61,
+        "rmse_bp": 8.5,
+        "max_error_bp": 21
+      },
+      {
+        "label": "diagonale_co_terminale_10_ans",
+        "a": 0.0937,
+        "sigma_bp": 95,
+        "rmse_bp": 7.2
+      }
+    ]
+  },
+  "grid": {
+    "expiries": [
+      "1M",
+      "3M",
+      "6M",
+      "1Y",
+      "2Y",
+      "3Y",
+      "5Y",
+      "7Y",
+      "10Y",
+      "15Y",
+      "20Y"
+    ],
+    "tenors": [
+      "1Y",
+      "2Y",
+      "3Y",
+      "5Y",
+      "7Y",
+      "10Y",
+      "15Y",
+      "20Y",
+      "30Y"
+    ],
+    "vol_normal_bp": [
+      [
+        40.6,
+        46.6,
+        50.5,
+        54.5,
+        56.6,
+        57.0,
+        54.1,
+        50.9,
+        45.4
+      ],
+      [
+        43.7,
+        50.0,
+        54.1,
+        58.4,
+        60.6,
+        61.0,
+        57.9,
+        54.5,
+        48.8
+      ],
+      [
+        46.8,
+        53.5,
+        57.8,
+        62.3,
+        64.5,
+        65.0,
+        61.8,
+        58.2,
+        52.2
+      ],
+      [
+        51.7,
+        58.8,
+        63.4,
+        68.1,
+        70.5,
+        71.0,
+        67.6,
+        63.8,
+        57.4
+      ],
+      [
+        56.4,
+        63.6,
+        68.3,
+        73.1,
+        75.5,
+        76.0,
+        72.6,
+        68.8,
+        62.3
+      ],
+      [
+        58.0,
+        65.0,
+        69.6,
+        74.2,
+        76.5,
+        77.0,
+        73.7,
+        70.0,
+        63.7
+      ],
+      [
+        57.6,
+        64.1,
+        68.2,
+        72.5,
+        74.6,
+        75.0,
+        72.0,
+        68.7,
+        62.9
+      ],
+      [
+        55.9,
+        62.0,
+        65.8,
+        69.7,
+        71.6,
+        72.0,
+        69.3,
+        66.2,
+        60.8
+      ],
+      [
+        53.3,
+        58.9,
+        62.4,
+        65.9,
+        67.6,
+        68.0,
+        65.5,
+        62.7,
+        57.8
+      ],
+      [
+        48.1,
+        53.0,
+        56.1,
+        59.2,
+        60.7,
+        61.0,
+        58.8,
+        56.4,
+        52.1
+      ],
+      [
+        44.2,
+        48.7,
+        51.5,
+        54.3,
+        55.7,
+        56.0,
+        54.0,
+        51.8,
+        47.9
+      ]
+    ]
+  }
+}
