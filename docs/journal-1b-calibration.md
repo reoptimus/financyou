@@ -81,7 +81,63 @@ prises, et les points à reprendre plus tard, au fil de l'étape 1.B.
   incohérence de convention entre les trois modèles qui mériterait d'être
   alignée en même temps que la correction du point 1.
 
+## 4. Bug composé dans le drift risque-neutre actions (`black_scholes.py`), corrigé à l'étape 1.B.3
+
+- **Ouvert et réglé le** : 2026-08-28 (étape 1.B.3, en implémentant la
+  séparation risque-neutre / monde réel)
+- **Statut** : réglé
+- **Contexte** : `_calculate_total_returns` était déjà repéré comme
+  « mal centré » au point 3 ci-dessus (`+σ²/2` au lieu de `-σ²/2`), avec un
+  écart résiduel d'environ 18 % à 30 ans jugé peu sévère par rapport au bug
+  immobilier. En corrigeant uniquement ce signe pour préparer la prime de
+  risque, l'écart n'a pas disparu : il a bougé (`E[D(t)*Index(t)]` ≈ 1,18 au
+  lieu de ≈ 0,82), ce qui a révélé un second bug, distinct et cumulatif :
+  `short_rates[:, t]` (le `Rt` produit par `HullWhiteModel`) est déjà un
+  rendement de PÉRIODE — exactement ce que `_calculate_deflators` accumule
+  sans le multiplier par `dt`. L'ancien code le multipliait pourtant une
+  seconde fois par `dt` dans le drift actions, comme s'il s'agissait d'un
+  taux annualisé, ce qui le sous-comptait par rapport à ce que le déflateur
+  retire réellement à chaque période.
+- **Correction** : `drift = short_rates[:, t] + (risk_premium - σ²/2) * dt`
+  — seuls `risk_premium` et la correction d'Itô (des taux annualisés) sont
+  mis à l'échelle par `dt` ; `short_rates[:, t]` ne l'est plus. Vérifié
+  empiriquement (`n_scenarios=20000`, `dt=0,25`, courbe EIOPA France,
+  graine 42) : `E[D(t)*Index(t)]` passe à 1,00026 à 30 ans, contre ≈ 1,18
+  avec le seul signe corrigé et une divergence plus grande encore avec le
+  code d'origine. Voir `tests/test_stochastic_models.py::TestBlackScholesEquity`
+  pour les deux tests déterministes qui isolent chaque terme du drift, et
+  `tests/test_scenario_generator.py::test_martingale_equity_est_risque_neutre`
+  (désormais un test qui passe, plus un `xfail`) pour la vérification Monte
+  Carlo bout en bout.
+- **Conséquence sur les nombres déjà produits** : toute simulation générée
+  avant cette correction avait un indice actions risque-neutre biaisé, et
+  — une fois la prime de risque introduite à la même étape — un indice
+  actions monde réel qui héritait du même biais de drift. `scenarios_df`
+  change donc de valeurs à partir de cette étape ; voir la comparaison
+  avant/après dans la description de la PR (`examples/complete_pipeline_with_files.py`,
+  règle « Aucune régression numérique silencieuse » de `CLAUDE.md`).
+
+## 5. Prime de risque immobilière : rattachée à un modèle risque-neutre déjà instable (point 1)
+
+- **Ouvert le** : 2026-08-28 (étape 1.B.3)
+- **Statut** : ouvert — documenté, pas corrigé, hors périmètre de 1.B.3
+- **Contexte** : par cohérence d'interface avec les actions,
+  `RealEstateModel.generate_returns` accepte désormais un paramètre
+  `risk_premium`, appliqué à un drift déjà annualisé (`kimmo`), et
+  `ScenarioGenerator` l'alimente avec `assumptions.real_estate_risk_premium`
+  (1,5 %, voir `docs/validation/1b-hypotheses-monde-reel.md`). Cela **ne
+  corrige pas** l'explosion documentée au point 1 : le socle risque-neutre
+  immobilier reste instable à 30 ans, la prime de risque s'ajoute
+  simplement à un drift qui explose déjà pour une autre raison.
+  L'illustration à 30 ans de `docs/validation/1b-hypotheses-monde-reel.md`
+  contourne le problème en calculant l'effet de la prime analytiquement
+  (capitalisation à taux constant), plutôt qu'en faisant tourner
+  `RealEstateModel`.
+- **À reprendre** : corriger le point 1 avant de considérer qu'une
+  projection immobilière monde réel produite par `RealEstateModel` est
+  utilisable pour un utilisateur.
+
 ---
 
-*Dernière mise à jour : 2026-08-27, étape 1.B.1 (correction du test de
-martingalité).*
+*Dernière mise à jour : 2026-08-28, étape 1.B.3 (séparation risque-neutre /
+monde réel).*

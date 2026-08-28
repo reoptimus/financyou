@@ -4,7 +4,7 @@
   "title": "Hypothèses de marché et de comportement FinancYou",
   "description": "Décrit des hypothèses de MARCHÉ et de COMPORTEMENT (rendement, répartition, comportement de réalisation), PAS de la fiscalité. Voir docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md, section « ce qui n'est pas de la fiscalité ». Le moteur fiscal (investment_calculator/modules/tax_engine.py) ne doit contenir aucune de ces valeurs en dur ; il charge ce document.",
   "type": "object",
-  "required": ["schema_version", "id", "status", "equity", "real_estate", "capital_gains_behavior", "household_income_approximation"],
+  "required": ["schema_version", "id", "status", "equity", "real_estate", "capital_gains_behavior", "household_income_approximation", "risk_premia"],
   "additionalProperties": false,
 
   "properties": {
@@ -104,6 +104,43 @@
           "type": "number",
           "minimum": 0,
           "description": "Revenu de foyer utilisé pour réduire un barème progressif de l'impôt sur le revenu à un taux moyen unique, faute de connaître le revenu réel du foyer simulé à ce stade du calcul. N'est pas une donnée fiscale : c'est un choix de modélisation du moteur de scénarios. Voir investment_calculator.tax_regime.TaxRegime.to_scenario_tax_config."
+        }
+      }
+    },
+
+    "risk_premia": {
+      "type": "object",
+      "description": "Primes de risque MONDE RÉEL, ajoutées au taux sans risque pour projeter un patrimoine (jamais pour un pricing ou un test de martingalité, qui restent risque-neutres — voir docs/adr/0001, étape 1.B.3, et docs/validation/1b-hypotheses-monde-reel.md). Ce sont des choix engageants qui affectent directement les résultats présentés à un utilisateur, pas des paramètres techniques : chaque valeur porte sa fourchette, la valeur retenue, et la méthode ou la source.",
+      "required": ["equity", "real_estate"],
+      "additionalProperties": false,
+      "properties": {
+        "equity": { "$ref": "#/$defs/riskPremium" },
+        "real_estate": { "$ref": "#/$defs/riskPremium" }
+      }
+    }
+  },
+
+  "$defs": {
+    "riskPremium": {
+      "type": "object",
+      "required": ["value", "range_low", "range_high", "method"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "number",
+          "description": "Prime de risque retenue, en fraction annualisée (0.05 = 5 %), à ajouter au taux sans risque dans le drift monde réel."
+        },
+        "range_low": {
+          "type": "number",
+          "description": "Borne basse de la fourchette raisonnable trouvée dans la littérature/les sources professionnelles."
+        },
+        "range_high": {
+          "type": "number",
+          "description": "Borne haute de la fourchette raisonnable."
+        },
+        "method": {
+          "type": "string",
+          "description": "Arithmétique ou géométrique, et brève description de la méthode (implicite, historique...). Important : ce moteur applique déjà une correction de convexité (-σ²/2) séparément, donc la prime doit être ARITHMÉTIQUE, pas géométrique, sous peine de compter deux fois l'effet de la volatilité."
         }
       }
     }

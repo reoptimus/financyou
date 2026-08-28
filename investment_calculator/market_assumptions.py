@@ -122,6 +122,23 @@ class MarketAssumptions:
             self.document["household_income_approximation"]["reference_household_income"]
         )
 
+    @property
+    def equity_risk_premium(self) -> float:
+        """
+        Prime de risque actions (monde réel), à ajouter au taux sans risque.
+
+        À utiliser uniquement pour projeter un patrimoine — jamais pour un
+        pricing ou un test de martingalité, qui restent risque-neutres. Voir
+        docs/validation/1b-hypotheses-monde-reel.md pour la fourchette et la
+        source.
+        """
+        return float(self.document["risk_premia"]["equity"]["value"])
+
+    @property
+    def real_estate_risk_premium(self) -> float:
+        """Prime de risque immobilière (monde réel) ; mêmes réserves que equity_risk_premium."""
+        return float(self.document["risk_premia"]["real_estate"]["value"])
+
 
 def load_market_assumptions(assumptions_id: str = "default-2026") -> MarketAssumptions:
     """

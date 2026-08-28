@@ -61,6 +61,8 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
+from investment_calculator.market_assumptions import load_market_assumptions
+
 # Import from existing modules
 from investment_calculator.stochastic_models import (
     BlackScholesEquity,
@@ -397,6 +399,13 @@ class ScenarioGenerator:
 
         corr_results = corr_gen.generate(rate_residuals=hw_results['residuals'])
 
+        # Deux univers, explicitement séparés (étape 1.B.3) : le monde réel
+        # (taux sans risque + prime de risque) alimente les scénarios
+        # projetés à l'utilisateur ; le risque-neutre (prime nulle) n'existe
+        # que pour le test de martingalité, jamais pour une projection —
+        # voir docs/validation/1b-hypotheses-monde-reel.md.
+        assumptions = load_market_assumptions()
+
         # Step 4: Generate equity scenarios
         equity_model = BlackScholesEquity(
             sigma=params['equity_volatility'],
@@ -409,7 +418,15 @@ class ScenarioGenerator:
         equity_shocks = corr_gen.get_asset_shocks(corr_results['shocks'], 'equity')
         equity_results = equity_model.generate_returns(
             hw_results['Rt'],
-            equity_shocks=equity_shocks
+            equity_shocks=equity_shocks,
+            risk_premium=assumptions.equity_risk_premium,
+        )
+        # Même diffusion (equity_shocks), prime nulle : sert uniquement au
+        # test de martingalité ci-dessous, jamais à une projection.
+        equity_results_rn = equity_model.generate_returns(
+            hw_results['Rt'],
+            equity_shocks=equity_shocks,
+            risk_premium=0.0,
         )
 
         # Step 5: Generate real estate scenarios
@@ -430,7 +447,19 @@ class ScenarioGenerator:
             hw_results['Rt'],
             f0t,
             re_price_shocks=re_price_shocks,
-            re_rental_shocks=re_rental_shocks
+            re_rental_shocks=re_rental_shocks,
+            risk_premium=assumptions.real_estate_risk_premium,
+        )
+        # Risque-neutre, mêmes chocs : voir la réserve dans
+        # RealEstateModel.generate_returns — n'apporte pas de propriété de
+        # martingale tant que le bug documenté n'est pas corrigé, mais garde
+        # l'interface cohérente avec les actions.
+        re_results_rn = re_model.generate_returns(
+            hw_results['Rt'],
+            f0t,
+            re_price_shocks=re_price_shocks,
+            re_rental_shocks=re_rental_shocks,
+            risk_premium=0.0,
         )
 
         # Step 6: Generate bond returns (simplified - use interest rates)
@@ -492,11 +521,15 @@ class ScenarioGenerator:
         # Calculate diagnostics
         diagnostics = self._calculate_diagnostics(scenarios_df, method='stochastic')
 
-        # Indices de rendement total (dividendes/loyers réinvestis), normalisés
-        # à 1 en t=0, mêmes conventions d'indexation que les déflateurs : voir
-        # _test_martingale pour la justification de ce qui est comparé à quoi.
-        equity_index = np.exp(np.cumsum(equity_results['total_returns'], axis=1))
-        real_estate_index = np.exp(np.cumsum(re_results['total_returns'], axis=1))
+        # Indices de rendement total RISQUE-NEUTRES (dividendes/loyers
+        # réinvestis, prime de risque nulle), normalisés à 1 en t=0, mêmes
+        # conventions d'indexation que les déflateurs. Construits à partir de
+        # equity_results_rn / re_results_rn, PAS des séries monde réel
+        # utilisées dans scenarios_df : un indice qui inclut une prime de
+        # risque n'a aucune raison d'être martingale une fois déflaté (voir
+        # _test_martingale et docs/validation/1b-hypotheses-monde-reel.md).
+        equity_index = np.exp(np.cumsum(equity_results_rn['total_returns'], axis=1))
+        real_estate_index = np.exp(np.cumsum(re_results_rn['total_returns'], axis=1))
 
         diagnostics['martingale_test'] = self._test_martingale(
             hw_results['deflators'],
@@ -518,7 +551,13 @@ class ScenarioGenerator:
                 # (voir investment_calculator.yield_curve).
                 'yield_curve_id': yield_curve_id,
                 'yield_curve_vintage_date': curve_vintage,
-                'forward_curve_range': (float(f0t.min()), float(f0t.max()))
+                'forward_curve_range': (float(f0t.min()), float(f0t.max())),
+                # Les rendements projetés (scenarios_df) sont monde réel :
+                # taux sans risque + cette prime. Voir
+                # docs/validation/1b-hypotheses-monde-reel.md.
+                'market_assumptions_id': assumptions.id,
+                'equity_risk_premium': assumptions.equity_risk_premium,
+                'real_estate_risk_premium': assumptions.real_estate_risk_premium,
             },
             'model_versions': {
                 'gse': '2.0.0',

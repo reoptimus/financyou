@@ -294,6 +294,46 @@ class TestBlackScholesEquity(unittest.TestCase):
         # All prices should be positive
         self.assertTrue(np.all(prices > 0))
 
+    def test_drift_uses_short_rate_as_a_period_return_not_annualized(self):
+        """
+        Régression du bug corrigé à l'étape 1.B.3, vérifiée analytiquement
+        (chocs nuls, pas de bruit Monte-Carlo) : short_rates[:, t] est déjà
+        un rendement de période (voir HullWhiteModel._calculate_deflators,
+        qui l'accumule sans le multiplier par dt) ; seuls risk_premium et la
+        correction -σ²/2 sont des taux annualisés, à mettre à l'échelle par
+        dt. Avant l'étape 1.B.3, short_rates était multiplié par dt une
+        seconde fois, cassant la propriété de martingale même une fois le
+        signe de -σ²/2 corrigé isolément (vérifié empiriquement : ~1,18 de
+        déviation avec le signe seul corrigé, contre ~1,0003 avec les deux
+        corrections combinées — voir docs/journal-1b-calibration.md).
+        """
+        zero_shocks = np.zeros((100, 20))
+        results = self.model.generate_returns(self.short_rates, equity_shocks=zero_shocks)
+
+        # short_rates est constant à 0.03 (rendement de période) ; avec des
+        # chocs nuls, chaque pas (hors t=0) doit valoir exactement
+        # short_rates[t] + (0 - sigma^2/2)*dt, PAS (short_rates[t] - sigma^2/2)*dt.
+        # (total_returns, pas price_returns, pour ne pas mélanger avec le
+        # dividende constant qui s'ajoute séparément.)
+        expected_step = 0.03 + (0.0 - self.model.sigma**2 / 2) * self.model.dt
+        np.testing.assert_allclose(results['total_returns'][:, 1:], expected_step)
+
+    def test_risk_premium_adds_an_annualized_drift(self):
+        """risk_premium est un taux annualisé : mis à l'échelle par dt, comme -σ²/2."""
+        zero_shocks = np.zeros((100, 20))
+        risk_premium = 0.05
+
+        baseline = self.model.generate_returns(self.short_rates, equity_shocks=zero_shocks)
+        with_premium = self.model.generate_returns(
+            self.short_rates, equity_shocks=zero_shocks, risk_premium=risk_premium
+        )
+
+        expected_extra = risk_premium * self.model.dt
+        np.testing.assert_allclose(
+            with_premium['price_returns'][:, 1:] - baseline['price_returns'][:, 1:],
+            expected_extra,
+        )
+
     def test_calculate_percentiles(self):
         """Test percentile calculation."""
         results = self.model.generate_returns(self.short_rates)

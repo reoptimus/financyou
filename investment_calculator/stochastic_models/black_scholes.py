@@ -4,8 +4,31 @@ Black-Scholes Equity Model
 This module implements stock price dynamics using the Black-Scholes framework
 with stochastic interest rates from the Hull-White model.
 
-Stock returns are modeled as:
-    dS/S = (r(t) + σ²/2)dt + σ*dW(t)
+Deux univers, explicitement séparés (voir étape 1.B.3 et
+docs/validation/1b-hypotheses-monde-reel.md) :
+
+* **Risque-neutre** (``risk_premium=0``, le défaut) : l'indice de rendement
+  total (dividendes réinvestis) suit
+  ``d(log Index) = short_rates[t] + (-σ²/2)*dt + σ*dW(t)``, si bien que
+  ``E[D(t)*Index(t)] = Index(0)`` — la propriété de martingale exigée pour
+  la cohérence de pricing et testée par
+  ``ScenarioGenerator._test_martingale``. **Avant l'étape 1.B.3, deux bugs
+  cumulés** cassaient cette propriété : le signe du terme de correction
+  d'Itô était inversé (``+σ²/2`` au lieu de ``-σ²/2``) — présenté comme
+  « risque-neutre » alors qu'il ne l'était pas — ET ``short_rates[:, t]``
+  (déjà un rendement de période, voir ``_calculate_total_returns``) était
+  multiplié une seconde fois par ``dt`` comme s'il s'agissait d'un taux
+  annualisé. L'indice déflaté dérivait d'environ 18 % à 30 ans (les deux
+  bugs se compensant partiellement) au lieu de rester à 1 — voir le test de
+  martingalité corrigé à l'étape 1.B.1 et docs/journal-1b-calibration.md.
+* **Monde réel** (``risk_premium>0``) : ``d(log Index) = short_rates[t] +
+  (risk_premium - σ²/2)*dt + σ*dW(t)`` — c'est le drift à utiliser pour
+  projeter le patrimoine d'un épargnant, jamais pour un test de martingalité
+  ou un pricing de produit dérivé. La valeur de ``risk_premium`` est une
+  hypothèse de marché engageante, pas un paramètre technique : voir
+  ``investment_calculator/market_assumptions/`` et
+  ``docs/validation/1b-hypotheses-monde-reel.md`` pour la fourchette
+  retenue et sa justification.
 
 where:
     r(t) = stochastic risk-free rate from Hull-White model
@@ -92,7 +115,8 @@ class BlackScholesEquity:
         self,
         short_rates: np.ndarray,
         equity_shocks: np.ndarray | None = None,
-        rate_shocks: np.ndarray | None = None
+        rate_shocks: np.ndarray | None = None,
+        risk_premium: float = 0.0,
     ) -> dict[str, np.ndarray]:
         """
         Generate equity return scenarios.
@@ -103,6 +127,14 @@ class BlackScholesEquity:
                           If None, will be generated internally
             rate_shocks: Optional rate shocks for correlation (n_scenarios × n_steps)
                         Required if correlation_with_rates != 0
+            risk_premium: prime de risque actions ajoutée au drift, en plus
+                du taux sans risque. 0 (défaut) = monde risque-neutre, la
+                seule mesure sous laquelle l'indice déflaté est martingale
+                — voir ScenarioGenerator._test_martingale. Une valeur > 0
+                donne le monde réel, à réserver aux projections de
+                patrimoine (voir docs/validation/1b-hypotheses-monde-reel.md
+                pour la valeur à utiliser et sa justification) : ne jamais
+                l'utiliser pour un test de martingalité ou un pricing.
 
         Returns:
             Dictionary containing:
@@ -129,7 +161,7 @@ class BlackScholesEquity:
                 equity_shocks = np.random.normal(0, 1, (n_scenarios, n_steps))
 
         # Calculate total returns using Black-Scholes
-        total_returns = self._calculate_total_returns(short_rates, equity_shocks)
+        total_returns = self._calculate_total_returns(short_rates, equity_shocks, risk_premium)
 
         # Calculate dividend returns (constant yield)
         dividend_returns = np.full(
@@ -149,22 +181,53 @@ class BlackScholesEquity:
     def _calculate_total_returns(
         self,
         short_rates: np.ndarray,
-        equity_shocks: np.ndarray
+        equity_shocks: np.ndarray,
+        risk_premium: float = 0.0,
     ) -> np.ndarray:
         """
         Calculate total equity returns using Black-Scholes formula.
 
-        Under risk-neutral measure:
+        Sous la mesure risque-neutre (risk_premium=0) :
             dS/S = r(t)dt + σ*dW(t)
 
-        Discrete version:
-            log(S[t+1]/S[t]) = (r(t) - σ²/2)dt + σ*sqrt(dt)*ε[t]
+        Version discrète (indice de rendement total, dividendes réinvestis) :
+            log(S[t+1]/S[t]) = short_rates[t] + (risk_premium - σ²/2)*dt + σ*sqrt(dt)*ε[t]
 
-        where we add σ²/2 drift adjustment for continuous compounding.
+        Deux corrections apportées à l'étape 1.B.3, dont la combinaison — pas
+        l'une ou l'autre isolément — restaure la propriété de martingale :
+
+        1. Le signe du terme d'Itô était inversé (``+σ²/2`` au lieu de
+           ``-σ²/2``), présenté comme risque-neutre alors qu'il ne l'était
+           pas.
+        2. ``short_rates[:, t]`` (le ``Rt`` produit par
+           ``HullWhiteModel.generate_scenarios``) est déjà un **rendement de
+           période** — c'est exactement ce que ``_calculate_deflators``
+           accumule sans le multiplier par ``dt`` pour obtenir
+           ``D(t)=exp(-Σ Rt)``. Le multiplier ICI par ``dt`` (comme le
+           faisait l'ancien code) le fait compter deux fois plus petit que
+           ce que le déflateur retire réellement à chaque période : la
+           partie « taux sans risque » de l'action décroche alors
+           progressivement de ce que le déflateur actualise, et
+           ``D(t)*Index(t)`` dérive vers le bas au lieu de rester à 1 — un
+           bug distinct de l'inversion de signe, présent même avant elle.
+           Seuls ``risk_premium`` et la correction ``-σ²/2`` (des taux
+           annualisés) ont besoin d'être mis à l'échelle par ``dt`` ;
+           ``short_rates[:, t]`` n'en a pas besoin, il l'est déjà.
+
+        Vérifié empiriquement (voir docs/journal-1b-calibration.md) : avec
+        risk_premium=0, dt=0,25 et 20 000 scénarios sur la courbe EIOPA
+        France, ``E[D(t)*Index(t)]`` vaut 1,00026 à 30 ans après ces deux
+        corrections, contre environ 1,18 avec seulement le signe corrigé
+        (le biais d'échelle masquait partiellement l'effet du signe) et une
+        divergence bien plus grande avec le code d'origine.
 
         Args:
-            short_rates: Short rate paths (n_scenarios × n_steps)
+            short_rates: Short rate paths — rendement de période, PAS un
+                taux annualisé (n_scenarios × n_steps).
             equity_shocks: Standard normal shocks (n_scenarios × n_steps)
+            risk_premium: prime de risque actions, taux ANNUALISÉ ajouté au
+                taux sans risque. 0 = monde risque-neutre (défaut) ; voir
+                ``generate_returns`` pour la distinction complète.
 
         Returns:
             Log returns (n_scenarios × n_steps)
@@ -177,8 +240,10 @@ class BlackScholesEquity:
 
         # Calculate returns for each time step
         for t in range(1, n_steps):
-            # Drift: r(t) + σ²/2 (add back drift for equity risk premium)
-            drift = (short_rates[:, t] + self.sigma**2 / 2) * self.dt
+            # short_rates[:, t] est déjà un rendement de période (pas de *dt) ;
+            # risk_premium et -σ²/2 sont des taux annualisés (mis à l'échelle
+            # par dt). Voir la docstring pour la justification empirique.
+            drift = short_rates[:, t] + (risk_premium - self.sigma**2 / 2) * self.dt
 
             # Diffusion: σ*sqrt(dt)*ε
             diffusion = vol_term * equity_shocks[:, t]
