@@ -79,6 +79,42 @@ class TestScenarioGeneratorInitialization:
         for corr_value in gen.default_correlations.values():
             assert -1 <= corr_value <= 1
 
+    def test_default_drifts_derive_du_taux_sans_risque_et_de_la_prime_de_risque(self):
+        """
+        Étape 1.B.4 : avant cette étape, equity_drift (0.10) et
+        real_estate_drift (0.08) étaient des littéraux indépendants. Ils
+        doivent désormais valoir risk_free_proxy.mean + la prime de risque
+        monde réel correspondante (voir
+        investment_calculator.market_assumptions.MarketAssumptions et
+        docs/validation/1b-hypotheses-monde-reel.md), pour rester cohérents
+        avec la séparation risque-neutre/monde réel du chemin stochastique.
+        """
+        from investment_calculator.market_assumptions import load_market_assumptions
+
+        assumptions = load_market_assumptions()
+        gen = scenario_generator.ScenarioGenerator()
+
+        assert gen.default_params['equity_drift'] == pytest.approx(
+            assumptions.risk_free_rate_mean + assumptions.equity_risk_premium
+        )
+        assert gen.default_params['real_estate_drift'] == pytest.approx(
+            assumptions.risk_free_rate_mean + assumptions.real_estate_risk_premium
+        )
+
+    def test_default_params_sont_une_donnee_versionnee_pas_un_litteral(self):
+        """Les valeurs par défaut viennent de market_assumptions, pas d'un dict codé en dur."""
+        from investment_calculator.market_assumptions import load_market_assumptions
+
+        assumptions = load_market_assumptions()
+        gen = scenario_generator.ScenarioGenerator()
+
+        assert gen.default_params['inflation_mean'] == assumptions.inflation_mean
+        assert gen.default_params['mean_reversion_speed'] == (
+            assumptions.hull_white_mean_reversion_speed
+        )
+        assert gen.default_params['hw_volatility'] == assumptions.hull_white_volatility
+        assert gen._market_assumptions_id == assumptions.id
+
 
 class TestConfigurationValidation:
     """Test configuration validation."""
@@ -178,6 +214,29 @@ class TestSimpleScenarioGeneration:
         assert 'deflators' in results
         assert 'metadata' in results
         assert 'diagnostics' in results
+
+    def test_simple_metadata_trace_le_jeu_d_hypotheses_utilise(self):
+        """
+        Étape 1.B.4 : le chemin simple dépend désormais de market_assumptions
+        (taux, primes, volatilités) au même titre que le chemin stochastique
+        dépend d'une courbe de taux (yield_curve_id) — une simulation
+        archivée doit pouvoir identifier quel jeu d'hypothèses l'a produite.
+        """
+        from investment_calculator.market_assumptions import load_market_assumptions
+
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 5,
+            'time_horizon': 3,
+            'timestep': 1.0,
+            'use_stochastic': False,
+        }
+
+        results = gen.generate(config)
+        assert (
+            results['metadata']['calibration_info']['market_assumptions_id']
+            == load_market_assumptions().id
+        )
 
     def test_simple_scenarios_dataframe_structure(self):
         """Test scenarios DataFrame structure."""

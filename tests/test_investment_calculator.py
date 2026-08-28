@@ -200,6 +200,30 @@ class TestGlobalScenarioEngine(unittest.TestCase):
         self.assertEqual(len(df), 30)
         self.assertIn("stock_return", df.columns)
 
+    def test_default_params_viennent_de_market_assumptions(self):
+        """
+        Étape 1.B.4 : avant cette étape, GlobalScenarioEngine avait sa propre
+        copie en dur de ces littéraux (stock_return_mean=0.10,
+        real_estate_mean=0.08...), désynchronisée de
+        investment_calculator.modules.scenario_generator.ScenarioGenerator.
+        Les deux lisent désormais le même jeu d'hypothèses versionné, et
+        stock_return_mean/real_estate_mean sont dérivés (taux sans risque +
+        prime de risque), pas des littéraux indépendants.
+        """
+        from investment_calculator.market_assumptions import load_market_assumptions
+
+        assumptions = load_market_assumptions()
+
+        self.assertAlmostEqual(
+            self.gse.default_params["stock_return_mean"],
+            assumptions.risk_free_rate_mean + assumptions.equity_risk_premium,
+        )
+        self.assertAlmostEqual(
+            self.gse.default_params["real_estate_mean"],
+            assumptions.risk_free_rate_mean + assumptions.real_estate_risk_premium,
+        )
+        self.assertEqual(self.gse.default_params["inflation_mean"], assumptions.inflation_mean)
+
 
 class TestTaxConfigFromRegime(unittest.TestCase):
     """

@@ -26,6 +26,13 @@ INPUT STRUCTURE:
     }
 }
 
+Toute valeur absente de 'economic_params' est complétée par
+investment_calculator.market_assumptions (étape 1.B.4), pas par un littéral
+codé en dur : voir ScenarioGenerator.__init__. equity_drift et
+real_estate_drift par défaut valent risk_free_proxy.mean + la prime de
+risque monde réel correspondante (voir docs/validation/1b-hypotheses-monde-reel.md) ;
+un economic_params['equity_drift'] fourni explicitement reste prioritaire.
+
 OUTPUT STRUCTURE:
 {
     'scenarios': pd.DataFrame,      # Shape: (num_scenarios * time_steps, n_columns)
@@ -109,37 +116,47 @@ class ScenarioGenerator:
         if random_seed is not None:
             np.random.seed(random_seed)
 
-        # Default economic parameters (US historical averages)
+        # Valeurs par défaut : données d'entrée versionnées (étape 1.B.4), plus
+        # des littéraux codés en dur. Avant cette étape, equity_drift (0.10) et
+        # real_estate_drift (0.08) étaient des constantes indépendantes du taux
+        # sans risque ; elles sont désormais dérivées (taux sans risque + prime
+        # de risque monde réel), pour rester cohérentes avec la séparation
+        # risque-neutre/monde réel introduite à l'étape 1.B.3 même sur le
+        # chemin de génération simple (qui n'a ni courbe EIOPA ni Hull-White).
+        # Voir MarketAssumptions.equity_expected_return et
+        # docs/journal-1b-calibration.md pour le détail. mean_reversion_speed
+        # et hw_volatility restent un PLACEHOLDER non calibré (voir
+        # rates.hull_white.status) tant que l'étape 1.B.5 n'est pas menée.
+        assumptions = load_market_assumptions()
+        self._market_assumptions_id = assumptions.id
         self.default_params = {
-            'inflation_mean': 0.025,
-            'inflation_volatility': 0.015,
-            'interest_mean': 0.03,
-            'interest_volatility': 0.02,
-            'equity_drift': 0.10,
-            'equity_volatility': 0.18,
-            'bond_return_mean': 0.05,
-            'bond_return_std': 0.07,
-            'real_estate_drift': 0.08,
-            'real_estate_volatility': 0.12,
-            'gdp_growth_mean': 0.025,
-            'gdp_growth_std': 0.02,
+            'inflation_mean': assumptions.inflation_mean,
+            'inflation_volatility': assumptions.inflation_volatility,
+            'interest_mean': assumptions.risk_free_rate_mean,
+            'interest_volatility': assumptions.risk_free_rate_volatility,
+            'equity_drift': assumptions.equity_expected_return,
+            'equity_volatility': assumptions.equity_volatility,
+            'bond_return_mean': assumptions.bond_return_mean,
+            'bond_return_std': assumptions.bond_return_volatility,
+            'real_estate_drift': assumptions.real_estate_expected_return,
+            'real_estate_volatility': assumptions.real_estate_volatility,
+            'gdp_growth_mean': assumptions.gdp_growth_mean,
+            'gdp_growth_std': assumptions.gdp_growth_volatility,
             # Advanced model parameters
-            'mean_reversion_speed': 0.1,  # Hull-White a parameter
-            'hw_volatility': 0.01,        # Hull-White sigma
-            'equity_dividend_yield': 0.02,
-            're_mean_reversion': 0.15,
-            're_rental_yield': 0.03,
-            're_inflation_adj': 0.02
+            'mean_reversion_speed': assumptions.hull_white_mean_reversion_speed,
+            'hw_volatility': assumptions.hull_white_volatility,
+            'equity_dividend_yield': assumptions.dividend_yield,
+            're_mean_reversion': assumptions.real_estate_mean_reversion,
+            're_rental_yield': assumptions.real_estate_rental_yield,
+            're_inflation_adj': assumptions.real_estate_inflation_adjustment,
         }
 
-        # Default correlation matrix
-        self.default_correlations = {
-            ('interest_rate', 'inflation'): 0.5,
-            ('stock_return', 'gdp_growth'): 0.6,
-            ('stock_return', 'bond_return'): -0.3,
-            ('real_estate_return', 'stock_return'): 0.5,
-            ('real_estate_return', 'interest_rate'): 0.3
-        }
+        # Défaut versionné (étape 1.B.4). Note : à l'écriture, aucun des deux
+        # chemins de génération ne consomme validated['correlation_matrix']
+        # (_generate_stochastic construit sa propre corrélation via
+        # CorrelatedRandomGenerator, qui l'ignore) — voir known_gaps de
+        # market_assumptions/default-2026.json et docs/journal-1b-calibration.md.
+        self.default_correlations = assumptions.correlations
 
     def generate(self, config: dict) -> dict:
         """
@@ -335,7 +352,12 @@ class ScenarioGenerator:
             'calibration_info': {
                 'method': 'simple',
                 'currency': config['currency'],
-                'calibration_date': config['calibration_date']
+                'calibration_date': config['calibration_date'],
+                # Les constantes par défaut de ce chemin (taux, primes de
+                # risque, volatilités) sont une donnée d'entrée versionnée
+                # depuis l'étape 1.B.4 : traçabilité au même titre que
+                # yield_curve_id pour le chemin stochastique.
+                'market_assumptions_id': self._market_assumptions_id,
             },
             'model_versions': {
                 'gse': '2.0.0',

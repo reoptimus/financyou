@@ -137,7 +137,78 @@ prises, et les points à reprendre plus tard, au fil de l'étape 1.B.
   projection immobilière monde réel produite par `RealEstateModel` est
   utilisable pour un utilisateur.
 
+## 6. Constantes économiques extraites en donnée versionnée (étape 1.B.4)
+
+- **Ouvert et réglé le** : 2026-08-28 (étape 1.B.4)
+- **Statut** : réglé, avec deux lacunes ouvertes documentées ci-dessous
+- **Contexte** : `ScenarioGenerator.__init__` et `GlobalScenarioEngine.__init__`
+  (`scenario_generator.py`, `gse.py`) avaient chacun leur propre copie en
+  dur des mêmes constantes ("US historical averages" : volatilité actions
+  18 %, dérive immobilière 8 %, inflation 2,5 %, matrice de corrélation...),
+  sous des noms de clé différents et désynchronisées l'une de l'autre.
+- **Ce qui a été fait** : ces constantes vivent désormais dans
+  `market_assumptions/default-2026.json` (nouveaux objets `equity.volatility`,
+  `real_estate.dynamics`, `rates.risk_free_proxy`, `rates.hull_white`,
+  `bond`, `inflation`, `gdp_growth`, `correlations`), lues par les deux
+  modules via `load_market_assumptions()` — une seule source, plus de
+  désynchronisation possible. `equity_drift` et `real_estate_drift`, qui
+  étaient des littéraux indépendants (0,10 et 0,08), sont désormais
+  **dérivés** : `risk_free_proxy.mean + risk_premia.<classe>.value` (voir
+  `MarketAssumptions.equity_expected_return` /
+  `.real_estate_expected_return`), pour que le chemin de génération simple
+  reste cohérent avec la séparation risque-neutre/monde réel de l'étape
+  1.B.3, même s'il n'a ni courbe EIOPA ni Hull-White. Un `economic_params`
+  fourni explicitement par l'appelant reste prioritaire sur cette valeur
+  dérivée (comportement inchangé, voir `test_custom_economic_params`).
+- **Effet secondaire découvert** : `tests/test_tax_engine.py::create_test_scenarios`
+  générait ses scénarios de test avec les valeurs par défaut de
+  `ScenarioGenerator`, sans le savoir explicitement. En abaissant
+  `equity_drift` (0,10 → 0,08) et surtout `real_estate_drift` (0,08 → 0,045),
+  trois tests dont les bornes de sanité (`effective_tax_rate > 0.05`,
+  moyenne de rendement positive...) étaient implicitement calibrées sur les
+  anciens littéraux se sont mis à échouer sur un échantillon de 10 scénarios
+  / 5 ans où la moyenne peut désormais tomber en territoire légèrement
+  négatif. Corrigé en fixant explicitement `equity_drift`/`real_estate_drift`
+  dans `create_test_scenarios` : ce module teste le calcul de l'impôt, pas
+  les hypothèses de marché, et ne doit pas dépendre de leur valeur courante.
+- **Lacune ouverte 1** : `rates.hull_white` (a=0,1, sigma=0,01) est marqué
+  `status: "placeholder"` — ce sont les anciens littéraux, pas une
+  calibration. L'étape 1.B.5 devait les remplacer par une calibration sur
+  swaptions réels, mais est différée (voir point 7 ci-dessous).
+- **Lacune ouverte 2** : `correlations` reste une extraction fidèle de
+  l'ancien littéral, mais **n'est consommé par aucun des deux chemins de
+  génération** — `_generate_stochastic` construit sa propre corrélation via
+  `CorrelatedRandomGenerator` (matrice n×n interne, ignore
+  `config['correlation_matrix']`), et `_generate_simple` n'utilise que des
+  poids de corrélation câblés en dur dans ses formules (`0.7 * base_shock +
+  0.3 * inflation_shock`, etc.), pas la matrice nommée. C'est une
+  configuration validée mais sans effet observable, découverte en
+  extrayant cette donnée, pas introduite par cette étape. Hors périmètre :
+  la corriger suppose de revoir comment `CorrelatedRandomGenerator` est
+  invoqué, un changement de comportement numérique qui mérite sa propre
+  étape et sa propre preuve de non-régression.
+- **Hors périmètre, non touché** : `GlobalScenarioEngine.generate_optimistic_scenario`
+  et `.generate_pessimistic_scenario` gardent leurs propres littéraux ad hoc
+  (0,12/0,15 pour l'optimiste, 0,06/0,25 pour le pessimiste...), non dérivés
+  de `self.default_params` ni de `market_assumptions` : l'étape 1.B.4 ne
+  ciblait que les `default_params` des deux moteurs, pas ces méthodes.
+
+## 7. Étape 1.B.5 (calibration Hull-White sur swaptions) différée faute de données
+
+- **Ouvert le** : 2026-08-28
+- **Statut** : différé, en attente de données de marché
+- **Contexte** : `legacy/R_scripts/Calib_Taux_Swaptions_V2.R` attend un
+  fichier `Prix_swaptions_bloomberg.Rda` (chemin réseau
+  `\\intra\partages\...\R4 CALIBRAGE\R4 IN\`) absent de ce dépôt.
+  `legacy/excel_files/` ne contient aucune donnée de prix de swaption ; le
+  fichier le plus proche par le nom, `Extractions Bloomberg - Calibration
+  ESG - ML 1.xlsx`, contient des données d'options sur indice actions
+  (feuilles SX5E, V2X), pas des swaptions de taux.
+- **Décision** : reporter l'étape 1.B.5 jusqu'à disposer de la donnée de
+  marché nécessaire. `rates.hull_white` reste un `placeholder` non calibré
+  (point 6 ci-dessus) en attendant.
+
 ---
 
-*Dernière mise à jour : 2026-08-28, étape 1.B.3 (séparation risque-neutre /
-monde réel).*
+*Dernière mise à jour : 2026-08-28, étape 1.B.4 (extraction des constantes
+économiques en donnée versionnée) ; étape 1.B.5 différée.*
