@@ -139,6 +139,119 @@ class MarketAssumptions:
         """Prime de risque immobilière (monde réel) ; mêmes réserves que equity_risk_premium."""
         return float(self.document["risk_premia"]["real_estate"]["value"])
 
+    @property
+    def equity_volatility(self) -> float:
+        """Volatilité annualisée du rendement total actions (σ de Black-Scholes)."""
+        return float(self.document["equity"]["volatility"])
+
+    @property
+    def real_estate_volatility(self) -> float:
+        """Volatilité annualisée du prix immobilier."""
+        return float(self.document["real_estate"]["dynamics"]["volatility"])
+
+    @property
+    def real_estate_mean_reversion(self) -> float:
+        """Vitesse de retour à la moyenne du processus immobilier ('a' de RealEstateModel)."""
+        return float(self.document["real_estate"]["dynamics"]["mean_reversion"])
+
+    @property
+    def real_estate_rental_yield(self) -> float:
+        """Rendement locatif annuel supposé (paramètre du modèle stochastique immobilier)."""
+        return float(self.document["real_estate"]["dynamics"]["rental_yield"])
+
+    @property
+    def real_estate_inflation_adjustment(self) -> float:
+        """Ajustement du loyer à l'inflation (paramètre du modèle stochastique immobilier)."""
+        return float(self.document["real_estate"]["dynamics"]["inflation_adjustment"])
+
+    @property
+    def risk_free_rate_mean(self) -> float:
+        """
+        Taux sans risque constant, utilisé uniquement par le chemin de génération
+        simple (ScenarioGenerator._generate_simple), qui n'a ni courbe EIOPA ni
+        modèle Hull-White. Sert aussi de base au drift monde réel de ce chemin :
+        voir equity_expected_return et real_estate_expected_return.
+        """
+        return float(self.document["rates"]["risk_free_proxy"]["mean"])
+
+    @property
+    def risk_free_rate_volatility(self) -> float:
+        """Volatilité du taux sans risque constant du chemin de génération simple."""
+        return float(self.document["rates"]["risk_free_proxy"]["volatility"])
+
+    @property
+    def hull_white_mean_reversion_speed(self) -> float:
+        """
+        Paramètre 'a' de Hull-White pour le chemin stochastique. PLACEHOLDER non
+        calibré tant que l'étape 1.B.5 (calibration sur swaptions réels) n'a pas
+        été menée — voir le champ 'status' du document et
+        docs/journal-1b-calibration.md.
+        """
+        return float(self.document["rates"]["hull_white"]["mean_reversion_speed"])
+
+    @property
+    def hull_white_volatility(self) -> float:
+        """Paramètre 'sigma' de Hull-White ; mêmes réserves que hull_white_mean_reversion_speed."""
+        return float(self.document["rates"]["hull_white"]["volatility"])
+
+    @property
+    def bond_return_mean(self) -> float:
+        """Rendement obligataire moyen, chemin de génération simple."""
+        return float(self.document["bond"]["mean"])
+
+    @property
+    def bond_return_volatility(self) -> float:
+        """Volatilité du rendement obligataire, chemin de génération simple."""
+        return float(self.document["bond"]["volatility"])
+
+    @property
+    def inflation_mean(self) -> float:
+        """Inflation moyenne supposée."""
+        return float(self.document["inflation"]["mean"])
+
+    @property
+    def inflation_volatility(self) -> float:
+        """Volatilité de l'inflation supposée."""
+        return float(self.document["inflation"]["volatility"])
+
+    @property
+    def gdp_growth_mean(self) -> float:
+        """Croissance du PIB moyenne supposée."""
+        return float(self.document["gdp_growth"]["mean"])
+
+    @property
+    def gdp_growth_volatility(self) -> float:
+        """Volatilité de la croissance du PIB supposée."""
+        return float(self.document["gdp_growth"]["volatility"])
+
+    @property
+    def correlations(self) -> dict[tuple[str, str], float]:
+        """
+        Matrice de corrélation entre classes d'actifs, sous la forme utilisée par
+        ScenarioGenerator.default_correlations (clé = tuple des deux noms
+        d'actifs). Voir known_gaps : à l'écriture, aucun des deux chemins de
+        génération ne consomme cette donnée.
+        """
+        return {
+            (entry["pair"][0], entry["pair"][1]): float(entry["value"])
+            for entry in self.document["correlations"]
+        }
+
+    @property
+    def equity_expected_return(self) -> float:
+        """
+        Rendement actions attendu, monde réel, chemin de génération simple :
+        taux sans risque constant + prime de risque actions. Centralise la
+        formule utilisée à la fois par ScenarioGenerator et GlobalScenarioEngine
+        (étape 1.B.4) pour éviter de la dupliquer dans les deux modules.
+        """
+        return self.risk_free_rate_mean + self.equity_risk_premium
+
+    @property
+    def real_estate_expected_return(self) -> float:
+        """Rendement immobilier attendu, chemin simple ; réserves : voir equity_expected_return."""
+        return self.risk_free_rate_mean + self.real_estate_risk_premium
+
 
 def load_market_assumptions(assumptions_id: str = "default-2026") -> MarketAssumptions:
     """
