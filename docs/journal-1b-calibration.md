@@ -193,10 +193,13 @@ prises, et les points à reprendre plus tard, au fil de l'étape 1.B.
   de `self.default_params` ni de `market_assumptions` : l'étape 1.B.4 ne
   ciblait que les `default_params` des deux moteurs, pas ces méthodes.
 
-## 7. Étape 1.B.5 (calibration Hull-White sur swaptions) différée faute de données
+## 7. Étape 1.B.5 (calibration Hull-White sur swaptions) différée faute de données réelles
 
 - **Ouvert le** : 2026-08-28
-- **Statut** : différé, en attente de données de marché
+- **Statut** : toujours différé pour une VRAIE calibration (aucune donnée de
+  marché disponible) — voir point 8 pour la version de développement
+  débloquée le même jour avec une surface synthétique fournie par
+  l'utilisateur.
 - **Contexte** : `legacy/R_scripts/Calib_Taux_Swaptions_V2.R` attend un
   fichier `Prix_swaptions_bloomberg.Rda` (chemin réseau
   `\\intra\partages\...\R4 CALIBRAGE\R4 IN\`) absent de ce dépôt.
@@ -204,9 +207,100 @@ prises, et les points à reprendre plus tard, au fil de l'étape 1.B.
   fichier le plus proche par le nom, `Extractions Bloomberg - Calibration
   ESG - ML 1.xlsx`, contient des données d'options sur indice actions
   (feuilles SX5E, V2X), pas des swaptions de taux.
-- **Décision** : reporter l'étape 1.B.5 jusqu'à disposer de la donnée de
-  marché nécessaire. `rates.hull_white` reste un `placeholder` non calibré
-  (point 6 ci-dessus) en attendant.
+- **Décision** : reporter une calibration RÉELLE jusqu'à disposer de la
+  donnée de marché nécessaire (voir
+  `investment_calculator/swaption_surfaces/HANDOFF_surface_swaptions.md`,
+  section 2, pour les sources payantes envisagées). `rates.hull_white` dans
+  `market_assumptions/default-2026.json` reste un `placeholder` non calibré
+  (point 6 ci-dessus) : le point 8 n'y touche pas.
+
+## 8. SwaptionCalibrator implémenté (Jamshidian) sur une surface synthétique — version de développement
+
+- **Ouvert et réglé le** : 2026-08-28
+- **Statut** : réglé pour une version de développement ; PAS une calibration
+  de production (voir garde-fou `synthetic`, ci-dessous)
+- **Origine** : l'utilisateur a transmis `HANDOFF_surface_swaptions.md`
+  (rédigé lors d'une session Cowork antérieure) et un classeur
+  `surface_swaptions_EUR_SYNTHETIQUE.xlsx` contenant une grille de
+  volatilités normales ATM (11 échéances × 9 ténors, 99 points) produite par
+  un modèle paramétrique — PAS des cotations de marché — pour débloquer le
+  portage en l'absence de toute donnée de marché réelle (voir point 7). Voir
+  `investment_calculator/swaption_surfaces/HANDOFF_surface_swaptions.md`
+  pour le document complet, annoté des sections effectivement implémentées.
+- **Donnée versionnée créée** :
+  `investment_calculator/swaption_surfaces/eur-synthetic-2026-08.json`
+  (schéma dédié, `investment_calculator/swaption_surfaces/schema.json`),
+  chargée par le nouveau module `investment_calculator/swaption_surface.py`
+  (mêmes conventions que `yield_curve.py` : `list_*`, `load_*`,
+  vérifications de cohérence qu'un schéma JSON seul ne peut pas exprimer).
+  Contient la grille de volatilités, la courbe Nelson-Siegel de référence
+  (marquée : usage vérification uniquement, jamais en production — voir
+  ci-dessous), et les deux calibrations de référence rapportées par le
+  handoff, pour non-régression.
+- **Garde-fou `synthetic`** : `document["synthetic"] = true`.
+  `load_swaption_surface` lève `SwaptionSurfaceSyntheticNotAllowedError` si
+  l'appelant ne passe pas explicitement `allow_synthetic=True` ; le
+  constructeur de `SwaptionCalibrator` répète le même contrôle (au cas où
+  quelqu'un construirait un `SwaptionSurface` sans passer par le chargeur).
+  Défaut à `False`, contrairement à `allow_draft=True` par défaut dans
+  `yield_curve.py` : une surface synthétique n'est pas une donnée de marché
+  imparfaite mais relue, c'est une valeur inventée pour du développement —
+  la laisser passer par défaut violerait « aucune valeur inventée » de
+  CLAUDE.md. **Rien dans `ScenarioGenerator` ou `market_assumptions`
+  n'appelle `SwaptionCalibrator`** : la calibration issue de cette surface
+  n'alimente aucune sortie utilisateur, par construction.
+- **Pricing implémenté** — `investment_calculator/stochastic_models/calibration.py` :
+  décomposition de Jamshidian, Hull-White 1 facteur (`hull_white_payer_swaption_price`,
+  `hull_white_zero_coupon_bond_put_price`) : une swaption payeuse ≡ un put
+  sur l'obligation à coupon sous-jacente, strike 1, décomposé en somme de
+  puts sur zéro-coupon via le r* qui égalise l'obligation à 1 (Brigo-Mercurio,
+  section 3.9). Swaptions à la monnaie uniquement (le forward et l'annuité
+  sont recalculés à partir de la courbe fournie, jamais lus depuis un
+  tableau figé — voir la mise en garde de la section 3.2 du handoff sur les
+  strikes qui ne seraient plus à la monnaie). **Pas un portage ligne à ligne
+  du script R** : `Calib_Taux_Swaptions_V2.R` délègue le pricing à
+  `Prix_swaptions_M2_V2.R` (Monte-Carlo) et
+  `Prix_swaption_Normal_Uniroot.R` (inversion en vol), deux fichiers absents
+  de `legacy/` — la décomposition de Jamshidian est une méthode fermée
+  standard, mathématiquement équivalente à la limite Monte-Carlo, mais une
+  implémentation indépendante, pas la même.
+- **Non-régression, faute de R exécutable ET de scripts R complets** :
+  reproduction du calcul de vérification (déjà indépendamment calculé et
+  documenté dans le handoff, section 4) plutôt que du script R lui-même.
+  Résultat (`tests/test_swaption_calibration.py::TestCalibrationReproduitLesReperesDuHandoff`) :
+  - Cube complet (99 points) : a=0,00259 σ=60,7 bp RMSE=8,45 bp err.max=21,19 bp
+    — handoff : a=0,0026 σ=61 bp RMSE=8,5 bp err.max=21 bp. Quasi-identique :
+    forte confiance que le pricer est correct.
+  - Bande co-terminale 10 ans (11 points, sélection par ténor le plus
+    proche par échéance) : a=0,098 σ=99,7 bp RMSE=7,48 bp — handoff : a=0,0937
+    σ=95 bp RMSE=7,2 bp (9 points, sélection non précisée). Même ordre de
+    grandeur, écart probablement dû à un ensemble de points différent (9
+    contre 11) plutôt qu'à une erreur de pricing, vu la quasi-exactitude du
+    cube complet. Tolérance des tests volontairement large (±5 à ±10 bp),
+    pas un test à 1 % : deux implémentations indépendantes d'un pricer
+    fermé convergent rarement bit-à-bit, surtout sur un optimum plat
+    (dégénérescence de `a`).
+- **Confirmation empirique de la dégénérescence documentée par le handoff** :
+  calibrer `a` ET `sigma` conjointement sur les 99 points du cube fait
+  effectivement s'effondrer `a` vers ~0 (confirmé indépendamment, pas
+  seulement recopié du handoff) — dégénérescence classique d'un modèle à un
+  facteur. `SwaptionCalibrator.calibrate(fixed_a=...)` implémente le schéma
+  de production recommandé par le handoff (fixer `a`, ne calibrer que
+  `sigma` sur une bande co-terminale via `select_co_terminal_band`).
+- **Décisions ouvertes, non tranchées ici** (reprises du handoff, section
+  6 — restent à l'utilisateur) :
+  - Valeur de `a` à fixer en production (handoff : 0,05-0,10 pour l'EUR).
+  - Horizon de la bande co-terminale à calibrer (10 ans ? 20 ans ?), selon
+    l'horizon de passif visé.
+  - Calibration ponctuelle de validation, ou surface rafraîchie en
+    production (donnée courtier payante : ICAP/Parameta, LSEG, Bloomberg
+    VCUB... voir le handoff, section 2) ?
+- **Hors périmètre, non fait** : brancher `SwaptionCalibrator` sur
+  `ScenarioGenerator`/`market_assumptions` (interdit tant que la seule
+  surface disponible est synthétique) ; convention lognormale ; smile/skew
+  (swaptions non-ATM) ; `grid_curve_functions` (courbe réelle interpolée)
+  n'est pour l'instant exercée par aucun test, faute d'un cas d'usage réel
+  à brancher dessus.
 
 ---
 
