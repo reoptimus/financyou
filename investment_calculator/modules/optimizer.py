@@ -27,7 +27,6 @@ OUTPUT STRUCTURE:
     'optimal_portfolio': dict,
     'efficient_frontier': pd.DataFrame,
     'simulation_results': dict,
-    'rebalancing_schedule': pd.DataFrame,
     'sensitivity_analysis': dict,
     'goal_analysis': dict
 }
@@ -109,20 +108,23 @@ class PortfolioOptimizer:
 
         # Extract returns for optimization
         asset_returns = self._extract_asset_returns(scenarios_df)
+        risk_free_rate = self._risk_free_rate(scenarios_df)
 
         # Run optimization
         optimal_portfolio = self._run_optimization(
             asset_returns,
             objective,
             params,
-            constraints
+            constraints,
+            risk_free_rate
         )
 
         # Generate efficient frontier
         efficient_frontier = self._generate_efficient_frontier(
             asset_returns,
             constraints,
-            params
+            params,
+            risk_free_rate
         )
 
         # Run simulations
@@ -131,13 +133,6 @@ class PortfolioOptimizer:
             optimal_portfolio,
             validated_config['investment_time_series'],
             params
-        )
-
-        # Create rebalancing schedule
-        rebalancing_schedule = self._create_rebalancing_schedule(
-            optimal_portfolio,
-            params,
-            validated_config['investment_time_series']
         )
 
         # Sensitivity analysis
@@ -168,7 +163,6 @@ class PortfolioOptimizer:
             'optimal_portfolio': optimal_portfolio,
             'efficient_frontier': efficient_frontier,
             'simulation_results': simulation_results,
-            'rebalancing_schedule': rebalancing_schedule,
             'sensitivity_analysis': sensitivity_analysis,
             'goal_analysis': goal_analysis
         }
@@ -289,12 +283,30 @@ class PortfolioOptimizer:
                 "Générez les scénarios avec 'timestep': 1.0."
             )
 
+    @staticmethod
+    def _risk_free_rate(scenarios_df: pd.DataFrame) -> float:
+        """
+        Taux sans risque annuel moyen des scénarios (colonne ``interest_rate``).
+
+        Il sert au ratio de Sharpe, qui mesure le rendement **excédentaire**
+        par unité de risque. Sans cette colonne, on ne peut pas le calculer :
+        on le dit plutôt que de supposer un taux nul.
+        """
+        if 'interest_rate' not in scenarios_df.columns:
+            raise ValueError(
+                "Les scénarios n'ont pas de colonne 'interest_rate' : le taux sans "
+                "risque est nécessaire au ratio de Sharpe. Utilisez des scénarios "
+                "produits par scenario_generator."
+            )
+        return float(scenarios_df['interest_rate'].mean())
+
     def _run_optimization(
         self,
         asset_returns: pd.DataFrame,
         objective: str,
         params: dict,
-        constraints: dict
+        constraints: dict,
+        risk_free_rate: float
     ) -> dict:
         """
         Run portfolio optimization.
@@ -304,6 +316,7 @@ class PortfolioOptimizer:
             objective: Optimization objective
             params: Optimization parameters
             constraints: User constraints
+            risk_free_rate: Taux sans risque annuel, pour le ratio de Sharpe
 
         Returns:
             Dictionary with optimal weights and statistics
@@ -321,7 +334,7 @@ class PortfolioOptimizer:
 
         if objective == 'max_sharpe':
             optimal_weights = self._optimize_max_sharpe(
-                mean_returns, cov_matrix, n_assets, min_weight, max_weight
+                mean_returns, cov_matrix, n_assets, min_weight, max_weight, risk_free_rate
             )
         elif objective == 'min_volatility':
             optimal_weights = self._optimize_min_volatility(
@@ -335,7 +348,8 @@ class PortfolioOptimizer:
         elif objective == 'target_return':
             target_return = params['target_return']
             optimal_weights = self._optimize_target_return(
-                mean_returns, cov_matrix, n_assets, target_return, min_weight, max_weight
+                mean_returns, cov_matrix, n_assets, target_return, min_weight, max_weight,
+                risk_free_rate
             )
         elif objective == 'risk_parity':
             optimal_weights = self._optimize_risk_parity(
@@ -346,14 +360,14 @@ class PortfolioOptimizer:
         else:
             # Default to max Sharpe
             optimal_weights = self._optimize_max_sharpe(
-                mean_returns, cov_matrix, n_assets, min_weight, max_weight
+                mean_returns, cov_matrix, n_assets, min_weight, max_weight, risk_free_rate
             )
 
         # Calculate portfolio statistics
         portfolio_return = np.dot(optimal_weights, mean_returns)
         portfolio_variance = np.dot(optimal_weights.T, np.dot(cov_matrix, optimal_weights))
         portfolio_volatility = np.sqrt(portfolio_variance)
-        sharpe_ratio = portfolio_return / portfolio_volatility if portfolio_volatility > 0 else 0.0
+        sharpe_ratio = self._sharpe_ratio(portfolio_return, portfolio_volatility, risk_free_rate)
 
         # Calculate max drawdown (estimated from simulations)
         max_drawdown = self._estimate_max_drawdown(asset_returns, optimal_weights)
@@ -365,8 +379,18 @@ class PortfolioOptimizer:
             'expected_return': float(portfolio_return),
             'expected_volatility': float(portfolio_volatility),
             'sharpe_ratio': float(sharpe_ratio),
+            'risk_free_rate': float(risk_free_rate),
             'max_drawdown': float(max_drawdown)
         }
+
+    @staticmethod
+    def _sharpe_ratio(
+        portfolio_return: float, portfolio_volatility: float, risk_free_rate: float
+    ) -> float:
+        """Ratio de Sharpe : rendement excédentaire sur le taux sans risque, par unité de risque."""
+        if portfolio_volatility <= 0:
+            return 0.0
+        return float((portfolio_return - risk_free_rate) / portfolio_volatility)
 
     def _optimize_max_sharpe(
         self,
@@ -374,13 +398,16 @@ class PortfolioOptimizer:
         cov_matrix: np.ndarray,
         n_assets: int,
         min_weight: float,
-        max_weight: float
+        max_weight: float,
+        risk_free_rate: float
     ) -> np.ndarray:
-        """Optimize for maximum Sharpe ratio."""
+        """Optimize for maximum Sharpe ratio (excess return over the risk-free rate)."""
         def neg_sharpe(weights: np.ndarray) -> float:
             portfolio_return = np.dot(weights, mean_returns)
             portfolio_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-            return -portfolio_return / portfolio_std if portfolio_std > 0 else 1e10
+            if portfolio_std <= 0:
+                return 1e10
+            return float(-(portfolio_return - risk_free_rate) / portfolio_std)
 
         constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}]
         bounds = tuple((min_weight, max_weight) for _ in range(n_assets))
@@ -432,7 +459,8 @@ class PortfolioOptimizer:
         n_assets: int,
         target_return: float,
         min_weight: float,
-        max_weight: float
+        max_weight: float,
+        risk_free_rate: float
     ) -> np.ndarray:
         """Optimize for target return with minimum volatility."""
         def portfolio_volatility(weights: np.ndarray) -> float:
@@ -459,7 +487,7 @@ class PortfolioOptimizer:
                 result.message,
             )
             return self._optimize_max_sharpe(
-                mean_returns, cov_matrix, n_assets, min_weight, max_weight
+                mean_returns, cov_matrix, n_assets, min_weight, max_weight, risk_free_rate
             )
 
     def _optimize_risk_parity(
@@ -538,6 +566,7 @@ class PortfolioOptimizer:
         asset_returns: pd.DataFrame,
         constraints: dict,
         params: dict,
+        risk_free_rate: float,
         n_points: int = 50
     ) -> pd.DataFrame:
         """
@@ -571,12 +600,13 @@ class PortfolioOptimizer:
                     n_assets,
                     target_ret,
                     params['min_weight'],
-                    params['max_weight']
+                    params['max_weight'],
+                    risk_free_rate
                 )
 
                 portfolio_return = np.dot(weights, mean_returns)
                 portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-                sharpe = portfolio_return / portfolio_volatility if portfolio_volatility > 0 else 0
+                sharpe = self._sharpe_ratio(portfolio_return, portfolio_volatility, risk_free_rate)
 
                 result_dict = {
                     'return': portfolio_return,
@@ -649,11 +679,12 @@ class PortfolioOptimizer:
                 params
             )
 
-            terminal_wealth_list.append({
-                'scenario_id': scenario_id,
-                'wealth': terminal_wealth,
-                'real_wealth': terminal_wealth  # Could adjust for inflation
-            })
+            entry = {'scenario_id': scenario_id, 'wealth': terminal_wealth}
+            if 'inflation' in scenario_data.columns:
+                # Patrimoine en euros constants de la date de départ.
+                price_index = float(np.prod(1.0 + scenario_data['inflation'].to_numpy()))
+                entry['real_wealth'] = terminal_wealth / price_index
+            terminal_wealth_list.append(entry)
 
             wealth_paths.append(wealth_path)
 
@@ -675,8 +706,6 @@ class PortfolioOptimizer:
                 '75': float(np.percentile(wealth_values, 75)),
                 '95': float(np.percentile(wealth_values, 95))
             },
-            'probability_of_success': 0.0,  # Will be calculated in goal_analysis
-            'shortfall_risk': 0.0,
             'var_95': float(np.percentile(wealth_values, 5)),
             'cvar_95': float(wealth_values[wealth_values <= np.percentile(wealth_values, 5)].mean())
         }
@@ -761,35 +790,6 @@ class PortfolioOptimizer:
 
         return wealth_path, terminal_wealth
 
-    def _create_rebalancing_schedule(
-        self,
-        optimal_portfolio: dict,
-        params: dict,
-        time_series: pd.DataFrame
-    ) -> pd.DataFrame:
-        """
-        Create rebalancing schedule.
-
-        Args:
-            optimal_portfolio: Optimal portfolio
-            params: Parameters
-            time_series: Time series
-
-        Returns:
-            Rebalancing schedule DataFrame
-        """
-        # Placeholder for rebalancing schedule
-        # In full implementation, this would calculate when to rebalance based on drift
-
-        return pd.DataFrame({
-            'period': [],
-            'action': [],
-            'from_asset': [],
-            'to_asset': [],
-            'amount': [],
-            'cost': []
-        })
-
     def _sensitivity_analysis(
         self,
         asset_returns: pd.DataFrame,
@@ -809,9 +809,10 @@ class PortfolioOptimizer:
         """
         # Analyze sensitivity to return assumptions
         mean_returns = asset_returns.mean()
+        cov_matrix = asset_returns.cov().to_numpy()
         weights = np.array(list(optimal_portfolio['weights'].values()))
 
-        # Test +/-10% change in expected returns
+        # Test +10% change in expected returns
         return_sensitivity = {}
         for asset in asset_returns.columns:
             modified_returns = mean_returns.copy()
@@ -822,10 +823,20 @@ class PortfolioOptimizer:
 
             return_sensitivity[asset] = float(impact)
 
+        # Test +10% change in each asset's volatility (correlations unchanged)
+        volatility_sensitivity = {}
+        for i, asset in enumerate(asset_returns.columns):
+            scale = np.ones(len(weights))
+            scale[i] = 1.1
+            modified_cov = cov_matrix * np.outer(scale, scale)
+            new_volatility = float(np.sqrt(weights @ modified_cov @ weights))
+            volatility_sensitivity[asset] = (
+                new_volatility - optimal_portfolio['expected_volatility']
+            )
+
         return {
             'return_sensitivity': return_sensitivity,
-            'volatility_sensitivity': {},
-            'correlation_sensitivity': {}
+            'volatility_sensitivity': volatility_sensitivity,
         }
 
     def _analyze_goals(
@@ -855,14 +866,10 @@ class PortfolioOptimizer:
         surplus_deficit = terminal_wealth - goal_amount
         expected_surplus_deficit = surplus_deficit.mean()
 
-        # Years to goal distribution (simplified - would need time-series analysis)
-        years_to_goal: dict = {}
-
         return {
             'goal_amount': float(goal_amount),
             'probability_of_achieving': float(probability_of_achieving),
             'expected_surplus_deficit': float(expected_surplus_deficit),
-            'years_to_goal': years_to_goal
         }
 
 

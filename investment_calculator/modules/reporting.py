@@ -201,7 +201,7 @@ class ReportGenerator:
             'language': 'en',
             'format': 'html',
             'charts': ['wealth_trajectories', 'efficient_frontier', 'allocation_pie',
-                      'monte_carlo_histogram', 'tax_impact_waterfall'],
+                      'monte_carlo_histogram'],
             'include_sections': ['summary', 'optimization', 'risk', 'tax', 'recommendations']
         }
 
@@ -275,10 +275,11 @@ class ReportGenerator:
             )
 
         if 'tax_impact_waterfall' in chart_types:
-            figures['tax_impact_waterfall'] = self._create_tax_impact_waterfall(
-                config['tax_results'],
-                colors,
-                viz_prefs
+            # La cascade fiscale était une liste littérale de nombres inventés.
+            # Elle reviendra quand le moteur fiscal produira la décomposition.
+            raise ValueError(
+                "Le graphique 'tax_impact_waterfall' n'est plus disponible : il "
+                "affichait des valeurs inventées. Retirez-le de report_config['charts']."
             )
 
         return figures
@@ -490,48 +491,6 @@ class ReportGenerator:
             'data': terminal_wealth_df
         }
 
-    def _create_tax_impact_waterfall(
-        self,
-        tax_results: dict,
-        colors: dict,
-        viz_prefs: dict
-    ) -> dict:
-        """Create tax impact waterfall chart."""
-        # Placeholder for tax waterfall
-        fig, ax = plt.subplots(figsize=(10, 6))
-
-        # Example waterfall data
-        categories = ['Gross\nReturn', 'Dividend\nTax', 'Interest\nTax', 'Cap Gains\nTax',
-                     'Social\nCharges', 'Net\nReturn']
-        values = [100, -5, -8, -3, -4, 80]  # Placeholder values
-
-        # Create waterfall effect
-        colors_list = []
-        for i, val in enumerate(values):
-            if i == 0 or i == len(values) - 1:
-                colors_list.append(colors['primary'])
-            elif val < 0:
-                colors_list.append(colors['danger'])
-            else:
-                colors_list.append(colors['success'])
-
-        ax.bar(range(len(categories)), values, color=colors_list, edgecolor='black')
-
-        ax.set_xticks(range(len(categories)))
-        ax.set_xticklabels(categories)
-        ax.set_ylabel('Return (%)', fontsize=12)
-        ax.set_title('Tax Impact on Returns', fontsize=14, fontweight='bold')
-        ax.axhline(0, color='black', linewidth=0.5)
-        ax.grid(True, alpha=0.3, axis='y')
-
-        plt.tight_layout()
-
-        return {
-            'figure': fig,
-            'path': 'tax_impact_waterfall.png',
-            'data': pd.DataFrame({'category': categories, 'value': values})
-        }
-
     def _create_placeholder_figure(self, title: str) -> dict:
         """Create placeholder figure when data is missing."""
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -600,17 +559,23 @@ class ReportGenerator:
             percentile_95 = stats.get('percentiles', {}).get('95', 0)
             summary_text += f"  95th Percentile: ${percentile_95:,.0f}\n\n"
 
-        # Key findings
-        key_findings = [
-            "Diversified portfolio recommended based on risk tolerance",
-            "Monte Carlo analysis shows strong probability of goal achievement",
-            "Tax-optimized account allocation can improve after-tax returns"
-        ]
+        # Key findings: only statements computed from the results
+        key_findings = []
+        goal = opt_results.get('goal_analysis', {})
+        if 'probability_of_achieving' in goal and 'goal_amount' in goal:
+            key_findings.append(
+                f"Probability of reaching the goal of {goal['goal_amount']:,.0f}: "
+                f"{goal['probability_of_achieving']:.0%} of simulated scenarios"
+            )
+        if 'optimal_portfolio' in opt_results:
+            drawdown = opt_results['optimal_portfolio'].get('max_drawdown')
+            if drawdown is not None:
+                key_findings.append(
+                    f"Median maximum drawdown over the horizon: {drawdown:.1%}"
+                )
 
         # Recommendations
         recommendations = [
-            "Rebalance portfolio annually or when allocations drift >5%",
-            "Consider tax-loss harvesting opportunities in taxable accounts",
             "Review plan annually and after major life changes"
         ]
 

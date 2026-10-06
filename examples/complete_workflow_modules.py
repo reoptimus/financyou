@@ -307,8 +307,7 @@ def main():
                 'wealth_trajectories',
                 'efficient_frontier',
                 'allocation_pie',
-                'monte_carlo_histogram',
-                'tax_impact_waterfall'
+                'monte_carlo_histogram'
             ],
             'include_sections': ['summary', 'optimization', 'risk', 'tax', 'recommendations']
         },
