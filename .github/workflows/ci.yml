@@ -120,7 +120,6 @@ jobs:
           outputs/allocation_pie_chart.png
           outputs/efficient_frontier.png
           outputs/monte_carlo_histogram.png
-          outputs/tax_impact_waterfall.png
           outputs/wealth_trajectories.png
           "
           manquants=0
