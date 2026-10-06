@@ -148,3 +148,16 @@ est marquée comme telle.
   sans rapport avec les frais réels d'une transaction immobilière directe
   (frais de notaire de l'ordre de 7 à 8 % dans l'ancien), et pertinent
   seulement pour un support immobilier coté.
+
+## 11. Performance : 1 000 scénarios × 30 ans (étape 1.C.5)
+
+- **Ouvert et réglé le** : 2026-10-06
+- **Statut** : réglé
+- **Mesure** (fiscalité + optimisation, scénarios stochastiques EUR, même
+  machine) : `main` 14,0 s (fiscalité 9,5 s, optimiseur 4,6 s) ; après
+  1.C.4 (simulation vectorisée) 10,2 s ; après 1.C.5 (tables fiscales
+  vectorisées) 0,2 s.
+- **Correction** : `_calculate_tax_tables` bouclait par scénario puis par
+  ligne (`iterrows`). Le calcul vectorisé produit des tableaux identiques à
+  l'ancien, vérifié sur 200 scénarios × 30 ans.
+- **Test de garde** : `tests/test_performance.py`, budget de 5 s.
