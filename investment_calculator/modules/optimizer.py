@@ -191,7 +191,7 @@ class PortfolioOptimizer:
             # Sans liste explicite, on ne propose que les enveloppes dont l'impôt est
             # modélisé ; les autres sont déclarées dans `wrapper_gaps`.
             available, wrapper_gaps = modelled_wrappers(regime_from_config(wrapper_config))
-        elif wrapper_config and wrapper_tax_on:
+        elif wrapper_config and wrapper_tax_on and available is not None:
             _, gaps = modelled_wrappers(regime_from_config(wrapper_config))
             refused = [w for w in available if w in gaps]
             if refused:
