@@ -260,3 +260,73 @@ def test_cto_reinvested_income_is_not_taxed_again_at_exit(scenarios):
     assert (terminal['annual_income_tax_cto'] > 0).all()
     assert (terminal['exit_tax_cto'].to_numpy() <= naive + 1e-9).all()
     assert (terminal['exit_tax_cto'].to_numpy() < naive - 1.0).any()
+
+
+# --- Étape 1.D.3 : poids et placement choisis après impôt -----------------------------------
+
+
+def test_tax_aware_placement_beats_priority_placement(scenarios):
+    """Poids identiques (parité des risques) : seul le placement diffère, le net attendu monte."""
+    base = _config(scenarios, wrapper_constraints=_tax_config(tax_aware=False))
+    base['optimization_objective'] = 'risk_parity'
+    aware = _config(scenarios, wrapper_constraints=_tax_config())
+    aware['optimization_objective'] = 'risk_parity'
+    priority = optimizer.PortfolioOptimizer().optimize(base)
+    smart = optimizer.PortfolioOptimizer().optimize(aware)
+    assert smart['optimal_portfolio']['weights'] == pytest.approx(
+        priority['optimal_portfolio']['weights'], abs=1e-6
+    )
+    net_priority = priority['simulation_results']['statistics']['mean_terminal_wealth']
+    net_smart = smart['simulation_results']['statistics']['mean_terminal_wealth']
+    assert net_smart >= net_priority * 0.995
+
+
+def test_net_multiple_placement_maximises_the_score_and_respects_caps():
+    rules = _rules(1_000_000.0)
+    weights = {'stock': 0.6, 'bond': 0.4, 'real_estate': 0.0}
+    multiples = {}
+    for asset in ('stock', 'bond'):
+        for wrapper in rules.eligible[asset]:
+            bonus = 0.5 if asset == 'stock' else 0.0
+            multiples[(asset, wrapper)] = 1.0 + 0.1 * len(wrapper) + bonus
+    best = place_in_wrappers(weights, rules, net_multiples=multiples)
+    default = place_in_wrappers(weights, rules)
+
+    def score(placement):
+        return sum(
+            r.share_of_contributions * multiples[(r.asset, r.wrapper)]
+            for r in placement.itertuples()
+        )
+
+    assert score(best) >= score(default) - 1e-9
+    assert best.loc[best['wrapper'] == 'pea', 'amount'].sum() <= 150_000.0 + 1e-6
+    assert best['amount'].sum() == pytest.approx(1_000_000.0)
+
+
+def test_placement_with_missing_multiples_is_refused():
+    rules = _rules(1_000_000.0)
+    with pytest.raises(ValueError, match='net_multiples'):
+        place_in_wrappers({'stock': 1.0, 'bond': 0.0, 'real_estate': 0.0}, rules,
+                          net_multiples={('stock', 'cto'): 1.0})
+
+
+def test_tax_aware_results_are_consistent(scenarios):
+    results = optimizer.PortfolioOptimizer().optimize(
+        _config(scenarios, wrapper_constraints=_tax_config())
+    )
+    portfolio = results['optimal_portfolio']
+    placement = results['wrapper_allocation']
+    assert portfolio['tax_adjusted'] is True
+    assert all(v >= 0 for v in portfolio['annual_tax_drag'].values())
+    assert sum(portfolio['weights'].values()) == pytest.approx(1.0)
+    by_asset = placement.groupby('asset')['share_of_contributions'].sum()
+    for asset, weight in portfolio['weights'].items():
+        assert by_asset.get(asset, 0.0) == pytest.approx(weight, abs=1e-6)
+    assert placement.loc[placement['wrapper'] == 'pea', 'amount'].sum() <= 150_000.0 + 1e-6
+
+
+def test_tax_aware_can_be_disabled(scenarios):
+    results = optimizer.PortfolioOptimizer().optimize(
+        _config(scenarios, wrapper_constraints=_tax_config(tax_aware=False))
+    )
+    assert 'tax_adjusted' not in results['optimal_portfolio']

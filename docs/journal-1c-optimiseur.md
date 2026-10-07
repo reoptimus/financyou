@@ -248,3 +248,38 @@ est marquée comme telle.
     et des poids après impôt est la suite (1.D.3) ;
   - les calculs reprennent les taux du régime, y compris les prélèvements
     sociaux à 17,2 % dont la révision à 18,6 % reste à trancher.
+
+## 15. Poids et placement choisis après impôt (étape 1.D.3)
+
+- **Ouvert et réglé le** : 2026-10-07
+- **Statut** : livré, avec limites ci-dessous
+- **Avant** : les poids étaient choisis sur les rendements avant impôt, et le
+  placement dans les enveloppes suivait une priorité (plafonnées d'abord).
+- **Après** (`wrapper_constraints['tax_aware']`, vrai par défaut) :
+  1. chaque couple (actif, enveloppe) est simulé seul, avec son impôt annuel
+     et son impôt de sortie : patrimoine net et brut par euro versé ;
+  2. le placement maximise le patrimoine net attendu (programme linéaire sur
+     ces multiples nets, mêmes plafonds et éligibilités) ;
+  3. la ponction annuelle d'impôt de l'actif dans ses enveloppes
+     (`(ln brut − ln net) / durée moyenne de détention`) est retranchée de son
+     rendement moyen, les poids sont ré-optimisés, puis on recommence jusqu'à
+     stabilité (8 itérations au plus). `optimal_portfolio['annual_tax_drag']`
+     expose la ponction retenue.
+- **Sur le pipeline d'exemple** (graine 42) : actions 30,5 % → 42,5 %,
+  obligations 69,5 % → 57,5 % ; PEA 150 000 € inchangé, le reste passe du CTO à
+  l'assurance-vie ; médiane du patrimoine final net 1 163 000 → 1 291 283 ;
+  probabilité d'atteindre 2 M€ 3,4 % → 7,8 %.
+- **Déclaré comme limite** :
+  - le multiple d'un couple est mesuré pour une poche de la taille de la
+    capacité de l'enveloppe : le seuil de primes de l'assurance-vie n'y est pas
+    représentatif d'une poche plus petite. La simulation finale, elle, répartit
+    la plus-value au prorata ;
+  - la covariance reste celle des rendements avant impôt, et le taux sans
+    risque du Sharpe est avant impôt : le Sharpe affiché (rendement net)
+    n'est pas comparable à celui des étapes précédentes ;
+  - le résultat repose sur les choix de modélisation fiscale du point 13
+    (assurance-vie avec abattement, CTO imposé chaque année sur dividendes et
+    coupons) : la préférence pour l'assurance-vie est à confirmer avec un
+    fiscaliste avant tout usage présenté à un utilisateur ;
+  - point fixe sans garantie de convergence : un avertissement est journalisé
+    si 8 itérations ne suffisent pas.

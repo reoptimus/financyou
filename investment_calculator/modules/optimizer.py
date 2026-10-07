@@ -214,26 +214,40 @@ class PortfolioOptimizer:
             asset_names, params, constraints, wrapper_rules
         )
 
-        # Run optimization
-        optimal_portfolio = self._run_optimization(
-            asset_returns,
-            objective,
-            params,
-            weight_constraints,
-            risk_free_rate
-        )
+        tax_aware = wrapper_tax_on and bool(wrapper_config.get('tax_aware', True))
+        wrapper_allocation = None
+        mean_adjustment = None
+        if tax_aware and wrapper_rules is not None:
+            # Poids et placement choisis après impôt, par point fixe.
+            optimal_portfolio, wrapper_allocation, mean_adjustment = (
+                self._tax_aware_allocation(
+                    asset_returns, objective, params, weight_constraints, risk_free_rate,
+                    wrapper_rules, regime_from_config(wrapper_config),
+                    validated_config['investment_time_series'],
+                    bool(wrapper_config.get('couple', False)),
+                )
+            )
+        else:
+            optimal_portfolio = self._run_optimization(
+                asset_returns,
+                objective,
+                params,
+                weight_constraints,
+                risk_free_rate
+            )
 
         # Generate efficient frontier
         efficient_frontier = self._generate_efficient_frontier(
             asset_returns,
             weight_constraints,
-            risk_free_rate
+            risk_free_rate,
+            mean_adjustment=mean_adjustment,
         )
 
-        wrapper_allocation = None
         wrapper_tax = None
         if wrapper_rules is not None:
-            wrapper_allocation = place_in_wrappers(optimal_portfolio['weights'], wrapper_rules)
+            if wrapper_allocation is None:
+                wrapper_allocation = place_in_wrappers(optimal_portfolio['weights'], wrapper_rules)
             if wrapper_tax_on:
                 wrapper_tax = WrapperTaxContext(
                     regime=regime_from_config(wrapper_config),
@@ -481,7 +495,8 @@ class PortfolioOptimizer:
         objective: str,
         params: dict,
         weight_constraints: WeightConstraints,
-        risk_free_rate: float
+        risk_free_rate: float,
+        mean_adjustment: np.ndarray | None = None,
     ) -> dict:
         """
         Run portfolio optimization.
@@ -492,6 +507,8 @@ class PortfolioOptimizer:
             params: Optimization parameters
             weight_constraints: Bornes de poids et contraintes d'enveloppe
             risk_free_rate: Taux sans risque annuel, pour le ratio de Sharpe
+            mean_adjustment: ponction annuelle d'impôt par actif, retranchée des
+                rendements moyens (optimisation après impôt)
 
         Returns:
             Dictionary with optimal weights and statistics
@@ -500,6 +517,8 @@ class PortfolioOptimizer:
 
         # Calculate mean returns and covariance
         mean_returns = asset_returns.mean().values
+        if mean_adjustment is not None:
+            mean_returns = mean_returns - mean_adjustment
         cov_matrix = asset_returns.cov().values
 
         if objective == 'min_volatility':
@@ -719,7 +738,8 @@ class PortfolioOptimizer:
         asset_returns: pd.DataFrame,
         weight_constraints: WeightConstraints,
         risk_free_rate: float,
-        n_points: int = 50
+        n_points: int = 50,
+        mean_adjustment: np.ndarray | None = None,
     ) -> pd.DataFrame:
         """
         Generate efficient frontier.
@@ -738,6 +758,8 @@ class PortfolioOptimizer:
             DataFrame with efficient frontier points
         """
         mean_returns = asset_returns.mean().values
+        if mean_adjustment is not None:
+            mean_returns = mean_returns - mean_adjustment
         cov_matrix = asset_returns.cov().values
 
         min_return, max_return = weight_constraints.return_range(mean_returns)
@@ -1017,6 +1039,151 @@ class PortfolioOptimizer:
                 'mean_cost': float(np.sum([s.period_costs[t] for s in sleeves], axis=0).mean()),
             })
         return schedule
+
+    def _returns_tensor(self, asset_returns: pd.DataFrame) -> np.ndarray:
+        """Rendements en tableau (scénarios, périodes, actifs), scénarios et périodes triés."""
+        ordered = asset_returns.sort_index()
+        n_scenarios = ordered.index.get_level_values(0).nunique()
+        n_periods = len(ordered) // n_scenarios
+        if n_scenarios * n_periods != len(ordered):
+            raise ValueError(
+                "Les scénarios n'ont pas tous le même nombre de périodes : "
+                "impossible de simuler les trajectoires de patrimoine."
+            )
+        tensor: np.ndarray = ordered.to_numpy().reshape(
+            n_scenarios, n_periods, len(ordered.columns)
+        )
+        return tensor
+
+    def _net_multiples(
+        self,
+        asset_returns: pd.DataFrame,
+        rules: WrapperRules,
+        regime: TaxRegime,
+        time_series: pd.DataFrame,
+        params: dict,
+        couple: bool,
+    ) -> tuple[dict[tuple[str, str], float], dict[tuple[str, str], float], float]:
+        """
+        Patrimoine final par euro versé de chaque couple (actif, enveloppe), net et brut.
+
+        Chaque couple est simulé seul : une poche investie à 100 % dans l'actif,
+        de la taille que l'enveloppe peut recevoir (la totalité des versements,
+        ou son plafond), avec l'impôt annuel et l'impôt de sortie de l'enveloppe.
+
+        Returns:
+            Multiples nets, multiples bruts, et durée moyenne de détention d'un euro
+            versé, en années (pour annualiser l'écart).
+        """
+        asset_names = list(asset_returns.columns)
+        returns = self._returns_tensor(asset_returns)
+        n_periods = returns.shape[1]
+        flows = self._investment_flows(time_series, n_periods)
+        total = float(flows.sum())
+        costs = self._transaction_cost_rates(asset_names, params['transaction_costs'])
+        threshold = float(params['rebalancing_threshold'])
+        holding = float((flows * (n_periods - np.arange(n_periods + 1))).sum() / total)
+
+        net: dict[tuple[str, str], float] = {}
+        gross: dict[tuple[str, str], float] = {}
+        for wrapper in rules.available:
+            size = min(1.0, rules.capacity_share[wrapper])
+            if size <= 0:
+                continue
+            for i, asset in enumerate(asset_names):
+                if wrapper not in rules.eligible[asset]:
+                    continue
+                target = np.zeros(len(asset_names))
+                target[i] = 1.0
+                income = self._sleeve_income(regime, wrapper, asset_names, target)
+                sleeve = self._simulate_sleeve(
+                    returns, target, flows * size, costs, threshold, income
+                )
+                final = liquidation_tax(
+                    regime, wrapper,
+                    contributions=total * size,
+                    final_value=sleeve.wealth_paths[:, -1],
+                    holding_years=float(n_periods),
+                    couple=couple,
+                    cost_basis=sleeve.cost_basis if income is not None else None,
+                )
+                untaxed = self._simulate_sleeve(returns, target, flows * size, costs, threshold)
+                net[(asset, wrapper)] = float(final.net_value.mean() / (total * size))
+                gross[(asset, wrapper)] = float(untaxed.wealth_paths[:, -1].mean() / (total * size))
+        return net, gross, holding
+
+    def _tax_aware_allocation(
+        self,
+        asset_returns: pd.DataFrame,
+        objective: str,
+        params: dict,
+        weight_constraints: WeightConstraints,
+        risk_free_rate: float,
+        rules: WrapperRules,
+        regime: TaxRegime,
+        time_series: pd.DataFrame,
+        couple: bool,
+        max_iterations: int = 8,
+    ) -> tuple[dict, pd.DataFrame, np.ndarray]:
+        """
+        Poids et placement choisis après impôt, par point fixe.
+
+        1. Mesurer, pour chaque couple (actif, enveloppe), le patrimoine net et brut
+           par euro versé (``_net_multiples``) et en déduire la ponction annuelle
+           d'impôt ``(ln brut - ln net) / durée de détention``.
+        2. Placer l'allocation dans les enveloppes pour maximiser le patrimoine net
+           attendu (programme linéaire sur les multiples nets).
+        3. Retrancher des rendements moyens la ponction de chaque actif dans ses
+           enveloppes, ré-optimiser les poids, puis recommencer jusqu'à stabilité.
+
+        La covariance reste celle des rendements avant impôt : l'impôt réduit aussi
+        la volatilité, effet ignoré ici (déclaré dans le journal).
+
+        Returns:
+            Portefeuille optimal (rendements moyens après impôt), placement, ponction
+            annuelle par actif.
+        """
+        asset_names = list(asset_returns.columns)
+        net, gross, holding = self._net_multiples(
+            asset_returns, rules, regime, time_series, params, couple
+        )
+        drag = {
+            pair: max(float(np.log(gross[pair] / net[pair])) / holding, 0.0) for pair in net
+        }
+        adjustment = np.zeros(len(asset_names))
+        portfolio: dict = {}
+        placement = pd.DataFrame()
+        for _ in range(max_iterations):
+            portfolio = self._run_optimization(
+                asset_returns, objective, params, weight_constraints, risk_free_rate,
+                mean_adjustment=adjustment,
+            )
+            weights = portfolio['weights']
+            placement = place_in_wrappers(weights, rules, net_multiples=net)
+            new_adjustment = np.zeros(len(asset_names))
+            for i, asset in enumerate(asset_names):
+                held = placement[placement['asset'] == asset]
+                if weights[asset] > 1e-9 and not held.empty:
+                    shares = held['share_of_contributions'].to_numpy()
+                    drags = np.array([drag[(asset, w)] for w in held['wrapper']])
+                    new_adjustment[i] = float((shares * drags).sum() / shares.sum())
+                else:
+                    candidates = [
+                        drag[(asset, w)] for w in rules.eligible[asset] if (asset, w) in drag
+                    ]
+                    new_adjustment[i] = min(candidates) if candidates else 0.0
+            if np.abs(new_adjustment - adjustment).max() < 1e-6:
+                adjustment = new_adjustment
+                break
+            adjustment = new_adjustment
+        else:
+            logger.warning(
+                "L'optimisation après impôt n'a pas convergé en %d itérations : "
+                "la dernière allocation est conservée.", max_iterations,
+            )
+        portfolio['tax_adjusted'] = True
+        portfolio['annual_tax_drag'] = dict(zip(asset_names, adjustment.tolist(), strict=True))
+        return portfolio, placement, adjustment
 
     def _simulate_wrappers(
         self,

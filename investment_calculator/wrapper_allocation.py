@@ -331,13 +331,20 @@ def build_wrapper_rules(
     )
 
 
-def place_in_wrappers(weights: Mapping[str, float], rules: WrapperRules) -> pd.DataFrame:
+def place_in_wrappers(
+    weights: Mapping[str, float],
+    rules: WrapperRules,
+    *,
+    net_multiples: Mapping[tuple[str, str], float] | None = None,
+) -> pd.DataFrame:
     """
     Placer une allocation dans les enveloppes, en respectant éligibilité et plafonds.
 
-    Programme linéaire : à poids fixés, remplir en priorité les enveloppes
-    d'ordre de priorité le plus bas. Le résultat est réalisable, pas optimal
-    fiscalement (voir le module).
+    Programme linéaire à poids fixés. Sans ``net_multiples``, on remplit en
+    priorité les enveloppes d'ordre de priorité le plus bas : le résultat est
+    réalisable, pas optimal fiscalement. Avec ``net_multiples`` (patrimoine net
+    final par euro versé de chaque couple ``(actif, enveloppe)``), on maximise le
+    patrimoine net attendu, sous les mêmes contraintes.
 
     Returns:
         DataFrame ``asset, wrapper, share_of_contributions, amount`` : part des
@@ -349,8 +356,23 @@ def place_in_wrappers(weights: Mapping[str, float], rules: WrapperRules) -> pd.D
     assets = list(rules.asset_names)
     w = np.clip(np.array([weights[a] for a in assets], dtype=float), 0.0, None)
     pairs = [(i, wrapper) for i, a in enumerate(assets) for wrapper in rules.eligible[a]]
-    rank = {wrapper: r for r, wrapper in enumerate(rules.priority)}
-    cost = np.array([rank[wrapper] for _, wrapper in pairs], dtype=float)
+    if net_multiples is None:
+        rank = {wrapper: r for r, wrapper in enumerate(rules.priority)}
+        cost = np.array([rank[wrapper] for _, wrapper in pairs], dtype=float)
+    else:
+        # Un actif de poids nul n'est placé nulle part : son multiple est sans effet.
+        missing = [
+            (assets[i], wr) for i, wr in pairs
+            if w[i] > 0 and (assets[i], wr) not in net_multiples
+        ]
+        if missing:
+            raise ValueError(
+                f"net_multiples ne couvre pas les couples (actif, enveloppe) {missing}. "
+                "Calculez un multiple pour chaque couple éligible."
+            )
+        cost = -np.array(
+            [net_multiples.get((assets[i], wr), 0.0) for i, wr in pairs], dtype=float
+        )
 
     a_eq = np.zeros((len(assets), len(pairs)))
     for k, (i, _) in enumerate(pairs):
