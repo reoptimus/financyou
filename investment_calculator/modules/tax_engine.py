@@ -327,31 +327,28 @@ class TaxEngine:
         Returns:
             Dictionary of tax-related DataFrames
         """
-        # Annual tax by account type
-        annual_tax_list = []
+        # Calcul vectorisé : les deux tableaux sont alignés ligne à ligne
+        # (after_tax_df est construit comme une copie de pre_tax_df).
+        if len(pre_tax_df) != len(after_tax_df):
+            raise ValueError(
+                "Scénarios avant et après impôt de tailles différentes : "
+                f"{len(pre_tax_df)} contre {len(after_tax_df)} lignes."
+            )
+        pre = pre_tax_df.reset_index(drop=True)
+        post = after_tax_df.reset_index(drop=True)
 
-        for scenario_id in pre_tax_df['scenario_id'].unique():
-            scenario_pre = pre_tax_df[pre_tax_df['scenario_id'] == scenario_id]
-            scenario_post = after_tax_df[after_tax_df['scenario_id'] == scenario_id]
-
-            for idx, row_pre in scenario_pre.iterrows():
-                row_post = scenario_post.iloc[idx - scenario_pre.index[0]]
-
-                # Calculate tax per asset class
-                stock_tax = (row_pre['stock_return'] - row_post['stock_return_after_tax'])
-                bond_tax = (row_pre['bond_return'] - row_post['bond_return_after_tax'])
-                re_tax = (row_pre['real_estate_return'] - row_post['real_estate_return_after_tax'])
-
-                annual_tax_list.append({
-                    'scenario_id': scenario_id,
-                    'time_period': row_pre['time_period'],
-                    'stock_tax': stock_tax,
-                    'bond_tax': bond_tax,
-                    'real_estate_tax': re_tax,
-                    'total_tax': stock_tax + bond_tax + re_tax
-                })
-
-        annual_tax_df = pd.DataFrame(annual_tax_list)
+        # Annual tax per asset class
+        annual_tax_df = pd.DataFrame({
+            'scenario_id': pre['scenario_id'],
+            'time_period': pre['time_period'],
+            'stock_tax': pre['stock_return'] - post['stock_return_after_tax'],
+            'bond_tax': pre['bond_return'] - post['bond_return_after_tax'],
+            'real_estate_tax': pre['real_estate_return'] - post['real_estate_return_after_tax'],
+        })
+        annual_tax_df['total_tax'] = (
+            annual_tax_df['stock_tax'] + annual_tax_df['bond_tax']
+            + annual_tax_df['real_estate_tax']
+        )
 
         # Cumulative tax
         cumulative_tax_df = annual_tax_df.copy()
@@ -361,48 +358,36 @@ class TaxEngine:
 
         # Tax drag (percentage)
         tax_drag_df = annual_tax_df.copy()
-        total_return = (
-            pre_tax_df['stock_return'] +
-            pre_tax_df['bond_return'] +
-            pre_tax_df['real_estate_return']
-        ).reset_index(drop=True)
+        total_return = pre['stock_return'] + pre['bond_return'] + pre['real_estate_return']
 
         tax_drag_df['tax_drag_pct'] = (
             tax_drag_df['total_tax'] / total_return.clip(lower=0.001)
         ) * 100
 
         # Effective tax rate per scenario
-        effective_rates = []
-        for scenario_id in pre_tax_df['scenario_id'].unique():
-            scenario_pre = pre_tax_df[pre_tax_df['scenario_id'] == scenario_id]
-            scenario_post = after_tax_df[after_tax_df['scenario_id'] == scenario_id]
+        totals = pd.DataFrame({
+            'scenario_id': pre['scenario_id'],
+            'total_pre_tax_return': (
+                pre['stock_return'] + pre['bond_return'] + pre['real_estate_return']
+            ),
+            'total_after_tax_return': (
+                post['stock_return_after_tax'] + post['bond_return_after_tax']
+                + post['real_estate_return_after_tax']
+            ),
+        }).groupby('scenario_id', sort=False).sum().reset_index()
 
-            total_pre_tax = (
-                scenario_pre['stock_return'].sum() +
-                scenario_pre['bond_return'].sum() +
-                scenario_pre['real_estate_return'].sum()
-            )
-
-            total_after_tax = (
-                scenario_post['stock_return_after_tax'].sum() +
-                scenario_post['bond_return_after_tax'].sum() +
-                scenario_post['real_estate_return_after_tax'].sum()
-            )
-
-            if total_pre_tax > 0:
-                effective_rate = (total_pre_tax - total_after_tax) / total_pre_tax
-            else:
-                effective_rate = 0.0
-
-            effective_rates.append({
-                'scenario_id': scenario_id,
-                'effective_tax_rate': effective_rate,
-                'total_pre_tax_return': total_pre_tax,
-                'total_after_tax_return': total_after_tax,
-                'total_taxes_paid': total_pre_tax - total_after_tax
-            })
-
-        effective_rate_df = pd.DataFrame(effective_rates)
+        totals['total_taxes_paid'] = (
+            totals['total_pre_tax_return'] - totals['total_after_tax_return']
+        )
+        positive = totals['total_pre_tax_return'] > 0
+        totals['effective_tax_rate'] = (
+            totals['total_taxes_paid'].where(positive, 0.0)
+            / totals['total_pre_tax_return'].where(positive, 1.0)
+        )
+        effective_rate_df = totals[[
+            'scenario_id', 'effective_tax_rate', 'total_pre_tax_return',
+            'total_after_tax_return', 'total_taxes_paid',
+        ]]
 
         return {
             'annual_tax_by_account': annual_tax_df,
