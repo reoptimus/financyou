@@ -407,71 +407,6 @@ class TestTaxTables:
         assert reasonable_rates.mean() > 0.8  # At least 80% should be reasonable
 
 
-class TestAccountBalances:
-    """Test account balance simulation."""
-
-    def test_account_balances_structure(self):
-        """Test account balances have correct structure."""
-        scenarios_df = create_test_scenarios()
-        engine = tax_engine.TaxEngine()
-
-        results = engine.apply_taxes({'scenarios': scenarios_df})
-        balances = results['account_balances']
-
-        # Check all account types present
-        assert 'taxable' in balances
-        assert 'tax_deferred' in balances
-        assert 'tax_free' in balances
-        assert 'total' in balances
-
-    def test_account_balance_dataframes(self):
-        """Test account balance DataFrames."""
-        scenarios_df = create_test_scenarios()
-        engine = tax_engine.TaxEngine()
-
-        results = engine.apply_taxes({'scenarios': scenarios_df})
-        taxable_balances = results['account_balances']['taxable']
-
-        # Should be a DataFrame
-        assert isinstance(taxable_balances, pd.DataFrame)
-        assert 'scenario_id' in taxable_balances.columns
-
-
-class TestOptimizationInsights:
-    """Test optimization insights generation."""
-
-    def test_insights_structure(self):
-        """Test optimization insights structure."""
-        scenarios_df = create_test_scenarios()
-        engine = tax_engine.TaxEngine()
-
-        results = engine.apply_taxes({'scenarios': scenarios_df})
-        insights = results['optimization_insights']
-
-        # Check expected fields
-        assert 'tax_loss_harvesting_opportunities' in insights
-        assert 'optimal_withdrawal_sequence' in insights
-        assert 'roth_conversion_analysis' in insights
-
-    def test_withdrawal_sequence(self):
-        """Test optimal withdrawal sequence."""
-        scenarios_df = create_test_scenarios()
-        engine = tax_engine.TaxEngine()
-
-        results = engine.apply_taxes({'scenarios': scenarios_df})
-        withdrawal_seq = results['optimization_insights']['optimal_withdrawal_sequence']
-
-        # Should be a list
-        assert isinstance(withdrawal_seq, list)
-        assert len(withdrawal_seq) > 0
-
-        # Check structure
-        for item in withdrawal_seq:
-            assert 'rank' in item
-            assert 'account_type' in item
-            assert 'reason' in item
-
-
 class TestJurisdictions:
     """
     Test des juridictions disponibles.
@@ -611,7 +546,6 @@ class TestConvenienceFunctions:
 
         assert 'after_tax_scenarios' in results
         assert 'tax_tables' in results
-        assert 'account_balances' in results
 
     def test_apply_taxes_simple_fr(self):
         """Test apply_taxes_simple with French jurisdiction."""

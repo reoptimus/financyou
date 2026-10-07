@@ -64,11 +64,50 @@ est marquée comme telle.
   5 % au minimum sans raison, et les obligations ne sont pas réellement
   garanties à 5 %. La frontière efficiente, elle, ignore ces contraintes.
 
-## 5. Ratio de Sharpe calculé sans taux sans risque
+## 5. Ratio de Sharpe calculé sans taux sans risque — réglé
 
 - **Ouvert le** : 2026-10-06 (étape 1.C.1)
-- **Statut** : ouvert, à traiter en 1.C.2 (vérité des chiffres)
+- **Statut** : réglé le 2026-10-06 (étape 1.C.2) : le Sharpe et l'objectif
+  `max_sharpe` utilisent le rendement excédentaire sur la moyenne de
+  `interest_rate`, exposée dans `optimal_portfolio['risk_free_rate']`. Sur le
+  pipeline d'exemple, la part actions passe de 20 % à 35 %.
 - **Constat** : `sharpe_ratio` vaut rendement / volatilité, sans soustraire
   de taux sans risque, et l'objectif `max_sharpe` maximise cette quantité.
   L'interface l'affiche sous le nom « Sharpe Ratio ». Le taux sans risque est
   disponible dans les scénarios (`interest_rate`).
+
+## 6. Chiffres factices retirés ou calculés (étape 1.C.2)
+
+- **Ouvert et réglé le** : 2026-10-06
+- **Statut** : réglé
+- **Calculé réellement** : `real_wealth` (patrimoine déflaté par l'inflation
+  du scénario, il valait le nominal) ; `volatility_sensitivity` (effet d'une
+  hausse de 10 % de la volatilité de chaque actif) ; les constats du résumé
+  (probabilité d'atteindre l'objectif, perte maximale médiane). Le résumé
+  affirmait « strong probability of goal achievement » quel que soit le
+  résultat ; sur le pipeline d'exemple, la probabilité réelle est de 1 %.
+- **Retiré** : la cascade fiscale (`tax_impact_waterfall`, liste littérale) ;
+  les soldes par compte du moteur fiscal (tous à 0) ; les « conseils »
+  fiscaux (séquence de retrait figée, conversion Roth, récolte de pertes) ;
+  `rebalancing_schedule` (DataFrame vide, reviendra avec les coûts de
+  transaction en 1.C.4) ; `correlation_sensitivity` et `years_to_goal`
+  (vides) ; `probability_of_success` et `shortfall_risk` des statistiques
+  (0 en dur, la probabilité vit dans `goal_analysis`).
+- **Test de garde** : `tests/test_display_outputs.py` échoue si une sortie de
+  l'optimiseur, du moteur fiscal ou du rapport est vide ou constante.
+
+## 7. Documentation d'architecture décrivant l'ancienne API
+
+- **Ouvert le** : 2026-10-06 (étape 1.C.2)
+- **Statut** : ouvert
+- **Constat** : `ARCHITECTURE.md`, `MODULES_GUIDE.md` et `COMPLETE_GUIDE.md`
+  décrivent encore les sorties retirées au point 6. Ce sont des documents
+  pour développeurs, pas des écrans utilisateur ; à réécrire avec le parcours
+  unique de la phase 2.1.
+
+## 8. Montants en euros affichés avec le symbole « $ »
+
+- **Ouvert le** : 2026-10-06 (étape 1.C.2)
+- **Statut** : ouvert, à traiter en phase 2.1 (parcours en français)
+- **Constat** : le rapport et les exemples formatent les montants avec `$`
+  alors que la seule devise validée est l'euro.

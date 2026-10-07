@@ -51,21 +51,13 @@ OUTPUT STRUCTURE:
         'cumulative_tax': pd.DataFrame,         # Cumulative tax burden over time
         'tax_drag': pd.DataFrame,              # Performance drag due to taxes
         'effective_tax_rate': pd.DataFrame     # Effective tax rate per scenario
-    },
-
-    'account_balances': {
-        'taxable': pd.DataFrame,      # After-tax balances by scenario and time
-        'tax_deferred': pd.DataFrame,
-        'tax_free': pd.DataFrame,
-        'total': pd.DataFrame         # Total across all accounts
-    },
-
-    'optimization_insights': {
-        'tax_loss_harvesting_opportunities': list,
-        'optimal_withdrawal_sequence': list,  # Which account to draw from first
-        'roth_conversion_analysis': dict      # Tax-deferred to tax-free conversion
     }
 }
+
+Les soldes par type de compte et les « conseils d'optimisation fiscale »
+(séquence de retrait, conversion Roth) ont été retirés à l'étape 1.C.2 : les
+soldes valaient 0 et les conseils étaient des textes figés, sans calcul. Une
+fonctionnalité absente vaut mieux qu'une fonctionnalité qui ment.
 """
 
 import logging
@@ -140,7 +132,7 @@ class TaxEngine:
             config: Configuration dictionary (see module docstring)
 
         Returns:
-            Dictionary with after-tax scenarios, tax tables, account balances, insights
+            Dictionary with after-tax scenarios and tax tables
         """
         # Chronomètre pour tracer la durée du traitement fiscal.
         start_time = time.perf_counter()
@@ -168,16 +160,6 @@ class TaxEngine:
             scenarios_df, after_tax_scenarios, tax_config, allocation
         )
 
-        # Simulate account balances
-        account_balances = self._simulate_account_balances(
-            after_tax_scenarios, allocation, tax_config
-        )
-
-        # Generate optimization insights
-        insights = self._generate_optimization_insights(
-            tax_tables, account_balances, tax_config
-        )
-
         logger.info(
             "Fin de l'application du régime fiscal en %.3f s : %d lignes après impôt",
             time.perf_counter() - start_time,
@@ -187,8 +169,6 @@ class TaxEngine:
         return {
             'after_tax_scenarios': after_tax_scenarios,
             'tax_tables': tax_tables,
-            'account_balances': account_balances,
-            'optimization_insights': insights
         }
 
     def _validate_config(self, config: dict) -> dict:
@@ -429,89 +409,6 @@ class TaxEngine:
             'cumulative_tax': cumulative_tax_df,
             'tax_drag': tax_drag_df,
             'effective_tax_rate': effective_rate_df
-        }
-
-    def _simulate_account_balances(
-        self,
-        after_tax_df: pd.DataFrame,
-        allocation: dict,
-        tax_config: dict
-    ) -> dict[str, pd.DataFrame]:
-        """
-        Simulate account balances over time.
-
-        Args:
-            after_tax_df: After-tax scenarios
-            allocation: Asset allocation
-            tax_config: Tax configuration
-
-        Returns:
-            Dictionary of balance DataFrames by account type
-        """
-        # For now, return placeholder
-        # In full implementation, this would simulate actual account growth
-
-        scenarios = after_tax_df['scenario_id'].unique()
-        time_periods = sorted(after_tax_df['time_period'].unique())
-
-        # Placeholder balances (would be calculated based on contributions, returns, etc.)
-        taxable_balances = pd.DataFrame({
-            'scenario_id': scenarios,
-            **{f"t_{int(t)}": 0.0 for t in time_periods}
-        })
-
-        tax_deferred_balances = taxable_balances.copy()
-        tax_free_balances = taxable_balances.copy()
-
-        total_balances = taxable_balances.copy()
-
-        return {
-            'taxable': taxable_balances,
-            'tax_deferred': tax_deferred_balances,
-            'tax_free': tax_free_balances,
-            'total': total_balances
-        }
-
-    def _generate_optimization_insights(
-        self,
-        tax_tables: dict,
-        account_balances: dict,
-        tax_config: dict
-    ) -> dict:
-        """
-        Generate tax optimization insights.
-
-        Args:
-            tax_tables: Tax tables
-            account_balances: Account balances
-            tax_config: Tax configuration
-
-        Returns:
-            Dictionary of optimization insights
-        """
-        # Tax loss harvesting opportunities
-        # (simplified - would analyze negative returns)
-        tlh_opportunities: list = []
-
-        # Optimal withdrawal sequence
-        # Rule: withdraw from taxable first, then tax-deferred, then tax-free
-        withdrawal_sequence = [
-            {'rank': 1, 'account_type': 'taxable', 'reason': 'Lowest tax cost, no penalties'},
-            {'rank': 2, 'account_type': 'tax_deferred', 'reason': 'Ordinary income tax only'},
-            {'rank': 3, 'account_type': 'tax_free', 'reason': 'Preserve tax-free growth longest'}
-        ]
-
-        # Roth conversion analysis
-        roth_conversion = {
-            'recommended': False,
-            'reason': 'Requires detailed income projection',
-            'optimal_years': []
-        }
-
-        return {
-            'tax_loss_harvesting_opportunities': tlh_opportunities,
-            'optimal_withdrawal_sequence': withdrawal_sequence,
-            'roth_conversion_analysis': roth_conversion
         }
 
 
