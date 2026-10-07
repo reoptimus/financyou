@@ -1005,16 +1005,16 @@ class PortfolioOptimizer:
         schedule = []
         for t in range(n_periods):
             rebalanced = np.any([s.rebalanced[t] for s in sleeves], axis=0)
-            wealth = sum(s.wealth_before_rebalancing[t] for s in sleeves)
+            wealth = np.sum([s.wealth_before_rebalancing[t] for s in sleeves], axis=0)
             turnover = np.divide(
-                sum(s.half_turnover[t] for s in sleeves), wealth,
+                np.sum([s.half_turnover[t] for s in sleeves], axis=0), wealth,
                 out=np.zeros_like(wealth), where=wealth > 0,
             )
             schedule.append({
                 'period': t + 1,
                 'share_of_scenarios_rebalanced': float(rebalanced.mean()),
                 'mean_turnover': float(np.where(rebalanced, turnover, 0.0).mean()),
-                'mean_cost': float(sum(s.period_costs[t] for s in sleeves).mean()),
+                'mean_cost': float(np.sum([s.period_costs[t] for s in sleeves], axis=0).mean()),
             })
         return schedule
 
