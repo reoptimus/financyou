@@ -217,13 +217,23 @@ class PortfolioOptimizer:
 
     def _extract_asset_returns(self, scenarios_df: pd.DataFrame) -> pd.DataFrame:
         """
-        Extract asset returns from scenarios DataFrame.
+        Extract periodic asset returns from scenarios DataFrame.
+
+        Chaque ligne est un couple (scénario, période) : les moments sont estimés
+        sur les rendements **périodiques**. Moyenner d'abord les pas de temps de
+        chaque scénario, comme le faisait l'ancienne version, divisait la
+        volatilité par environ √(nombre de périodes) et faisait de la frontière
+        efficiente un artefact des hypothèses de dérive.
 
         Args:
             scenarios_df: Scenarios with after-tax returns
 
         Returns:
-            DataFrame of asset returns (scenarios × assets)
+            DataFrame of periodic asset returns, indexé par (scenario_id,
+            time_period) quand ces colonnes existent, une colonne par actif
+
+        Raises:
+            ValueError: si le pas de temps des scénarios n'est pas annuel
         """
         # Identify return columns (after_tax versions if available)
         return_columns = []
@@ -245,12 +255,39 @@ class PortfolioOptimizer:
                     asset_name = col.replace('_return', '')
                     asset_names.append(asset_name)
 
-        # Create pivot table: scenarios × assets
-        # Group by scenario_id and calculate mean returns
-        returns_by_scenario = scenarios_df.groupby('scenario_id')[return_columns].mean()
-        returns_by_scenario.columns = asset_names
+        self._check_annual_timestep(scenarios_df)
 
-        return returns_by_scenario
+        index_columns = [c for c in ('scenario_id', 'time_period') if c in scenarios_df.columns]
+        periodic_returns = scenarios_df[index_columns + return_columns].copy()
+        if index_columns:
+            periodic_returns = periodic_returns.set_index(index_columns)
+        periodic_returns.columns = asset_names
+
+        return periodic_returns
+
+    @staticmethod
+    def _check_annual_timestep(scenarios_df: pd.DataFrame) -> None:
+        """
+        Vérifie que les scénarios sont à pas annuel.
+
+        Les statistiques de l'optimiseur (rendement attendu, volatilité) sont
+        annuelles. Les deux générateurs de scénarios ne donnent pas le même sens
+        à un rendement infra-annuel (rendement de période pour le chemin
+        stochastique, rendement annualisé pour le chemin simple) : plutôt que de
+        deviner une annualisation, on refuse un pas qui n'est pas annuel.
+        """
+        if 'time_period' not in scenarios_df.columns:
+            return
+        periods = np.sort(scenarios_df['time_period'].unique())
+        if len(periods) < 2:
+            return
+        steps = np.diff(periods)
+        if not np.allclose(steps, 1.0):
+            raise ValueError(
+                "L'optimiseur n'accepte que des scénarios à pas annuel (timestep=1.0) ; "
+                f"pas observé(s) : {sorted(set(np.round(steps, 6)))}. "
+                "Générez les scénarios avec 'timestep': 1.0."
+            )
 
     def _run_optimization(
         self,
@@ -459,24 +496,42 @@ class PortfolioOptimizer:
         """
         Estimate maximum drawdown from scenarios.
 
+        La perte maximale est calculée sur la trajectoire de chaque scénario,
+        puis on retient sa médiane : c'est la perte maximale « typique » sur
+        l'horizon de projection.
+
         Args:
-            asset_returns: Asset returns DataFrame
+            asset_returns: Periodic asset returns, indexed by (scenario_id, time_period)
             weights: Portfolio weights
 
         Returns:
-            Estimated maximum drawdown
+            Median over scenarios of the maximum drawdown (positive fraction)
         """
-        # Calculate portfolio returns for each scenario
-        portfolio_returns = (asset_returns * weights).sum(axis=1)
+        portfolio_returns = asset_returns.to_numpy() @ weights
 
-        # Calculate cumulative returns
-        cumulative_returns = (1 + portfolio_returns).cumprod()
+        if 'scenario_id' in (asset_returns.index.names or []):
+            scenario_ids = asset_returns.index.get_level_values('scenario_id')
+            paths = (
+                pd.Series(portfolio_returns, index=scenario_ids)
+                .groupby(level=0, sort=False)
+                .apply(lambda r: r.to_numpy())
+            )
+            n_periods = paths.map(len)
+            if n_periods.nunique() != 1:
+                raise ValueError(
+                    "Les scénarios n'ont pas tous le même nombre de périodes : "
+                    "impossible d'estimer la perte maximale."
+                )
+            returns_matrix = np.vstack(paths.to_list())
+        else:
+            returns_matrix = portfolio_returns[np.newaxis, :]
 
-        # Calculate drawdown
-        running_max = cumulative_returns.expanding().max()
-        drawdown = (cumulative_returns - running_max) / running_max
+        cumulative = np.cumprod(1.0 + returns_matrix, axis=1)
+        running_max = np.maximum.accumulate(cumulative, axis=1)
+        drawdowns = (cumulative - running_max) / running_max
+        max_drawdowns = np.abs(drawdowns.min(axis=1))
 
-        return float(abs(drawdown.min()))
+        return float(np.median(max_drawdowns))
 
     def _generate_efficient_frontier(
         self,

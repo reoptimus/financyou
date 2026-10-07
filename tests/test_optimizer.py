@@ -468,6 +468,138 @@ class TestDataQuality:
                 assert abs(weights1[asset] - weights2[asset]) < 0.1
 
 
+class TestPeriodicCovariance:
+    """
+    Étape 1.C.1 : les moments sont estimés sur les rendements périodiques.
+
+    L'ancienne version moyennait les pas de temps de chaque scénario avant
+    d'estimer la covariance, ce qui divisait la volatilité par ~√T.
+    """
+
+    @staticmethod
+    def _periodic_returns(scenarios_df):
+        cols = [c for c in scenarios_df.columns if c.endswith('_return_after_tax')]
+        if not cols:
+            cols = [c for c in scenarios_df.columns if c.endswith('_return')]
+        return scenarios_df[cols]
+
+    def test_single_asset_volatility_is_periodic_volatility(self):
+        """Un portefeuille 100 % actions a la volatilité annuelle des actions, pas σ/√T."""
+        opt = optimizer.PortfolioOptimizer()
+        config = create_test_optimizer_config()
+        config['scenarios'] = create_test_scenarios(num_scenarios=200)
+        config['optimization_objective'] = 'max_return'
+        config['user_constraints'] = {}
+
+        portfolio = opt.optimize(config)['optimal_portfolio']
+        best_asset = max(portfolio['weights'], key=portfolio['weights'].get)
+        periodic = self._periodic_returns(config['scenarios'])
+        asset_vol = periodic[f'{best_asset}_return'].std()
+        horizon = config['scenarios']['time_period'].nunique()
+
+        assert portfolio['expected_volatility'] == pytest.approx(asset_vol, rel=1e-9)
+        # L'ancienne estimation était de l'ordre de asset_vol / √T.
+        assert portfolio['expected_volatility'] > 2 * asset_vol / np.sqrt(horizon)
+
+    def test_portfolio_volatility_same_order_as_assets(self):
+        """La volatilité du portefeuille optimal est du même ordre que celle des actifs."""
+        opt = optimizer.PortfolioOptimizer()
+        config = create_test_optimizer_config()
+        config['scenarios'] = create_test_scenarios(num_scenarios=200)
+
+        portfolio = opt.optimize(config)['optimal_portfolio']
+        asset_vols = self._periodic_returns(config['scenarios']).std()
+
+        # Un portefeuille long-only ne peut pas dépasser la plus volatile de ses
+        # composantes, et la diversification seule ne divise pas σ par √T.
+        assert portfolio['expected_volatility'] <= asset_vols.max() + 1e-12
+        assert portfolio['expected_volatility'] > asset_vols.min() / 3
+
+    def test_non_annual_timestep_is_refused(self):
+        """Un pas infra-annuel est refusé plutôt qu'annualisé au hasard."""
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        scenarios = gen.generate({
+            'num_scenarios': 5, 'time_horizon': 2, 'timestep': 0.25, 'use_stochastic': False
+        })['scenarios']
+        config = create_test_optimizer_config()
+        config['scenarios'] = scenarios
+
+        with pytest.raises(ValueError, match='pas annuel'):
+            optimizer.PortfolioOptimizer().optimize(config)
+
+    def test_max_drawdown_is_computed_per_scenario(self):
+        """La perte maximale est une vraie mesure, comprise dans [0, 1]."""
+        opt = optimizer.PortfolioOptimizer()
+        config = create_test_optimizer_config()
+        config['scenarios'] = create_test_scenarios(num_scenarios=100)
+
+        drawdown = opt.optimize(config)['optimal_portfolio']['max_drawdown']
+
+        assert 0.0 < drawdown < 1.0
+
+
+@pytest.fixture(scope='module')
+def frontier_results():
+    """
+    Scénarios du chemin stochastique : le chemin simple construit trois actifs
+    à partir de deux chocs seulement, sa covariance est donc singulière (voir
+    test_minimum_variance_portfolio_is_unique).
+    """
+    gen = scenario_generator.ScenarioGenerator(random_seed=42)
+    scenarios = gen.generate({
+        'num_scenarios': 200,
+        'time_horizon': 10,
+        'timestep': 1.0,
+        'use_stochastic': True,
+        'currency': 'EUR',
+        'yield_curve_id': 'eiopa-fr-2018-04',
+    })['scenarios']
+    config = create_test_optimizer_config()
+    config['scenarios'] = scenarios
+    config['optimization_objective'] = 'min_volatility'
+    config['user_constraints'] = {}
+    return config, optimizer.PortfolioOptimizer().optimize(config)
+
+
+class TestEfficientFrontierProperties:
+    """Étape 1.C.1 : propriétés de la frontière efficiente."""
+
+    @pytest.fixture
+    def results(self, frontier_results):
+        return frontier_results
+
+    def test_frontier_weights_sum_to_one(self, results):
+        _, res = results
+        frontier = res['efficient_frontier']
+        weight_cols = [c for c in frontier.columns if c.endswith('_weight')]
+        np.testing.assert_allclose(frontier[weight_cols].sum(axis=1), 1.0, atol=1e-6)
+
+    def test_return_increases_with_risk_on_efficient_branch(self, results):
+        """Au-dessus du portefeuille de variance minimale, plus de risque ⇒ plus de rendement."""
+        _, res = results
+        frontier = res['efficient_frontier'].sort_values('return')
+        min_var_idx = frontier['volatility'].idxmin()
+        efficient = frontier.loc[frontier['return'] >= frontier.loc[min_var_idx, 'return']]
+
+        assert len(efficient) > 2
+        assert (np.diff(efficient['volatility'].to_numpy()) >= -1e-6).all()
+
+    def test_minimum_variance_portfolio_is_unique(self, results):
+        """
+        La covariance est définie positive : la variance est strictement
+        convexe, le portefeuille de variance minimale est donc unique et
+        coïncide avec le point le moins risqué de la frontière.
+        """
+        config, res = results
+        opt = optimizer.PortfolioOptimizer()
+        asset_returns = opt._extract_asset_returns(config['scenarios'])
+
+        assert np.linalg.eigvalsh(asset_returns.cov().to_numpy()).min() > 0
+
+        min_vol = res['optimal_portfolio']['expected_volatility']
+        assert min_vol == pytest.approx(res['efficient_frontier']['volatility'].min(), rel=1e-3)
+
+
 class TestConvenienceFunctions:
     """Test convenience functions."""
 
