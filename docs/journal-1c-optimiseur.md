@@ -189,7 +189,7 @@ est marquée comme telle.
 ## 13. Impôt de sortie par enveloppe (étape 1.D.1)
 
 - **Ouvert le** : 2026-10-07
-- **Statut** : première brique livrée, intégration à l'optimiseur ouverte (1.D.2)
+- **Statut** : réglé pour l'impôt de sortie ; intégration à l'optimiseur au point 14 (1.D.2)
 - **Livré** : `investment_calculator/wrapper_tax.py::liquidation_tax` calcule
   l'impôt dû à la liquidation totale d'une enveloppe à partir de la règle de
   retrait du régime (taux, taux social, abattement, seuil de primes). Pris en
@@ -210,3 +210,41 @@ est marquée comme telle.
   enveloppes imposées au fil de l'eau et `liquidation_tax` à l'horizon. Sans
   cela, appliquer l'impôt de sortie sur des rendements déjà après impôt
   (moteur fiscal historique) compterait l'impôt deux fois.
+
+## 14. L'optimiseur simule chaque enveloppe et son impôt (étape 1.D.2)
+
+- **Ouvert le** : 2026-10-07
+- **Statut** : livré, avec limites ci-dessous
+- **Avant** : le patrimoine projeté partait de rendements après impôt calculés
+  avec trois comptes génériques dont la répartition était saisie à la main
+  (`tax_config_fr.json`), puis ignorait l'enveloppe réelle.
+- **Après** : avec `wrapper_constraints`, l'optimiseur lit les rendements
+  **avant** impôt (même si des colonnes après impôt existent : sinon l'impôt
+  serait compté deux fois), place l'allocation dans les enveloppes, simule
+  chaque enveloppe comme une poche, prélève l'impôt annuel des revenus
+  distribués dans les enveloppes imposées au fil de l'eau (CTO), et retranche
+  l'impôt de sortie de `liquidation_tax`. `wealth` est le patrimoine net ;
+  `pre_liquidation_wealth`, `exit_tax_<enveloppe>` et
+  `annual_income_tax_<enveloppe>` détaillent. `apply_wrapper_tax=False` rend
+  l'ancien comportement (contraintes seules).
+- **Sur le pipeline d'exemple** (graine 42, 1 000 scénarios) : médiane du
+  patrimoine final 1 336 308 → 1 163 000 ; probabilité d'atteindre 2 M€ :
+  1,7 % → 3,4 % (la dispersion est plus large : 5e centile 1 030 458 →
+  870 369, 95e centile 1 837 942 → 1 878 540) ; impôt moyen sur 30 ans :
+  CTO 113 800 €, PEA 91 500 €. Les poids passent à 30,5 % actions / 69,5 %
+  obligations (rendements avant impôt, sans immobilier).
+- **Déclaré comme limite** :
+  - le PER et l'immobilier direct ne sont pas modélisés : ils sont exclus par
+    défaut et listés dans `wrapper_gaps` ; les demander explicitement lève une
+    erreur ;
+  - les retraits ne sont pas gérés (erreur explicite) ;
+  - les plus-values réalisées par le rééquilibrage dans un CTO ne sont pas
+    imposées au fil de l'eau : elles le sont à la sortie ;
+  - revenus distribués : dividende des hypothèses de marché (non sourcées,
+    point 14 du journal fiscalité) pour les actions, rendement positif pour les
+    obligations ;
+  - **les poids sont choisis avant impôt** et le placement reste une
+    heuristique (enveloppes plafonnées d'abord) : une optimisation du placement
+    et des poids après impôt est la suite (1.D.3) ;
+  - les calculs reprennent les taux du régime, y compris les prélèvements
+    sociaux à 17,2 % dont la révision à 18,6 % reste à trancher.

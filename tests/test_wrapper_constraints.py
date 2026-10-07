@@ -140,3 +140,123 @@ def test_random_profiles_are_always_feasible_or_explicitly_refused(scenarios):
         for _, row in placement.iterrows():
             assert row['amount'] >= -1e-6
     assert n_ok > 0
+
+
+# --- Étape 1.D.2 : impôt par enveloppe dans la simulation --------------------------------------
+
+from investment_calculator.modules import tax_engine  # noqa: E402
+from investment_calculator.tax_regime import load_regime as _load_regime  # noqa: E402
+
+
+def _tax_config(**wrapper):
+    return {'country': 'FR', 'fiscal_year': 2026, **wrapper}
+
+
+def _no_cost(config):
+    config['optimization_params'] = {
+        'transaction_costs': {'stock': 0.0, 'bond': 0.0, 'real_estate': 0.0},
+    }
+    return config
+
+
+def test_pea_only_matches_closed_form(scenarios):
+    """PEA seul, actions seules, sans coût : patrimoine net = brut moins prélèvements sociaux."""
+    regime = _load_regime('FR', 2026)
+    config = _no_cost(_config(
+        scenarios, contribution=5_000.0,
+        wrapper_constraints=_tax_config(available_wrappers=['pea']),
+    ))
+    config['optimization_objective'] = 'min_volatility'
+    results = optimizer.PortfolioOptimizer().optimize(config)
+    terminal = results['simulation_results']['terminal_wealth']
+
+    # Versements : mise initiale puis 5 000 en fin de chaque année, soit 10 versements.
+    contributions = 10 * 5_000.0
+    pre = terminal['pre_liquidation_wealth'].to_numpy()
+    gain = np.clip(pre - contributions, 0.0, None)
+    assert terminal['exit_tax_pea'].to_numpy() == pytest.approx(gain * regime.social_rate)
+    assert terminal['wealth'].to_numpy() == pytest.approx(pre - gain * regime.social_rate)
+    assert (terminal['annual_income_tax_pea'] == 0).all()
+
+
+def test_net_wealth_is_below_gross_and_taxes_are_reported(scenarios):
+    config = _config(scenarios, wrapper_constraints=_tax_config())
+    results = optimizer.PortfolioOptimizer().optimize(config)
+    terminal = results['simulation_results']['terminal_wealth']
+    assert (terminal['wealth'] <= terminal['pre_liquidation_wealth'] + 1e-9).all()
+    stats = results['simulation_results']['statistics']
+    assert set(stats['mean_tax_by_wrapper']) == set(results['wrapper_allocation']['wrapper'])
+    assert stats['mean_pre_liquidation_wealth'] > stats['mean_terminal_wealth']
+
+
+def test_after_tax_scenario_columns_are_not_taxed_twice(scenarios):
+    taxed = tax_engine.apply_taxes_simple(scenarios, jurisdiction='FR')['after_tax_scenarios']
+    base = optimizer.PortfolioOptimizer().optimize(
+        _config(scenarios, wrapper_constraints=_tax_config())
+    )
+    again = optimizer.PortfolioOptimizer().optimize(
+        _config(taxed, wrapper_constraints=_tax_config())
+    )
+    assert again['optimal_portfolio']['weights'] == base['optimal_portfolio']['weights']
+    assert again['simulation_results']['statistics']['median_terminal_wealth'] == pytest.approx(
+        base['simulation_results']['statistics']['median_terminal_wealth']
+    )
+
+
+def test_unmodelled_wrappers_are_declared_not_silently_used(scenarios):
+    results = optimizer.PortfolioOptimizer().optimize(
+        _config(scenarios, wrapper_constraints=_tax_config())
+    )
+    assert set(results['wrapper_gaps']) == {'per', 'immobilier_direct'}
+    assert not {'per', 'immobilier_direct'} & set(results['wrapper_allocation']['wrapper'])
+
+
+def test_explicit_unmodelled_wrapper_is_refused(scenarios):
+    config = _config(
+        scenarios, wrapper_constraints=_tax_config(available_wrappers=['cto', 'per']),
+    )
+    with pytest.raises(NotImplementedError, match='per'):
+        optimizer.PortfolioOptimizer().optimize(config)
+
+
+def test_withdrawals_are_refused_with_wrapper_tax(scenarios):
+    config = _config(scenarios, wrapper_constraints=_tax_config())
+    config['investment_time_series'] = pd.DataFrame({
+        'period': range(10), 'net_flow': [10_000.0] * 9 + [-5_000.0],
+    })
+    with pytest.raises(NotImplementedError, match='retraits'):
+        optimizer.PortfolioOptimizer().optimize(config)
+
+
+def test_disabling_wrapper_tax_keeps_gross_wealth(scenarios):
+    on = optimizer.PortfolioOptimizer().optimize(
+        _config(scenarios, wrapper_constraints=_tax_config())
+    )
+    off = optimizer.PortfolioOptimizer().optimize(
+        _config(scenarios, wrapper_constraints=_tax_config(apply_wrapper_tax=False))
+    )
+    assert 'exit_tax_pea' not in off['simulation_results']['terminal_wealth'].columns
+    assert (
+        off['simulation_results']['statistics']['median_terminal_wealth']
+        > on['simulation_results']['statistics']['median_terminal_wealth']
+    )
+
+
+def test_cto_reinvested_income_is_not_taxed_again_at_exit(scenarios):
+    """CTO seul : l'impôt de sortie porte sur le prix de revient relevé, pas sur les versements."""
+    regime = _load_regime('FR', 2026)
+    config = _no_cost(_config(
+        scenarios, contribution=5_000.0,
+        wrapper_constraints=_tax_config(available_wrappers=['cto']),
+    ))
+    config['optimization_objective'] = 'min_volatility'
+    config['user_constraints'] = {'min_bond_allocation': 0.0}
+    results = optimizer.PortfolioOptimizer().optimize(config)
+    terminal = results['simulation_results']['terminal_wealth']
+    pre = terminal['pre_liquidation_wealth'].to_numpy()
+    naive = np.clip(pre - 50_000.0, 0.0, None) * (
+        regime.flat_tax_income_rate + regime.social_rate
+    )
+    assert (terminal['annual_income_tax_cto'] > 0).all()
+    assert (terminal['exit_tax_cto'].to_numpy() <= naive + 1e-9).all()
+    assert (terminal['exit_tax_cto'].to_numpy() < naive - 1.0).any()
