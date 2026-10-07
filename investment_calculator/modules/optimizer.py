@@ -43,12 +43,15 @@ OUTPUT STRUCTURE:
 import logging
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
 
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 
+from investment_calculator.market_assumptions import load_market_assumptions
+from investment_calculator.tax_regime import TaxRegime
 from investment_calculator.wrapper_allocation import (
     InfeasibleConstraintsError,
     WeightConstraints,
@@ -58,6 +61,7 @@ from investment_calculator.wrapper_allocation import (
     regime_from_config,
     total_contributions_of,
 )
+from investment_calculator.wrapper_tax import liquidation_tax, modelled_wrappers
 
 # Journalisation : logger nommé d'après le module, il hérite donc de la
 # configuration posée par investment_calculator.logging_config.configure_logging().
@@ -66,6 +70,42 @@ logger = logging.getLogger(__name__)
 # Actifs sur lesquels portent les contraintes utilisateur de profil.
 BOND_ASSET = 'bond'
 EQUITY_ASSET = 'stock'
+
+
+@dataclass(frozen=True)
+class WrapperTaxContext:
+    """Ce qu'il faut pour simuler l'impôt par enveloppe : régime, placement, hypothèses."""
+
+    regime: TaxRegime
+    placement: pd.DataFrame
+    couple: bool = False
+
+    @property
+    def wrappers(self) -> list[str]:
+        return list(dict.fromkeys(self.placement['wrapper']))
+
+
+@dataclass(frozen=True)
+class _SleeveIncome:
+    """Revenus distribués imposés chaque année dans une enveloppe imposée au fil de l'eau."""
+
+    fixed_yield: np.ndarray
+    return_is_income: np.ndarray
+    tax_rate: float
+
+
+@dataclass
+class _Sleeve:
+    """Résultat de la simulation d'une poche : trajectoires et mouvements de chaque année."""
+
+    wealth_paths: np.ndarray
+    total_costs: np.ndarray
+    cost_basis: np.ndarray
+    income_tax_paid: np.ndarray
+    rebalanced: list[np.ndarray]
+    half_turnover: list[np.ndarray]
+    period_costs: list[np.ndarray]
+    wealth_before_rebalancing: list[np.ndarray]
 
 
 class OptimizationObjective(Enum):
@@ -129,15 +169,35 @@ class PortfolioOptimizer:
             len(scenarios_df),
         )
 
+        # Avec l'impôt par enveloppe, l'optimiseur travaille sur les rendements avant
+        # impôt : les rendements après impôt du moteur fiscal historique seraient
+        # taxés une seconde fois par l'impôt des enveloppes.
+        wrapper_config = validated_config['wrapper_constraints']
+        wrapper_tax_on = bool(wrapper_config) and bool(
+            wrapper_config.get('apply_wrapper_tax', True)
+        )
+
         # Extract returns for optimization
-        asset_returns = self._extract_asset_returns(scenarios_df)
+        asset_returns = self._extract_asset_returns(scenarios_df, pre_tax=wrapper_tax_on)
         risk_free_rate = self._risk_free_rate(scenarios_df)
 
         asset_names = list(asset_returns.columns)
 
         # Enveloppes : éligibilité et plafonds de versement du régime fiscal
         wrapper_rules: WrapperRules | None = None
-        wrapper_config = validated_config['wrapper_constraints']
+        wrapper_gaps: dict[str, str] = {}
+        available = wrapper_config.get('available_wrappers') if wrapper_config else None
+        if wrapper_config and wrapper_tax_on and available is None:
+            # Sans liste explicite, on ne propose que les enveloppes dont l'impôt est
+            # modélisé ; les autres sont déclarées dans `wrapper_gaps`.
+            available, wrapper_gaps = modelled_wrappers(regime_from_config(wrapper_config))
+        elif wrapper_config and wrapper_tax_on and available is not None:
+            _, gaps = modelled_wrappers(regime_from_config(wrapper_config))
+            refused = [w for w in available if w in gaps]
+            if refused:
+                raise NotImplementedError(
+                    f"L'impôt des enveloppes {refused} n'est pas modélisé : {gaps[refused[0]]}"
+                )
         if wrapper_config:
             n_periods = len(asset_returns) // asset_returns.index.get_level_values(0).nunique()
             flows = self._investment_flows(validated_config['investment_time_series'], n_periods)
@@ -146,7 +206,7 @@ class PortfolioOptimizer:
                 asset_names,
                 total_contributions=total_contributions_of(flows),
                 n_periods=n_periods,
-                available_wrappers=wrapper_config.get('available_wrappers'),
+                available_wrappers=available,
                 asset_classes=wrapper_config.get('asset_classes'),
                 wrapper_priority=wrapper_config.get('wrapper_priority'),
             )
@@ -170,13 +230,25 @@ class PortfolioOptimizer:
             risk_free_rate
         )
 
+        wrapper_allocation = None
+        wrapper_tax = None
+        if wrapper_rules is not None:
+            wrapper_allocation = place_in_wrappers(optimal_portfolio['weights'], wrapper_rules)
+            if wrapper_tax_on:
+                wrapper_tax = WrapperTaxContext(
+                    regime=regime_from_config(wrapper_config),
+                    placement=wrapper_allocation,
+                    couple=bool(wrapper_config.get('couple', False)),
+                )
+
         # Run simulations
         simulation_results = self._run_simulations(
             scenarios_df,
             asset_returns,
             optimal_portfolio,
             validated_config['investment_time_series'],
-            params
+            params,
+            wrapper_tax,
         )
 
         # Sensitivity analysis
@@ -210,10 +282,9 @@ class PortfolioOptimizer:
             'sensitivity_analysis': sensitivity_analysis,
             'goal_analysis': goal_analysis
         }
-        if wrapper_rules is not None:
-            results['wrapper_allocation'] = place_in_wrappers(
-                optimal_portfolio['weights'], wrapper_rules
-            )
+        if wrapper_allocation is not None:
+            results['wrapper_allocation'] = wrapper_allocation
+            results['wrapper_gaps'] = wrapper_gaps
         return results
 
     def _validate_config(self, config: dict) -> dict:
@@ -259,7 +330,9 @@ class PortfolioOptimizer:
 
         return validated
 
-    def _extract_asset_returns(self, scenarios_df: pd.DataFrame) -> pd.DataFrame:
+    def _extract_asset_returns(
+        self, scenarios_df: pd.DataFrame, *, pre_tax: bool = False
+    ) -> pd.DataFrame:
         """
         Extract periodic asset returns from scenarios DataFrame.
 
@@ -271,6 +344,8 @@ class PortfolioOptimizer:
 
         Args:
             scenarios_df: Scenarios with after-tax returns
+            pre_tax: lire les rendements avant impôt même si des colonnes après
+                impôt existent (impôt par enveloppe appliqué par l'optimiseur)
 
         Returns:
             DataFrame of periodic asset returns, indexé par (scenario_id,
@@ -284,7 +359,7 @@ class PortfolioOptimizer:
         asset_names = []
 
         for col in scenarios_df.columns:
-            if 'return' in col.lower() and 'after_tax' in col.lower():
+            if not pre_tax and 'return' in col.lower() and 'after_tax' in col.lower():
                 return_columns.append(col)
                 # Extract asset name
                 asset_name = col.replace('_after_tax', '').replace('_return', '')
@@ -294,7 +369,7 @@ class PortfolioOptimizer:
             # Fallback to pre-tax returns
             for col in scenarios_df.columns:
                 excluded = ['interest_rate', 'inflation', 'gdp_growth']
-                if 'return' in col.lower() and col not in excluded:
+                if 'return' in col.lower() and col not in excluded and 'after_tax' not in col:
                     return_columns.append(col)
                     asset_name = col.replace('_return', '')
                     asset_names.append(asset_name)
@@ -724,10 +799,17 @@ class PortfolioOptimizer:
         asset_returns: pd.DataFrame,
         optimal_portfolio: dict,
         time_series: pd.DataFrame,
-        params: dict
+        params: dict,
+        wrapper_tax: WrapperTaxContext | None = None,
     ) -> dict:
         """
         Simulate the optimal portfolio over every scenario, with rebalancing costs.
+
+        Avec ``wrapper_tax``, chaque enveloppe est simulée comme une poche
+        distincte (rééquilibrée à l'intérieur de la poche), l'impôt annuel des
+        revenus distribués est prélevé dans les enveloppes imposées au fil de
+        l'eau, et l'impôt de sortie du régime est retranché à l'horizon :
+        ``wealth`` est alors le patrimoine **net d'impôt**.
 
         Le portefeuille dérive avec les rendements de chaque actif. À chaque fin
         d'année, si l'écart d'un poids à sa cible dépasse
@@ -743,6 +825,7 @@ class PortfolioOptimizer:
             optimal_portfolio: Optimal portfolio weights
             time_series: Investment time series (flows, from Module 3)
             params: Parameters (transaction_costs, rebalancing_threshold)
+            wrapper_tax: placement par enveloppe et régime fiscal, ou None
 
         Returns:
             Dictionary with terminal wealth, wealth paths, rebalancing schedule
@@ -767,57 +850,34 @@ class PortfolioOptimizer:
         returns = ordered.to_numpy().reshape(n_scenarios, n_periods, len(asset_names))
         flows = self._investment_flows(time_series, n_periods)
 
-        holdings = np.tile(flows[0] * target, (n_scenarios, 1))
-        wealth_paths = np.zeros((n_scenarios, n_periods + 1))
-        wealth_paths[:, 0] = flows[0]
-        total_costs = np.zeros(n_scenarios)
-        schedule = []
-
-        for t in range(n_periods):
-            holdings = holdings * (1.0 + returns[:, t, :])
-            wealth = holdings.sum(axis=1)
-
-            flow = flows[t + 1]
-            if flow >= 0:
-                holdings = holdings + flow * target
-            else:
-                share = np.divide(
-                    holdings, wealth[:, None], out=np.zeros_like(holdings),
-                    where=wealth[:, None] > 0,
-                )
-                holdings = holdings + flow * share
-            holdings = np.where(holdings.sum(axis=1, keepdims=True) > 0, holdings, 0.0)
-            wealth = holdings.sum(axis=1)
-
-            current = np.divide(
-                holdings, wealth[:, None], out=np.tile(target, (n_scenarios, 1)),
-                where=wealth[:, None] > 0,
+        wrapper_columns: dict[str, np.ndarray] = {}
+        if wrapper_tax is None:
+            sleeve = self._simulate_sleeve(returns, target, flows, costs, threshold)
+            wealth_paths = sleeve.wealth_paths
+            total_costs = sleeve.total_costs
+            terminal = wealth_paths[:, -1]
+            sleeves = [sleeve]
+            wealth_at_end = terminal
+        else:
+            sleeves, wrapper_columns, wealth_paths, total_costs = self._simulate_wrappers(
+                returns, asset_names, flows, costs, threshold, wrapper_tax
             )
-            rebalance = np.abs(current - target).max(axis=1) > threshold
-            trades = np.abs(target * wealth[:, None] - holdings)
-            period_costs = np.where(rebalance, trades @ costs, 0.0)
-            holdings = np.where(
-                rebalance[:, None], (wealth - period_costs)[:, None] * target, holdings
+            wealth_at_end = wealth_paths[:, -1]
+            terminal = wealth_at_end - sum(
+                wrapper_columns[f'exit_tax_{w}'] for w in wrapper_tax.wrappers
             )
-            total_costs += period_costs
-            wealth_paths[:, t + 1] = holdings.sum(axis=1)
 
-            turnover = np.divide(
-                trades.sum(axis=1) / 2.0, wealth, out=np.zeros_like(wealth), where=wealth > 0
-            )
-            schedule.append({
-                'period': t + 1,
-                'share_of_scenarios_rebalanced': float(rebalance.mean()),
-                'mean_turnover': float(np.where(rebalance, turnover, 0.0).mean()),
-                'mean_cost': float(period_costs.mean()),
-            })
+        schedule = self._rebalancing_schedule(sleeves, n_periods)
 
-        terminal = wealth_paths[:, -1]
         terminal_wealth_df = pd.DataFrame({
             'scenario_id': scenario_ids,
             'wealth': terminal,
             'transaction_costs': total_costs,
         })
+        if wrapper_tax is not None:
+            terminal_wealth_df['pre_liquidation_wealth'] = wealth_at_end
+            for column, values in wrapper_columns.items():
+                terminal_wealth_df[column] = values
         if 'inflation' in scenarios_df.columns:
             # Patrimoine en euros constants de la date de départ.
             inflation = (
@@ -842,6 +902,14 @@ class PortfolioOptimizer:
             'cvar_95': float(terminal[terminal <= np.percentile(terminal, 5)].mean()),
             'mean_transaction_costs': float(total_costs.mean()),
         }
+        if wrapper_tax is not None:
+            statistics['mean_pre_liquidation_wealth'] = float(wealth_at_end.mean())
+            statistics['mean_tax_by_wrapper'] = {
+                w: float((
+                    wrapper_columns[f'exit_tax_{w}'] + wrapper_columns[f'annual_income_tax_{w}']
+                ).mean())
+                for w in wrapper_tax.wrappers
+            }
 
         wealth_paths_df = pd.DataFrame(
             wealth_paths,
@@ -855,6 +923,198 @@ class PortfolioOptimizer:
             'rebalancing_schedule': pd.DataFrame(schedule),
             'statistics': statistics
         }
+
+    @staticmethod
+    def _simulate_sleeve(
+        returns: np.ndarray,
+        target: np.ndarray,
+        flows: np.ndarray,
+        costs: np.ndarray,
+        threshold: float,
+        income: _SleeveIncome | None = None,
+    ) -> _Sleeve:
+        """
+        Simule une poche de portefeuille sur tous les scénarios.
+
+        ``returns`` a la forme (scénarios, périodes, actifs). Le portefeuille dérive,
+        il est ramené à ``target`` en fin d'année quand un poids s'écarte de plus
+        de ``threshold``, et les coûts de transaction sont prélevés sur le montant
+        échangé. Avec ``income``, l'impôt des revenus distribués est prélevé chaque
+        année et ces revenus, une fois imposés, augmentent le prix de revient.
+        """
+        n_scenarios, n_periods, _ = returns.shape
+        holdings = np.tile(flows[0] * target, (n_scenarios, 1))
+        wealth_paths = np.zeros((n_scenarios, n_periods + 1))
+        wealth_paths[:, 0] = flows[0]
+        total_costs = np.zeros(n_scenarios)
+        basis = np.full(n_scenarios, float(flows[0]))
+        income_tax_paid = np.zeros(n_scenarios)
+        sleeve = _Sleeve(wealth_paths, total_costs, basis, income_tax_paid, [], [], [], [])
+
+        for t in range(n_periods):
+            period_returns = returns[:, t, :]
+            if income is not None:
+                distributed = holdings * np.where(
+                    income.return_is_income,
+                    np.clip(period_returns, 0.0, None),
+                    income.fixed_yield,
+                )
+                tax = distributed * income.tax_rate
+            holdings = holdings * (1.0 + period_returns)
+            if income is not None:
+                holdings = holdings - tax
+                basis += (distributed - tax).sum(axis=1)
+                income_tax_paid += tax.sum(axis=1)
+            wealth = holdings.sum(axis=1)
+
+            flow = flows[t + 1]
+            if flow >= 0:
+                holdings = holdings + flow * target
+                basis += flow
+            else:
+                share = np.divide(
+                    holdings, wealth[:, None], out=np.zeros_like(holdings),
+                    where=wealth[:, None] > 0,
+                )
+                holdings = holdings + flow * share
+            holdings = np.where(holdings.sum(axis=1, keepdims=True) > 0, holdings, 0.0)
+            wealth = holdings.sum(axis=1)
+
+            current = np.divide(
+                holdings, wealth[:, None], out=np.tile(target, (n_scenarios, 1)),
+                where=wealth[:, None] > 0,
+            )
+            rebalance = np.abs(current - target).max(axis=1) > threshold
+            trades = np.abs(target * wealth[:, None] - holdings)
+            period_costs = np.where(rebalance, trades @ costs, 0.0)
+            holdings = np.where(
+                rebalance[:, None], (wealth - period_costs)[:, None] * target, holdings
+            )
+            total_costs += period_costs
+            wealth_paths[:, t + 1] = holdings.sum(axis=1)
+
+            sleeve.rebalanced.append(rebalance)
+            sleeve.half_turnover.append(np.where(rebalance, trades.sum(axis=1) / 2.0, 0.0))
+            sleeve.period_costs.append(period_costs)
+            sleeve.wealth_before_rebalancing.append(wealth)
+        return sleeve
+
+    @staticmethod
+    def _rebalancing_schedule(sleeves: list[_Sleeve], n_periods: int) -> list[dict]:
+        """Calendrier agrégé sur les poches : une ligne par année."""
+        schedule = []
+        for t in range(n_periods):
+            rebalanced = np.any([s.rebalanced[t] for s in sleeves], axis=0)
+            wealth = np.sum([s.wealth_before_rebalancing[t] for s in sleeves], axis=0)
+            turnover = np.divide(
+                np.sum([s.half_turnover[t] for s in sleeves], axis=0), wealth,
+                out=np.zeros_like(wealth), where=wealth > 0,
+            )
+            schedule.append({
+                'period': t + 1,
+                'share_of_scenarios_rebalanced': float(rebalanced.mean()),
+                'mean_turnover': float(np.where(rebalanced, turnover, 0.0).mean()),
+                'mean_cost': float(np.sum([s.period_costs[t] for s in sleeves], axis=0).mean()),
+            })
+        return schedule
+
+    def _simulate_wrappers(
+        self,
+        returns: np.ndarray,
+        asset_names: list[str],
+        flows: np.ndarray,
+        costs: np.ndarray,
+        threshold: float,
+        context: WrapperTaxContext,
+    ) -> tuple[list[_Sleeve], dict[str, np.ndarray], np.ndarray, np.ndarray]:
+        """
+        Simule chaque enveloppe comme une poche, puis calcule l'impôt de sortie.
+
+        Returns:
+            Poches, colonnes ``exit_tax_<enveloppe>`` (impôt de sortie) et
+            ``annual_income_tax_<enveloppe>`` (impôt annuel cumulé, déjà retranché des
+            trajectoires), trajectoires du patrimoine avant impôt de sortie, coûts de
+            transaction cumulés.
+        """
+        if (flows < 0).any():
+            raise NotImplementedError(
+                "L'impôt par enveloppe ne gère pas encore les retraits : la série de flux "
+                "contient des montants négatifs. Retirez les retraits, ou désactivez "
+                "l'impôt par enveloppe (apply_wrapper_tax=False)."
+            )
+        regime = context.regime
+        n_periods = returns.shape[1]
+        placement = context.placement
+        sleeves: list[_Sleeve] = []
+        columns: dict[str, np.ndarray] = {}
+        wealth_paths = np.zeros((returns.shape[0], n_periods + 1))
+        total_costs = np.zeros(returns.shape[0])
+        total_share = float(placement['share_of_contributions'].sum())
+
+        for wrapper in context.wrappers:
+            rows = placement[placement['wrapper'] == wrapper]
+            share = float(rows['share_of_contributions'].sum()) / total_share
+            target = np.array([
+                float(rows.loc[rows['asset'] == a, 'share_of_contributions'].sum())
+                for a in asset_names
+            ]) / (share * total_share)
+            income = self._sleeve_income(regime, wrapper, asset_names, target)
+            sleeve = self._simulate_sleeve(
+                returns, target, flows * share, costs, threshold, income
+            )
+            final = liquidation_tax(
+                regime, wrapper,
+                contributions=float(flows.sum() * share),
+                final_value=sleeve.wealth_paths[:, -1],
+                holding_years=float(n_periods),
+                couple=context.couple,
+                cost_basis=sleeve.cost_basis if income is not None else None,
+            )
+            columns[f'exit_tax_{wrapper}'] = final.total_tax
+            columns[f'annual_income_tax_{wrapper}'] = sleeve.income_tax_paid
+            sleeves.append(sleeve)
+            wealth_paths += sleeve.wealth_paths
+            total_costs += sleeve.total_costs
+        return sleeves, columns, wealth_paths, total_costs
+
+    @staticmethod
+    def _sleeve_income(
+        regime: TaxRegime, wrapper: str, asset_names: list[str], target: np.ndarray
+    ) -> _SleeveIncome | None:
+        """
+        Revenus distribués imposés chaque année, pour les enveloppes imposées au fil de l'eau.
+
+        Une enveloppe de traitement ``taxable`` (le CTO) voit ses dividendes et
+        coupons imposés chaque année au taux de sa règle de retrait ; les autres
+        capitalisent sans impôt annuel. Les actions distribuent le rendement du
+        dividende des hypothèses de marché ; les obligations distribuent leur
+        rendement positif.
+        """
+        spec = regime.wrapper(wrapper)
+        if spec.get('tax_treatment') != 'taxable' or spec.get('growth_taxed_annually'):
+            return None
+        rule = regime.select_withdrawal_rule(wrapper, holding_years=0.0)
+        rate = (
+            regime.resolve_income_tax_rate(rule, taxable_amount=1.0)
+            + regime.resolve_social_rate(rule)
+        )
+        dividend_yield = load_market_assumptions().dividend_yield
+        fixed = np.zeros(len(asset_names))
+        from_return = np.zeros(len(asset_names), dtype=bool)
+        for i, asset in enumerate(asset_names):
+            if target[i] <= 0:
+                continue
+            if asset == EQUITY_ASSET:
+                fixed[i] = dividend_yield
+            elif asset == BOND_ASSET:
+                from_return[i] = True
+            else:
+                raise NotImplementedError(
+                    f"Revenu distribué de l'actif {asset!r} dans l'enveloppe {wrapper!r} "
+                    "inconnu : seuls 'stock' et 'bond' sont modélisés. Retirez cette "
+                    "enveloppe pour cet actif ou attendez son modèle."
+                )
+        return _SleeveIncome(fixed, from_return, float(rate))
 
     @staticmethod
     def _transaction_cost_rates(asset_names: list[str], cost_params: dict) -> np.ndarray:

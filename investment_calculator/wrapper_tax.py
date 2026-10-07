@@ -104,6 +104,7 @@ def liquidation_tax(
     final_value: np.ndarray | float,
     holding_years: float,
     couple: bool = False,
+    cost_basis: np.ndarray | float | None = None,
 ) -> LiquidationResult:
     """
     Impôt dû à la liquidation totale d'une enveloppe.
@@ -115,6 +116,9 @@ def liquidation_tax(
         final_value: valeur de l'enveloppe à l'horizon, par scénario.
         holding_years: années écoulées depuis l'ouverture de l'enveloppe.
         couple: foyer imposé en couple (abattement de l'assurance-vie doublé).
+        cost_basis: prix de revient, par scénario, quand il diffère des versements
+            (revenus déjà imposés puis réinvestis dans un CTO). Par défaut, les
+            versements. Le seuil de primes de l'assurance-vie reste celui des versements.
 
     Raises:
         ValueError: versements négatifs ou valeur finale négative.
@@ -131,7 +135,8 @@ def liquidation_tax(
             "La valeur finale d'une enveloppe ne peut pas être négative : "
             "vérifiez la simulation du patrimoine."
         )
-    gain = np.clip(value - contributions, 0.0, None)
+    basis = contributions if cost_basis is None else np.asarray(cost_basis, dtype=float)
+    gain = np.clip(value - basis, 0.0, None)
 
     first = regime.select_withdrawal_rule(
         wrapper_id, holding_years=holding_years, premiums_paid=contributions
@@ -171,3 +176,24 @@ def liquidation_tax(
     net = value - income_tax - social_tax
     return LiquidationResult(gain=gain, income_tax=income_tax, social_tax=social_tax, net_value=net)
 
+
+
+def modelled_wrappers(regime: TaxRegime) -> tuple[list[str], dict[str, str]]:
+    """
+    Enveloppes dont l'impôt de sortie est modélisé, et les autres avec la raison.
+
+    Returns:
+        ``(modélisées, {enveloppe: raison})`` : la raison est le message de la
+        ``NotImplementedError`` que lèverait ``liquidation_tax``.
+    """
+    modelled: list[str] = []
+    gaps: dict[str, str] = {}
+    for wrapper_id in regime.wrapper_ids:
+        try:
+            for rule in regime.wrapper(wrapper_id).get("withdrawal_rules") or []:
+                _check_supported(regime, wrapper_id, rule)
+        except NotImplementedError as exc:
+            gaps[wrapper_id] = str(exc)
+        else:
+            modelled.append(wrapper_id)
+    return modelled, gaps
