@@ -1050,7 +1050,10 @@ class PortfolioOptimizer:
                 "Les scénarios n'ont pas tous le même nombre de périodes : "
                 "impossible de simuler les trajectoires de patrimoine."
             )
-        return ordered.to_numpy().reshape(n_scenarios, n_periods, len(ordered.columns))
+        tensor: np.ndarray = ordered.to_numpy().reshape(
+            n_scenarios, n_periods, len(ordered.columns)
+        )
+        return tensor
 
     def _net_multiples(
         self,
