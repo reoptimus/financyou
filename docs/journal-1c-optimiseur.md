@@ -57,7 +57,9 @@ est marquée comme telle.
 ## 4. Contraintes utilisateur appliquées à tous les actifs
 
 - **Ouvert le** : 2026-10-06 (étape 1.C.1)
-- **Statut** : ouvert, à traiter en 1.C.3 (contraintes)
+- **Statut** : réglé le 2026-10-07 (étape 1.C.3) : `min_bond_allocation` ne borne
+  plus que `bond` et `max_equity_allocation` que `stock`. Sur le pipeline
+  d'exemple, l'immobilier n'est plus forcé à 5 % (il tombe à 0).
 - **Constat** : `_run_optimization` transforme `min_bond_allocation` en poids
   minimal de **chaque** actif et `max_equity_allocation` en poids maximal de
   **chaque** actif. Sur le pipeline d'exemple, l'immobilier est ainsi forcé à
@@ -161,3 +163,25 @@ est marquée comme telle.
   ligne (`iterrows`). Le calcul vectorisé produit des tableaux identiques à
   l'ancien, vérifié sur 200 scénarios × 30 ans.
 - **Test de garde** : `tests/test_performance.py`, budget de 5 s.
+
+## 12. Contraintes par enveloppe (étape 1.C.3)
+
+- **Ouvert et réglé le** : 2026-10-07
+- **Statut** : réglé, avec une limite déclarée (ci-dessous)
+- **Décision de seb** : l'indice actions des scénarios est éligible au PEA,
+  dans la limite du plafond de versements (150 000 €, régime `fr-2026`).
+- **Après** : l'optimiseur accepte `wrapper_constraints` (pays, millésime,
+  enveloppes ouvrables). Éligibilité et plafonds viennent du régime, jamais du
+  code. Un plafond ne borne pas seul un actif tant qu'une enveloppe sans
+  plafond (CTO, assurance-vie) peut le détenir : la condition de réalisabilité
+  (Hall, sur tous les sous-ensembles d'actifs) devient des inégalités
+  linéaires sur les poids. Un cas impossible (par exemple PEA seul pour
+  1 M€ de versements) lève une erreur française explicite. La frontière
+  efficiente respecte les mêmes contraintes.
+- **Sortie** : `wrapper_allocation` (actif, enveloppe, part des versements,
+  montant). Sur le pipeline d'exemple, le PEA reçoit exactement 150 000 €.
+- **Limite** : le placement est **réalisable, pas optimisé fiscalement**
+  (heuristique : enveloppes plafonnées d'abord). Le moteur fiscal calcule
+  encore l'après-impôt avec les anciens comptes taxable / différé / exonéré :
+  les rendements après impôt ne dépendent pas de l'enveloppe. Un moteur fiscal
+  par enveloppe est la suite logique.

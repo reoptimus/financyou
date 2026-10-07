@@ -262,6 +262,7 @@ def main():
         'investment_time_series': profile_results['investment_time_series'],
         'optimization_objective': optimization_config['optimization_objective'],
         'optimization_params': optimization_config['optimization_params'],
+        'wrapper_constraints': optimization_config.get('wrapper_constraints'),
         'goal_amount': optimization_config['goal_amount']
     }
 
@@ -276,6 +277,10 @@ def main():
     print(f"\nOptimal Portfolio:")
     for asset, weight in optimal['weights'].items():
         print(f"  {asset}: {weight:.1%}")
+
+    if 'wrapper_allocation' in optimization_results:
+        print(f"\nWrapper placement (share of contributions, feasible not tax-optimized):")
+        print(optimization_results['wrapper_allocation'].to_string(index=False))
 
     print(f"\nExpected Performance:")
     print(f"  Expected return: {optimal['expected_return']:.2%}")
