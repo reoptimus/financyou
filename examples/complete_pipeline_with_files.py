@@ -279,7 +279,7 @@ def main():
         print(f"  {asset}: {weight:.1%}")
 
     if 'wrapper_allocation' in optimization_results:
-        print(f"\nWrapper placement (share of contributions, feasible not tax-optimized):")
+        print(f"\nWrapper placement (share of contributions):")
         print(optimization_results['wrapper_allocation'].to_string(index=False))
 
     print(f"\nExpected Performance:")
