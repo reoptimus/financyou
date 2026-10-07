@@ -19,7 +19,14 @@ INPUT STRUCTURE:
         'transaction_costs': dict,
         'rebalancing_threshold': float
     },
-    'asset_universe': dict
+    'asset_universe': dict,
+    'wrapper_constraints': {            # optionnel : éligibilité et plafonds par enveloppe
+        'country': str,                 # pays du régime fiscal ('FR')
+        'fiscal_year': int,             # millésime (défaut : le plus récent validé)
+        'available_wrappers': [str],    # enveloppes ouvrables (défaut : toutes)
+        'asset_classes': dict,          # actif -> classes d'actifs du régime
+        'wrapper_priority': [str]       # ordre de remplissage
+    }
 }
 
 OUTPUT STRUCTURE:
@@ -28,21 +35,37 @@ OUTPUT STRUCTURE:
     'efficient_frontier': pd.DataFrame,
     'simulation_results': dict,         # includes 'rebalancing_schedule'
     'sensitivity_analysis': dict,
-    'goal_analysis': dict
+    'goal_analysis': dict,
+    'wrapper_allocation': pd.DataFrame  # seulement avec 'wrapper_constraints'
 }
 """
 
 import logging
 import time
+from collections.abc import Callable
 from enum import Enum
 
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 
+from investment_calculator.wrapper_allocation import (
+    InfeasibleConstraintsError,
+    WeightConstraints,
+    WrapperRules,
+    build_wrapper_rules,
+    place_in_wrappers,
+    regime_from_config,
+    total_contributions_of,
+)
+
 # Journalisation : logger nommé d'après le module, il hérite donc de la
 # configuration posée par investment_calculator.logging_config.configure_logging().
 logger = logging.getLogger(__name__)
+
+# Actifs sur lesquels portent les contraintes utilisateur de profil.
+BOND_ASSET = 'bond'
+EQUITY_ASSET = 'stock'
 
 
 class OptimizationObjective(Enum):
@@ -110,20 +133,40 @@ class PortfolioOptimizer:
         asset_returns = self._extract_asset_returns(scenarios_df)
         risk_free_rate = self._risk_free_rate(scenarios_df)
 
+        asset_names = list(asset_returns.columns)
+
+        # Enveloppes : éligibilité et plafonds de versement du régime fiscal
+        wrapper_rules: WrapperRules | None = None
+        wrapper_config = validated_config['wrapper_constraints']
+        if wrapper_config:
+            n_periods = len(asset_returns) // asset_returns.index.get_level_values(0).nunique()
+            flows = self._investment_flows(validated_config['investment_time_series'], n_periods)
+            wrapper_rules = build_wrapper_rules(
+                regime_from_config(wrapper_config),
+                asset_names,
+                total_contributions=total_contributions_of(flows),
+                n_periods=n_periods,
+                available_wrappers=wrapper_config.get('available_wrappers'),
+                asset_classes=wrapper_config.get('asset_classes'),
+                wrapper_priority=wrapper_config.get('wrapper_priority'),
+            )
+        weight_constraints = self._build_weight_constraints(
+            asset_names, params, constraints, wrapper_rules
+        )
+
         # Run optimization
         optimal_portfolio = self._run_optimization(
             asset_returns,
             objective,
             params,
-            constraints,
+            weight_constraints,
             risk_free_rate
         )
 
         # Generate efficient frontier
         efficient_frontier = self._generate_efficient_frontier(
             asset_returns,
-            constraints,
-            params,
+            weight_constraints,
             risk_free_rate
         )
 
@@ -160,13 +203,18 @@ class PortfolioOptimizer:
             len(efficient_frontier),
         )
 
-        return {
+        results = {
             'optimal_portfolio': optimal_portfolio,
             'efficient_frontier': efficient_frontier,
             'simulation_results': simulation_results,
             'sensitivity_analysis': sensitivity_analysis,
             'goal_analysis': goal_analysis
         }
+        if wrapper_rules is not None:
+            results['wrapper_allocation'] = place_in_wrappers(
+                optimal_portfolio['weights'], wrapper_rules
+            )
+        return results
 
     def _validate_config(self, config: dict) -> dict:
         """
@@ -187,7 +235,8 @@ class PortfolioOptimizer:
             'investment_time_series': config.get('investment_time_series', pd.DataFrame()),
             'optimization_objective': config.get('optimization_objective', 'max_sharpe'),
             'asset_universe': config.get('asset_universe', {}),
-            'goal_amount': config.get('goal_amount', None)
+            'goal_amount': config.get('goal_amount', None),
+            'wrapper_constraints': config.get('wrapper_constraints') or {}
         }
 
         # Default optimization parameters
@@ -301,12 +350,62 @@ class PortfolioOptimizer:
             )
         return float(scenarios_df['interest_rate'].mean())
 
+    def _build_weight_constraints(
+        self,
+        asset_names: list[str],
+        params: dict,
+        constraints: dict,
+        wrapper_rules: WrapperRules | None,
+    ) -> WeightConstraints:
+        """
+        Bornes de poids par actif et contraintes d'enveloppe.
+
+        ``min_bond_allocation`` ne borne que l'actif ``bond`` et
+        ``max_equity_allocation`` que l'actif ``stock`` : l'ancienne version les
+        appliquait à tous les actifs à la fois.
+        """
+        lower = np.full(len(asset_names), float(params['min_weight']))
+        upper = np.full(len(asset_names), float(params['max_weight']))
+
+        for key, asset, side in (
+            ('min_bond_allocation', BOND_ASSET, 'lower'),
+            ('max_equity_allocation', EQUITY_ASSET, 'upper'),
+        ):
+            if key not in constraints:
+                continue
+            if asset not in asset_names:
+                raise ValueError(
+                    f"La contrainte {key!r} porte sur l'actif {asset!r}, absent des "
+                    f"scénarios ({asset_names}). Retirez la contrainte ou fournissez "
+                    "des scénarios qui contiennent cet actif."
+                )
+            i = asset_names.index(asset)
+            if side == 'lower':
+                lower[i] = max(lower[i], float(constraints[key]))
+            else:
+                upper[i] = min(upper[i], float(constraints[key]))
+
+        if wrapper_rules is None:
+            a_ub, b_ub, explanation = np.zeros((0, len(asset_names))), np.zeros(0), ""
+        else:
+            a_ub, b_ub = wrapper_rules.hall_constraints()
+            explanation = wrapper_rules.explain()
+
+        return WeightConstraints(
+            asset_names=tuple(asset_names),
+            lower=lower,
+            upper=upper,
+            a_ub=a_ub,
+            b_ub=b_ub,
+            explanation=explanation,
+        )
+
     def _run_optimization(
         self,
         asset_returns: pd.DataFrame,
         objective: str,
         params: dict,
-        constraints: dict,
+        weight_constraints: WeightConstraints,
         risk_free_rate: float
     ) -> dict:
         """
@@ -316,52 +415,43 @@ class PortfolioOptimizer:
             asset_returns: Asset return DataFrame
             objective: Optimization objective
             params: Optimization parameters
-            constraints: User constraints
+            weight_constraints: Bornes de poids et contraintes d'enveloppe
             risk_free_rate: Taux sans risque annuel, pour le ratio de Sharpe
 
         Returns:
             Dictionary with optimal weights and statistics
         """
-        n_assets = len(asset_returns.columns)
         asset_names = list(asset_returns.columns)
 
         # Calculate mean returns and covariance
         mean_returns = asset_returns.mean().values
         cov_matrix = asset_returns.cov().values
 
-        # Handle constraints
-        min_weight = max(params['min_weight'], constraints.get('min_bond_allocation', 0.0))
-        max_weight = min(params['max_weight'], constraints.get('max_equity_allocation', 1.0))
-
-        if objective == 'max_sharpe':
-            optimal_weights = self._optimize_max_sharpe(
-                mean_returns, cov_matrix, n_assets, min_weight, max_weight, risk_free_rate
-            )
-        elif objective == 'min_volatility':
-            optimal_weights = self._optimize_min_volatility(
-                cov_matrix, n_assets, min_weight, max_weight
-            )
+        if objective == 'min_volatility':
+            optimal_weights = self._optimize_min_volatility(cov_matrix, weight_constraints)
         elif objective == 'max_return':
-            # Max return = 100% in highest return asset (within constraints)
-            max_return_idx = np.argmax(mean_returns)
-            optimal_weights = np.zeros(n_assets)
-            optimal_weights[max_return_idx] = 1.0
+            # Programme linéaire : tout dans l'actif le plus rentable que les
+            # bornes et les enveloppes autorisent.
+            optimal_weights = weight_constraints.maximize(mean_returns)
         elif objective == 'target_return':
-            target_return = params['target_return']
             optimal_weights = self._optimize_target_return(
-                mean_returns, cov_matrix, n_assets, target_return, min_weight, max_weight,
+                mean_returns, cov_matrix, params['target_return'], weight_constraints,
                 risk_free_rate
             )
         elif objective == 'risk_parity':
-            optimal_weights = self._optimize_risk_parity(
-                cov_matrix, n_assets, min_weight, max_weight
-            )
+            optimal_weights = self._optimize_risk_parity(cov_matrix, weight_constraints)
         elif objective == 'equal_weight':
-            optimal_weights = np.ones(n_assets) / n_assets
+            optimal_weights = np.ones(len(asset_names)) / len(asset_names)
+            if not weight_constraints.is_feasible(optimal_weights):
+                raise InfeasibleConstraintsError(
+                    "L'équipondération ne respecte pas les bornes de poids ou les "
+                    f"contraintes d'enveloppe. {weight_constraints.explanation}"
+                    "Choisissez un autre objectif d'optimisation."
+                )
         else:
-            # Default to max Sharpe
+            # max_sharpe, et défaut pour un objectif inconnu
             optimal_weights = self._optimize_max_sharpe(
-                mean_returns, cov_matrix, n_assets, min_weight, max_weight, risk_free_rate
+                mean_returns, cov_matrix, weight_constraints, risk_free_rate
             )
 
         # Calculate portfolio statistics
@@ -374,9 +464,7 @@ class PortfolioOptimizer:
         max_drawdown = self._estimate_max_drawdown(asset_returns, optimal_weights)
 
         return {
-            # strict=False : longueurs structurellement égales (n_assets) ; on
-            # conserve le comportement historique de zip() plutôt que de lever.
-            'weights': dict(zip(asset_names, optimal_weights, strict=False)),
+            'weights': dict(zip(asset_names, optimal_weights, strict=True)),
             'expected_return': float(portfolio_return),
             'expected_volatility': float(portfolio_volatility),
             'sharpe_ratio': float(sharpe_ratio),
@@ -393,13 +481,45 @@ class PortfolioOptimizer:
             return 0.0
         return float((portfolio_return - risk_free_rate) / portfolio_volatility)
 
+    @staticmethod
+    def _slsqp(
+        objective_fn: Callable[[np.ndarray], float],
+        weight_constraints: WeightConstraints,
+        label: str,
+        extra_constraints: list[dict] | None = None,
+    ) -> np.ndarray | None:
+        """
+        Minimise ``objective_fn`` sous les contraintes de poids avec SLSQP.
+
+        Returns:
+            Les poids, ou ``None`` si le solveur échoue ou rend une allocation
+            qui viole une contrainte (l'appelant choisit le repli).
+        """
+        x0 = weight_constraints.feasible_start()
+        result = minimize(
+            objective_fn,
+            x0,
+            method='SLSQP',
+            bounds=weight_constraints.bounds,
+            constraints=weight_constraints.slsqp_constraints() + (extra_constraints or []),
+        )
+        if not result.success:
+            logger.warning("Échec de convergence SLSQP (%s) : %s", label, result.message)
+            return None
+        weights = np.asarray(result.x)
+        if not weight_constraints.is_feasible(weights, tol=1e-6):
+            logger.warning(
+                "SLSQP (%s) a rendu une allocation qui viole une contrainte de poids ou "
+                "d'enveloppe : elle est écartée.", label,
+            )
+            return None
+        return weights
+
     def _optimize_max_sharpe(
         self,
         mean_returns: np.ndarray,
         cov_matrix: np.ndarray,
-        n_assets: int,
-        min_weight: float,
-        max_weight: float,
+        weight_constraints: WeightConstraints,
         risk_free_rate: float
     ) -> np.ndarray:
         """Optimize for maximum Sharpe ratio (excess return over the risk-free rate)."""
@@ -410,93 +530,60 @@ class PortfolioOptimizer:
                 return 1e10
             return float(-(portfolio_return - risk_free_rate) / portfolio_std)
 
-        constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}]
-        bounds = tuple((min_weight, max_weight) for _ in range(n_assets))
-        x0 = np.ones(n_assets) / n_assets
-
-        result = minimize(neg_sharpe, x0, method='SLSQP', bounds=bounds, constraints=constraints)
-
-        if not result.success:
-            # Repli sur l'équipondération : comportement historique conservé,
-            # mais l'échec de convergence n'est plus silencieux.
-            logger.warning(
-                "Échec de convergence SLSQP (max_sharpe) : %s — repli sur l'équipondération",
-                result.message,
-            )
-            return x0
-        return np.asarray(result.x)
+        weights = self._slsqp(neg_sharpe, weight_constraints, 'max_sharpe')
+        if weights is None:
+            # Repli sur un point réalisable (l'équipondération quand elle l'est).
+            logger.warning("Repli sur l'allocation réalisable de départ (max_sharpe)")
+            return weight_constraints.feasible_start()
+        return weights
 
     def _optimize_min_volatility(
         self,
         cov_matrix: np.ndarray,
-        n_assets: int,
-        min_weight: float,
-        max_weight: float
+        weight_constraints: WeightConstraints,
     ) -> np.ndarray:
         """Optimize for minimum volatility."""
         def portfolio_volatility(weights: np.ndarray) -> float:
             return float(np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights))))
 
-        constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}]
-        bounds = tuple((min_weight, max_weight) for _ in range(n_assets))
-        x0 = np.ones(n_assets) / n_assets
-
-        result = minimize(
-            portfolio_volatility, x0, method='SLSQP', bounds=bounds, constraints=constraints
-        )
-
-        if not result.success:
-            logger.warning(
-                "Échec de convergence SLSQP (min_volatility) : %s — repli sur l'équipondération",
-                result.message,
-            )
-            return x0
-        return np.asarray(result.x)
+        weights = self._slsqp(portfolio_volatility, weight_constraints, 'min_volatility')
+        if weights is None:
+            logger.warning("Repli sur l'allocation réalisable de départ (min_volatility)")
+            return weight_constraints.feasible_start()
+        return weights
 
     def _optimize_target_return(
         self,
         mean_returns: np.ndarray,
         cov_matrix: np.ndarray,
-        n_assets: int,
         target_return: float,
-        min_weight: float,
-        max_weight: float,
+        weight_constraints: WeightConstraints,
         risk_free_rate: float
     ) -> np.ndarray:
         """Optimize for target return with minimum volatility."""
         def portfolio_volatility(weights: np.ndarray) -> float:
             return float(np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights))))
 
-        constraints = [
-            {'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0},
-            {'type': 'eq', 'fun': lambda w: np.dot(w, mean_returns) - target_return}
-        ]
-        bounds = tuple((min_weight, max_weight) for _ in range(n_assets))
-        x0 = np.ones(n_assets) / n_assets
-
-        result = minimize(
-            portfolio_volatility, x0, method='SLSQP', bounds=bounds, constraints=constraints
+        weights = self._slsqp(
+            portfolio_volatility,
+            weight_constraints,
+            f'target_return={target_return:.4f}',
+            extra_constraints=[
+                {'type': 'eq', 'fun': lambda w: np.dot(w, mean_returns) - target_return}
+            ],
         )
-
-        if result.success:
-            return np.asarray(result.x)
-        else:
-            # If target return not achievable, return max Sharpe
-            logger.warning(
-                "Échec de convergence SLSQP (target_return=%.4f) : %s — repli sur max_sharpe",
-                target_return,
-                result.message,
-            )
-            return self._optimize_max_sharpe(
-                mean_returns, cov_matrix, n_assets, min_weight, max_weight, risk_free_rate
-            )
+        if weights is not None:
+            return weights
+        # If target return not achievable, return max Sharpe
+        logger.warning("Repli sur max_sharpe (target_return=%.4f)", target_return)
+        return self._optimize_max_sharpe(
+            mean_returns, cov_matrix, weight_constraints, risk_free_rate
+        )
 
     def _optimize_risk_parity(
         self,
         cov_matrix: np.ndarray,
-        n_assets: int,
-        min_weight: float,
-        max_weight: float
+        weight_constraints: WeightConstraints,
     ) -> np.ndarray:
         """Optimize for risk parity (equal risk contribution)."""
         def risk_parity_objective(weights: np.ndarray) -> float:
@@ -505,21 +592,11 @@ class PortfolioOptimizer:
             risk_contrib = weights * marginal_contrib / np.sqrt(portfolio_variance)
             return float(np.sum((risk_contrib - risk_contrib.mean()) ** 2))
 
-        constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}]
-        bounds = tuple((min_weight, max_weight) for _ in range(n_assets))
-        x0 = np.ones(n_assets) / n_assets
-
-        result = minimize(
-            risk_parity_objective, x0, method='SLSQP', bounds=bounds, constraints=constraints
-        )
-
-        if not result.success:
-            logger.warning(
-                "Échec de convergence SLSQP (risk_parity) : %s — repli sur l'équipondération",
-                result.message,
-            )
-            return x0
-        return np.asarray(result.x)
+        weights = self._slsqp(risk_parity_objective, weight_constraints, 'risk_parity')
+        if weights is None:
+            logger.warning("Repli sur l'allocation réalisable de départ (risk_parity)")
+            return weight_constraints.feasible_start()
+        return weights
 
     def _estimate_max_drawdown(self, asset_returns: pd.DataFrame, weights: np.ndarray) -> float:
         """
@@ -565,18 +642,21 @@ class PortfolioOptimizer:
     def _generate_efficient_frontier(
         self,
         asset_returns: pd.DataFrame,
-        constraints: dict,
-        params: dict,
+        weight_constraints: WeightConstraints,
         risk_free_rate: float,
         n_points: int = 50
     ) -> pd.DataFrame:
         """
         Generate efficient frontier.
 
+        Les points respectent les mêmes bornes de poids et contraintes
+        d'enveloppe que le portefeuille optimal, et les rendements cibles
+        couvrent l'intervalle atteignable sous ces contraintes.
+
         Args:
             asset_returns: Asset returns
-            constraints: User constraints
-            params: Optimization parameters
+            weight_constraints: Bornes de poids et contraintes d'enveloppe
+            risk_free_rate: Taux sans risque annuel
             n_points: Number of points on frontier
 
         Returns:
@@ -584,10 +664,8 @@ class PortfolioOptimizer:
         """
         mean_returns = asset_returns.mean().values
         cov_matrix = asset_returns.cov().values
-        n_assets = len(asset_returns.columns)
 
-        min_return = mean_returns.min()
-        max_return = mean_returns.max()
+        min_return, max_return = weight_constraints.return_range(mean_returns)
 
         target_returns = np.linspace(min_return, max_return, n_points)
 
@@ -598,10 +676,8 @@ class PortfolioOptimizer:
                 weights = self._optimize_target_return(
                     mean_returns,
                     cov_matrix,
-                    n_assets,
                     target_ret,
-                    params['min_weight'],
-                    params['max_weight'],
+                    weight_constraints,
                     risk_free_rate
                 )
 

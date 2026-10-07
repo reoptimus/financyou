@@ -28,6 +28,12 @@
     "rebalancing_threshold": 0.05
   },
 
+  "wrapper_constraints": {
+    "country": "FR",
+    "fiscal_year": 2026
+  },
+  "_wrapper_description": "Eligibilite et plafonds de versement par enveloppe (regime fiscal FR 2026). Le PEA est plafonne a 150 000 EUR de versements.",
+
   "goal_amount": 2000000,
   "_goal_description": "Target wealth for retirement (e.g., $2 million)"
 }
