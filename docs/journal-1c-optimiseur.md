@@ -185,3 +185,28 @@ est marquée comme telle.
   encore l'après-impôt avec les anciens comptes taxable / différé / exonéré :
   les rendements après impôt ne dépendent pas de l'enveloppe. Un moteur fiscal
   par enveloppe est la suite logique.
+
+## 13. Impôt de sortie par enveloppe (étape 1.D.1)
+
+- **Ouvert le** : 2026-10-07
+- **Statut** : première brique livrée, intégration à l'optimiseur ouverte (1.D.2)
+- **Livré** : `investment_calculator/wrapper_tax.py::liquidation_tax` calcule
+  l'impôt dû à la liquidation totale d'une enveloppe à partir de la règle de
+  retrait du régime (taux, taux social, abattement, seuil de primes). Pris en
+  charge : CTO, PEA, assurance-vie, Livret A. Aucun taux dans le code.
+- **Refusé explicitement** (`NotImplementedError`) : PER (barème et déduction à
+  l'entrée) et immobilier direct (revenus fonciers annuels, abattements pour
+  durée de détention).
+- **Choix de modélisation à faire valider par un fiscaliste** : liquidation
+  totale à l'horizon ; durée de détention depuis l'ouverture ; pas d'imputation
+  des moins-values ; assurance-vie au-dessus du seuil de primes, plus-value
+  répartie au prorata des primes sous et au-dessus du seuil ; abattement imputé
+  d'abord sur la fraction au taux le plus bas (hypothèse prudente, non
+  confrontée à la doctrine).
+- **Reste ouvert** : prélèvements sociaux à 18,6 % (journal fiscalité, à
+  trancher par seb) : ce module reprend le taux du régime tel quel.
+- **Suite (1.D.2)** : l'optimiseur simule chaque enveloppe comme une poche
+  distincte sur les rendements avant impôt, y applique l'impôt annuel des
+  enveloppes imposées au fil de l'eau et `liquidation_tax` à l'horizon. Sans
+  cela, appliquer l'impôt de sortie sur des rendements déjà après impôt
+  (moteur fiscal historique) compterait l'impôt deux fois.
