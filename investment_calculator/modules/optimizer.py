@@ -26,7 +26,7 @@ OUTPUT STRUCTURE:
 {
     'optimal_portfolio': dict,
     'efficient_frontier': pd.DataFrame,
-    'simulation_results': dict,
+    'simulation_results': dict,         # includes 'rebalancing_schedule'
     'sensitivity_analysis': dict,
     'goal_analysis': dict
 }
@@ -130,6 +130,7 @@ class PortfolioOptimizer:
         # Run simulations
         simulation_results = self._run_simulations(
             scenarios_df,
+            asset_returns,
             optimal_portfolio,
             validated_config['investment_time_series'],
             params
@@ -644,151 +645,190 @@ class PortfolioOptimizer:
     def _run_simulations(
         self,
         scenarios_df: pd.DataFrame,
+        asset_returns: pd.DataFrame,
         optimal_portfolio: dict,
         time_series: pd.DataFrame,
         params: dict
     ) -> dict:
         """
-        Run Monte Carlo simulations with optimal portfolio.
+        Simulate the optimal portfolio over every scenario, with rebalancing costs.
+
+        Le portefeuille dérive avec les rendements de chaque actif. À chaque fin
+        d'année, si l'écart d'un poids à sa cible dépasse
+        ``rebalancing_threshold``, il est ramené à la cible et les coûts de
+        transaction (``transaction_costs``, en fraction du montant échangé) sont
+        prélevés sur le patrimoine. Les versements sont investis à
+        l'allocation cible ; les retraits sont prélevés au prorata des
+        positions. Le calcul est vectorisé sur les scénarios.
 
         Args:
-            scenarios_df: After-tax scenarios
+            scenarios_df: After-tax scenarios (for the inflation column)
+            asset_returns: Periodic asset returns from _extract_asset_returns
             optimal_portfolio: Optimal portfolio weights
-            time_series: Investment time series
-            params: Parameters
+            time_series: Investment time series (flows, from Module 3)
+            params: Parameters (transaction_costs, rebalancing_threshold)
 
         Returns:
-            Dictionary with simulation results
+            Dictionary with terminal wealth, wealth paths, rebalancing schedule
+            and statistics
         """
-        weights = optimal_portfolio['weights']
+        asset_names = list(asset_returns.columns)
+        target = np.array([optimal_portfolio['weights'][a] for a in asset_names])
+        costs = self._transaction_cost_rates(asset_names, params['transaction_costs'])
+        threshold = float(params['rebalancing_threshold'])
 
-        # Simulate terminal wealth for each scenario
-        terminal_wealth_list = []
-        wealth_paths = []
-
-        scenario_ids = scenarios_df['scenario_id'].unique()
-
-        for scenario_id in scenario_ids:
-            scenario_data = scenarios_df[scenarios_df['scenario_id'] == scenario_id]
-
-            # Simulate wealth path for this scenario
-            wealth_path, terminal_wealth = self._simulate_wealth_path(
-                scenario_data,
-                weights,
-                time_series,
-                params
+        if 'scenario_id' not in (asset_returns.index.names or []):
+            raise ValueError("Les scénarios doivent porter une colonne 'scenario_id'.")
+        ordered = asset_returns.sort_index()
+        scenario_ids = ordered.index.get_level_values(0).unique()
+        n_scenarios = len(scenario_ids)
+        n_periods = len(ordered) // n_scenarios
+        if n_scenarios * n_periods != len(ordered):
+            raise ValueError(
+                "Les scénarios n'ont pas tous le même nombre de périodes : "
+                "impossible de simuler les trajectoires de patrimoine."
             )
+        returns = ordered.to_numpy().reshape(n_scenarios, n_periods, len(asset_names))
+        flows = self._investment_flows(time_series, n_periods)
 
-            entry = {'scenario_id': scenario_id, 'wealth': terminal_wealth}
-            if 'inflation' in scenario_data.columns:
-                # Patrimoine en euros constants de la date de départ.
-                price_index = float(np.prod(1.0 + scenario_data['inflation'].to_numpy()))
-                entry['real_wealth'] = terminal_wealth / price_index
-            terminal_wealth_list.append(entry)
+        holdings = np.tile(flows[0] * target, (n_scenarios, 1))
+        wealth_paths = np.zeros((n_scenarios, n_periods + 1))
+        wealth_paths[:, 0] = flows[0]
+        total_costs = np.zeros(n_scenarios)
+        schedule = []
 
-            wealth_paths.append(wealth_path)
+        for t in range(n_periods):
+            holdings = holdings * (1.0 + returns[:, t, :])
+            wealth = holdings.sum(axis=1)
 
-        terminal_wealth_df = pd.DataFrame(terminal_wealth_list)
+            flow = flows[t + 1]
+            if flow >= 0:
+                holdings = holdings + flow * target
+            else:
+                share = np.divide(
+                    holdings, wealth[:, None], out=np.zeros_like(holdings),
+                    where=wealth[:, None] > 0,
+                )
+                holdings = holdings + flow * share
+            holdings = np.where(holdings.sum(axis=1, keepdims=True) > 0, holdings, 0.0)
+            wealth = holdings.sum(axis=1)
 
-        # Calculate percentiles
-        wealth_values = terminal_wealth_df['wealth'].values
+            current = np.divide(
+                holdings, wealth[:, None], out=np.tile(target, (n_scenarios, 1)),
+                where=wealth[:, None] > 0,
+            )
+            rebalance = np.abs(current - target).max(axis=1) > threshold
+            trades = np.abs(target * wealth[:, None] - holdings)
+            period_costs = np.where(rebalance, trades @ costs, 0.0)
+            holdings = np.where(
+                rebalance[:, None], (wealth - period_costs)[:, None] * target, holdings
+            )
+            total_costs += period_costs
+            wealth_paths[:, t + 1] = holdings.sum(axis=1)
+
+            turnover = np.divide(
+                trades.sum(axis=1) / 2.0, wealth, out=np.zeros_like(wealth), where=wealth > 0
+            )
+            schedule.append({
+                'period': t + 1,
+                'share_of_scenarios_rebalanced': float(rebalance.mean()),
+                'mean_turnover': float(np.where(rebalance, turnover, 0.0).mean()),
+                'mean_cost': float(period_costs.mean()),
+            })
+
+        terminal = wealth_paths[:, -1]
+        terminal_wealth_df = pd.DataFrame({
+            'scenario_id': scenario_ids,
+            'wealth': terminal,
+            'transaction_costs': total_costs,
+        })
+        if 'inflation' in scenarios_df.columns:
+            # Patrimoine en euros constants de la date de départ.
+            inflation = (
+                scenarios_df.set_index(list(ordered.index.names))['inflation']
+                .sort_index().to_numpy().reshape(n_scenarios, n_periods)
+            )
+            terminal_wealth_df['real_wealth'] = terminal / np.prod(1.0 + inflation, axis=1)
         terminal_wealth_df['percentile'] = terminal_wealth_df['wealth'].rank(pct=True) * 100
 
-        # Calculate statistics
         statistics = {
-            'mean_terminal_wealth': float(wealth_values.mean()),
-            'median_terminal_wealth': float(np.median(wealth_values)),
-            'std_terminal_wealth': float(wealth_values.std()),
+            'mean_terminal_wealth': float(terminal.mean()),
+            'median_terminal_wealth': float(np.median(terminal)),
+            'std_terminal_wealth': float(terminal.std()),
             'percentiles': {
-                '5': float(np.percentile(wealth_values, 5)),
-                '25': float(np.percentile(wealth_values, 25)),
-                '50': float(np.percentile(wealth_values, 50)),
-                '75': float(np.percentile(wealth_values, 75)),
-                '95': float(np.percentile(wealth_values, 95))
+                '5': float(np.percentile(terminal, 5)),
+                '25': float(np.percentile(terminal, 25)),
+                '50': float(np.percentile(terminal, 50)),
+                '75': float(np.percentile(terminal, 75)),
+                '95': float(np.percentile(terminal, 95))
             },
-            'var_95': float(np.percentile(wealth_values, 5)),
-            'cvar_95': float(wealth_values[wealth_values <= np.percentile(wealth_values, 5)].mean())
+            'var_95': float(np.percentile(terminal, 5)),
+            'cvar_95': float(terminal[terminal <= np.percentile(terminal, 5)].mean()),
+            'mean_transaction_costs': float(total_costs.mean()),
         }
 
-        # Create wealth paths DataFrame
-        max_len = max(len(path) for path in wealth_paths)
-        wealth_paths_array = np.zeros((len(scenario_ids), max_len))
-
-        for i, path in enumerate(wealth_paths):
-            wealth_paths_array[i, :len(path)] = path
-
         wealth_paths_df = pd.DataFrame(
-            wealth_paths_array,
-            columns=[f"year_{i}" for i in range(max_len)]
+            wealth_paths,
+            columns=[f"year_{i}" for i in range(n_periods + 1)]
         )
         wealth_paths_df.insert(0, 'scenario_id', scenario_ids)
 
         return {
             'terminal_wealth': terminal_wealth_df,
             'wealth_paths': wealth_paths_df,
+            'rebalancing_schedule': pd.DataFrame(schedule),
             'statistics': statistics
         }
 
-    def _simulate_wealth_path(
-        self,
-        scenario_data: pd.DataFrame,
-        weights: dict,
-        time_series: pd.DataFrame,
-        params: dict
-    ) -> tuple[np.ndarray, float]:
+    @staticmethod
+    def _transaction_cost_rates(asset_names: list[str], cost_params: dict) -> np.ndarray:
         """
-        Simulate wealth path for a single scenario.
+        Taux de coût de transaction de chaque actif, dans l'ordre de ``asset_names``.
 
-        Args:
-            scenario_data: Scenario data
-            weights: Portfolio weights
-            time_series: Investment time series
-            params: Parameters
-
-        Returns:
-            Tuple of (wealth_path, terminal_wealth)
+        Les clés historiques sont au pluriel (``stocks``, ``bonds``) alors que
+        les actifs sont au singulier (``stock``, ``bond``) : on accepte les deux.
+        Un actif sans coût déclaré est une erreur, pas un coût nul.
         """
-        # Simplified simulation
-        # In reality, this would incorporate contributions, withdrawals, rebalancing
+        rates = []
+        for asset in asset_names:
+            for key in (asset, f"{asset}s"):
+                if key in cost_params:
+                    rates.append(float(cost_params[key]))
+                    break
+            else:
+                raise ValueError(
+                    f"Aucun coût de transaction pour l'actif {asset!r} dans "
+                    f"optimization_params['transaction_costs'] ({sorted(cost_params)}). "
+                    "Ajoutez-le, éventuellement à 0 si c'est le cas."
+                )
+        return np.array(rates)
 
-        n_periods = len(scenario_data)
-        wealth_path = np.zeros(n_periods + 1)
+    @staticmethod
+    def _investment_flows(time_series: pd.DataFrame, n_periods: int) -> np.ndarray:
+        """
+        Flux d'investissement : ``flows[0]`` est la mise initiale, ``flows[t]``
+        le versement (positif) ou le retrait (négatif) de fin d'année ``t``.
 
-        # Initial wealth (from time_series if available)
-        initial_wealth = 10000  # Default
-        if not time_series.empty and 'contribution' in time_series.columns:
-            initial_wealth = time_series['contribution'].iloc[0] if len(time_series) > 0 else 10000
-
-        wealth_path[0] = initial_wealth
-
-        # Iterate through periods
-        for t in range(n_periods):
-            period_data = scenario_data.iloc[t]
-
-            # Calculate portfolio return
-            portfolio_return = 0.0
-            for asset, weight in weights.items():
-                return_col = f"{asset}_return_after_tax"
-                if return_col not in period_data:
-                    return_col = f"{asset}_after_tax"
-                if return_col not in period_data:
-                    return_col = f"{asset}_return"
-
-                if return_col in period_data:
-                    portfolio_return += weight * period_data[return_col]
-
-            # Add contribution/withdrawal if available
-            contribution = 0.0
-            if not time_series.empty and t < len(time_series):
-                if 'net_flow' in time_series.columns:
-                    contribution = time_series.iloc[t]['net_flow']
-
-            # Update wealth
-            wealth_path[t + 1] = wealth_path[t] * (1 + portfolio_return) + contribution
-
-        terminal_wealth = wealth_path[-1]
-
-        return wealth_path, terminal_wealth
+        La série vient du module 3. Sans elle, il n'y a pas de patrimoine à
+        projeter : on le dit plutôt que d'inventer une mise initiale.
+        """
+        if time_series.empty:
+            raise ValueError(
+                "investment_time_series est vide : la projection du patrimoine a "
+                "besoin des versements et retraits (module 3, user_profile)."
+            )
+        if 'net_flow' in time_series.columns:
+            series = time_series['net_flow']
+        elif 'contribution' in time_series.columns:
+            series = time_series['contribution'] - time_series.get('withdrawal', 0.0)
+        else:
+            raise ValueError(
+                "investment_time_series doit contenir 'net_flow' ou 'contribution'."
+            )
+        flows = np.zeros(n_periods + 1)
+        values = series.to_numpy(dtype=float)[: n_periods + 1]
+        flows[: len(values)] = values
+        return flows
 
     def _sensitivity_analysis(
         self,
@@ -876,7 +916,9 @@ class PortfolioOptimizer:
 # Convenience functions
 def quick_optimize(
     scenarios_df: pd.DataFrame,
-    objective: str = 'max_sharpe'
+    objective: str = 'max_sharpe',
+    *,
+    initial_wealth: float,
 ) -> dict:
     """
     Quick optimization with default parameters.
@@ -884,16 +926,18 @@ def quick_optimize(
     Args:
         scenarios_df: Scenarios DataFrame
         objective: Optimization objective
+        initial_wealth: Mise initiale, sans versement ultérieur
 
     Returns:
         Optimization results
 
     Example:
-        >>> results = quick_optimize(scenarios_df, 'max_sharpe')
+        >>> results = quick_optimize(scenarios_df, 'max_sharpe', initial_wealth=10_000)
     """
     config = {
         'scenarios': scenarios_df,
-        'optimization_objective': objective
+        'optimization_objective': objective,
+        'investment_time_series': pd.DataFrame({'period': [0], 'net_flow': [initial_wealth]}),
     }
 
     optimizer = PortfolioOptimizer()

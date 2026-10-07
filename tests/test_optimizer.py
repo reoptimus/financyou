@@ -600,6 +600,87 @@ class TestEfficientFrontierProperties:
         assert min_vol == pytest.approx(res['efficient_frontier']['volatility'].min(), rel=1e-3)
 
 
+class TestRebalancingAndTransactionCosts:
+    """Étape 1.C.4 : rééquilibrage à seuil et coûts de transaction appliqués."""
+
+    @staticmethod
+    def _run(threshold, cost_scale=1.0, num_scenarios=100):
+        config = create_test_optimizer_config()
+        config['scenarios'] = create_test_scenarios(num_scenarios=num_scenarios)
+        config['optimization_objective'] = 'equal_weight'
+        config['user_constraints'] = {}
+        config['optimization_params'] = {
+            'rebalancing_threshold': threshold,
+            'transaction_costs': {
+                'stocks': 0.001 * cost_scale,
+                'bonds': 0.0005 * cost_scale,
+                'real_estate': 0.002 * cost_scale,
+            },
+        }
+        return optimizer.PortfolioOptimizer().optimize(config)['simulation_results']
+
+    def test_constant_mix_without_costs_matches_closed_form(self):
+        """
+        Sans coût et rééquilibré chaque année, le patrimoine suit
+        W(t+1) = W(t)·(1 + w·r(t+1)) + versement(t+1), sans double compte de la
+        mise initiale.
+        """
+        sim = self._run(threshold=0.0, cost_scale=0.0, num_scenarios=3)
+        config = create_test_optimizer_config()
+        scenario = create_test_scenarios(num_scenarios=3)
+        first = scenario[scenario['scenario_id'] == scenario['scenario_id'].iloc[0]]
+        asset_columns = ['stock_return', 'bond_return', 'real_estate_return']
+        portfolio_returns = first[asset_columns].mean(axis=1)
+        flows = config['investment_time_series']['contribution'].to_numpy()
+
+        expected = [flows[0]]
+        for t, r in enumerate(portfolio_returns, start=1):
+            flow = flows[t] if t < len(flows) else 0.0
+            expected.append(expected[-1] * (1 + r) + flow)
+
+        path = sim['wealth_paths'].iloc[0, 1:].to_numpy(dtype=float)
+        np.testing.assert_allclose(path, expected, rtol=1e-12)
+
+    def test_costs_reduce_net_wealth_monotonically(self):
+        medians = [
+            self._run(threshold=0.0, cost_scale=scale)['statistics']['median_terminal_wealth']
+            for scale in (0.0, 1.0, 5.0, 20.0)
+        ]
+        assert all(a > b for a, b in zip(medians, medians[1:], strict=False))
+
+    def test_cost_drag_increases_with_turnover(self):
+        """À turnover croissant, la performance nette (après coûts) décroît."""
+        thresholds = (1.0, 0.10, 0.02, 0.0)  # du moins au plus de rééquilibrages
+        turnovers, drags = [], []
+        for threshold in thresholds:
+            gross = self._run(threshold, cost_scale=0.0)['terminal_wealth']['wealth']
+            net = self._run(threshold, cost_scale=1.0)
+            turnovers.append(net['rebalancing_schedule']['mean_turnover'].sum())
+            drags.append(float((gross - net['terminal_wealth']['wealth']).mean()))
+
+        assert turnovers == sorted(turnovers)
+        assert drags[0] == pytest.approx(0.0, abs=1e-9)
+        assert all(a < b for a, b in zip(drags, drags[1:], strict=False))
+
+    def test_rebalancing_schedule_reports_real_activity(self):
+        schedule = self._run(threshold=0.05)['rebalancing_schedule']
+        assert len(schedule) == 10
+        assert schedule['share_of_scenarios_rebalanced'].between(0, 1).all()
+        assert schedule['mean_cost'].sum() > 0
+
+    def test_missing_transaction_cost_is_an_error(self):
+        config = create_test_optimizer_config()
+        config['optimization_params'] = {'transaction_costs': {'stocks': 0.001}}
+        with pytest.raises(ValueError, match='coût de transaction'):
+            optimizer.PortfolioOptimizer().optimize(config)
+
+    def test_missing_investment_flows_is_an_error(self):
+        config = create_test_optimizer_config()
+        config['investment_time_series'] = pd.DataFrame()
+        with pytest.raises(ValueError, match='investment_time_series'):
+            optimizer.PortfolioOptimizer().optimize(config)
+
+
 class TestConvenienceFunctions:
     """Test convenience functions."""
 
@@ -608,7 +689,7 @@ class TestConvenienceFunctions:
         if hasattr(optimizer, 'quick_optimize'):
             scenarios_df = create_test_scenarios()
 
-            results = optimizer.quick_optimize(scenarios_df)
+            results = optimizer.quick_optimize(scenarios_df, initial_wealth=10_000)
 
             assert 'optimal_portfolio' in results
 
