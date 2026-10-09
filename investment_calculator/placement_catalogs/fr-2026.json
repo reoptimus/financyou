@@ -1,0 +1,107 @@
+{
+  "$schema": "./schema.json",
+  "schema_version": "0.1",
+  "id": "fr-2026",
+  "country": "FR",
+  "tax_regime": "fr-2026",
+
+  "status": "draft",
+  "validation": {
+    "validated_by": null,
+    "validated_on": null
+  },
+
+  "sources": [
+    {
+      "label": "France Assureurs, étude sur les frais de gestion de l'assurance-vie publiée le 6 mai 2026, citée par Toutsurmesfinances : 0,66 % sur les supports en euros et 0,88 % sur les unités de compte en 2025, inchangés depuis 2024. Source secondaire : l'étude elle-même n'a pas été consultée.",
+      "url": "https://www.toutsurmesfinances.com/actualites/a/assurance-vie-ce-que-les-frais-de-gestion-ont-coute-en-2025",
+      "consulted_on": "2026-10-09",
+      "covers": ["av_fonds_euros.fees.annual_rate", "av_uc_actions.fees.annual_rate"]
+    },
+    {
+      "label": "Arrêté du 27 janvier 2021 relatif aux taux d'intérêt des produits d'épargne réglementée, article 1er : taux du Livret A = le plus élevé entre la moyenne arithmétique de l'€STR et de l'inflation hors tabac (moyennes semestrielles), arrondie au dixième de point, et 0,5 %.",
+      "url": "https://legifrance.gouv.fr/jorf/id/JORFTEXT000043114027",
+      "consulted_on": "2026-10-09",
+      "covers": ["livret_a.support"]
+    },
+    {
+      "label": "Service-public.gouv.fr, fiche F2365 : « Les opérations effectuées sur le livret A (ouverture, dépôt, retrait et clôture) sont gratuites. »",
+      "url": "https://www.service-public.gouv.fr/particuliers/vosdroits/F2365",
+      "consulted_on": "2026-10-09",
+      "covers": ["livret_a.fees"]
+    }
+  ],
+
+  "known_gaps": [
+    "STATUT BROUILLON : rédigé par un agent le 2026-10-09, à valider par une personne. Le chargeur le refuse par défaut.",
+    "Frais du compte-titres et du PEA (courtage, droits de garde, frais du fonds ou de l'ETF) : non sourcés, ils dépendent du courtier et du support. Laissés à null.",
+    "Frais d'entrée de l'assurance-vie : de zéro (contrats en ligne) à plusieurs pour cent selon le contrat ; aucune moyenne sourcée. Laissés à null.",
+    "Frais propres aux fonds logés en unités de compte : les 0,88 % de France Assureurs sont les frais du contrat, pas ceux des fonds. Non comptés.",
+    "Fonds en euros : la part du rendement obligataire servie (pass_through) n'est pas calibrée ; il faut la tirer de l'historique du taux moyen servi (ACPR) rapporté au rendement des OAT. La garantie en capital est-elle nette ou brute des frais de gestion selon les contrats ? Non tranché : floor_rate laissé à null.",
+    "Livret A : le GSE n'a ni €STR ni inflation hors tabac. Le taux court (interest_rate) et l'inflation du GSE en tiennent lieu. Les dérogations du gouvernement à la formule ne sont pas modélisables.",
+    "PEA : le GSE n'a qu'une série actions, sans distinction entre actions européennes (seules éligibles) et mondiales.",
+    "Hors périmètre de ce premier catalogue : obligations en PEA, immobilier (en attente de la correction de RealEstateModel), PER (formule de sortie non sourcée)."
+  ],
+
+  "placements": [
+    {
+      "id": "cto_actions",
+      "label": "Actions en compte-titres",
+      "wrapper": "cto",
+      "asset_class": "equity",
+      "support": { "model": "gse_series", "series": "stock_return" },
+      "fees": { "entry_rate": null, "annual_rate": null }
+    },
+    {
+      "id": "cto_obligations",
+      "label": "Obligations en compte-titres",
+      "wrapper": "cto",
+      "asset_class": "bond",
+      "support": { "model": "gse_series", "series": "bond_return" },
+      "fees": { "entry_rate": null, "annual_rate": null }
+    },
+    {
+      "id": "pea_actions",
+      "label": "Actions européennes en PEA",
+      "wrapper": "pea",
+      "asset_class": "equity_eu",
+      "support": { "model": "gse_series", "series": "stock_return" },
+      "fees": { "entry_rate": null, "annual_rate": null }
+    },
+    {
+      "id": "av_fonds_euros",
+      "label": "Assurance-vie, fonds en euros",
+      "wrapper": "assurance_vie",
+      "asset_class": "euro_fund",
+      "support": {
+        "model": "euro_fund",
+        "reference_series": "bond_return",
+        "pass_through": null,
+        "floor_rate": null
+      },
+      "fees": { "entry_rate": null, "annual_rate": 0.0066 }
+    },
+    {
+      "id": "av_uc_actions",
+      "label": "Assurance-vie, unités de compte actions",
+      "wrapper": "assurance_vie",
+      "asset_class": "equity",
+      "support": { "model": "gse_series", "series": "stock_return" },
+      "fees": { "entry_rate": null, "annual_rate": 0.0088 }
+    },
+    {
+      "id": "livret_a",
+      "label": "Livret A",
+      "wrapper": "livret_a",
+      "asset_class": "money_market",
+      "support": {
+        "model": "regulated_rate",
+        "short_rate_weight": 0.5,
+        "inflation_weight": 0.5,
+        "rounding_step": 0.001,
+        "floor_rate": 0.005
+      },
+      "fees": { "entry_rate": 0.0, "annual_rate": 0.0 }
+    }
+  ]
+}

@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/reoptimus/financyou/schemas/placement_catalog-0.1.json",
+  "title": "Catalogue des placements FinancYou (GSE+)",
+  "description": "Les placements accessibles à un foyer : un support construit à partir du GSE, logé dans une enveloppe du régime fiscal, avec ses frais. Pas de fiscalité ici (voir tax_regimes/) ; pas d'hypothèse de marché générale (voir market_assumptions/). Voir docs/adr/0002-le-placement-est-l-unite-d-optimisation.md.",
+  "type": "object",
+  "required": ["schema_version", "id", "country", "tax_regime", "status", "sources", "known_gaps", "placements"],
+  "additionalProperties": false,
+
+  "$defs": {
+    "rate_or_unknown": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Fraction (0,0066 pour 0,66 %). null : valeur pas encore sourcée, refusée dans un catalogue validé."
+    },
+    "gse_series": {
+      "enum": ["stock_return", "bond_return", "real_estate_return", "interest_rate", "inflation"],
+      "description": "Colonne des scénarios produits par modules/scenario_generator.py."
+    }
+  },
+
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+$" },
+    "id": { "type": "string", "pattern": "^[a-z]{2}-\\d{4}$" },
+    "country": { "type": "string", "pattern": "^[A-Z]{2}$" },
+    "tax_regime": {
+      "type": "string",
+      "description": "Identifiant du régime fiscal dont les enveloppes sont référencées, par exemple fr-2026."
+    },
+    "status": { "enum": ["draft", "validated"] },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "validated_by": { "type": ["string", "null"] },
+        "validated_on": { "type": ["string", "null"], "format": "date" }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["label"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": "string" },
+          "url": { "type": "string" },
+          "consulted_on": { "type": "string", "format": "date" },
+          "covers": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "known_gaps": { "type": "array", "items": { "type": "string" } },
+
+    "placements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "wrapper", "asset_class", "support", "fees"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "label": { "type": "string" },
+          "wrapper": {
+            "type": "string",
+            "description": "Identifiant d'une enveloppe du régime fiscal (wrappers[].id)."
+          },
+          "asset_class": {
+            "type": "string",
+            "description": "Classe d'actifs, à prendre parmi les eligible_assets de l'enveloppe."
+          },
+          "support": {
+            "oneOf": [
+              {
+                "type": "object",
+                "description": "Le rendement d'une série du GSE, tel quel.",
+                "required": ["model", "series"],
+                "additionalProperties": false,
+                "properties": {
+                  "model": { "const": "gse_series" },
+                  "series": { "$ref": "#/$defs/gse_series" }
+                }
+              },
+              {
+                "type": "object",
+                "description": "Fonds en euros : capital garanti, rendement servi tiré du rendement obligataire du GSE.",
+                "required": ["model", "reference_series", "pass_through", "floor_rate"],
+                "additionalProperties": false,
+                "properties": {
+                  "model": { "const": "euro_fund" },
+                  "reference_series": { "$ref": "#/$defs/gse_series" },
+                  "pass_through": {
+                    "$ref": "#/$defs/rate_or_unknown",
+                    "description": "Part du rendement de référence servie avant frais de gestion."
+                  },
+                  "floor_rate": { "$ref": "#/$defs/rate_or_unknown" }
+                }
+              },
+              {
+                "type": "object",
+                "description": "Taux réglementé : max(plancher, arrondi(poids_taux × taux court + poids_inflation × inflation)).",
+                "required": ["model", "short_rate_weight", "inflation_weight", "rounding_step", "floor_rate"],
+                "additionalProperties": false,
+                "properties": {
+                  "model": { "const": "regulated_rate" },
+                  "short_rate_weight": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "inflation_weight": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "rounding_step": { "type": "number", "exclusiveMinimum": 0 },
+                  "floor_rate": { "type": "number", "minimum": 0 }
+                }
+              }
+            ]
+          },
+          "fees": {
+            "type": "object",
+            "required": ["entry_rate", "annual_rate"],
+            "additionalProperties": false,
+            "properties": {
+              "entry_rate": { "$ref": "#/$defs/rate_or_unknown" },
+              "annual_rate": {
+                "$ref": "#/$defs/rate_or_unknown",
+                "description": "Frais prélevés chaque année sur l'encours."
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
