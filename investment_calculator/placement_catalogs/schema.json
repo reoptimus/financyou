@@ -96,7 +96,10 @@
                     "$ref": "#/$defs/rate_or_unknown",
                     "description": "Part du rendement de référence servie avant frais de gestion."
                   },
-                  "floor_rate": { "$ref": "#/$defs/rate_or_unknown" }
+                  "floor_rate": {
+                    "$ref": "#/$defs/rate_or_unknown",
+                    "description": "Plancher du rendement servi, net des frais de gestion."
+                  }
                 }
               },
               {
