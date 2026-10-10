@@ -116,6 +116,15 @@ class TestProfileValidation:
         assert 'risk_profile' in results
         assert 'validation_warnings' in results
 
+    def test_contraintes_incompatibles_refusees(self):
+        """Actions au plus + obligations au moins > 100 % : erreur, pas de valeurs inventées."""
+        profile_config = create_simple_test_profile()
+        profile_config['user_profile']['constraints'].update(
+            max_equity_allocation=0.7, min_bond_allocation=0.4
+        )
+        with pytest.raises(ValueError, match="incompatibles"):
+            user_profile.UserProfileManager().process(profile_config)
+
     def test_validation_warnings_list(self):
         """Test that validation warnings is a list."""
         manager = user_profile.UserProfileManager()

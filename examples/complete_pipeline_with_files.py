@@ -238,6 +238,8 @@ def main():
         target_return=params.get('target_return'),
         risk_free_placement=optimization_config.get('risk_free_placement'),
         goal_amount=optimization_config['goal_amount'],
+        max_equity=validated['constraints']['max_equity_allocation'],
+        min_bond=validated['constraints']['min_bond_allocation'],
     )
 
     optimal = optimization_results['optimal_portfolio']
@@ -250,7 +252,7 @@ def main():
     for placement_id, weight in optimal['weights'].items():
         print(f"  {placement_id}: {weight:.1%}")
     if optimization_results['constraints_explanation']:
-        print(f"\nContribution caps: {optimization_results['constraints_explanation']}")
+        print(f"\nConstraints: {optimization_results['constraints_explanation']}")
 
     sharpe = optimal['sharpe_ratio']
     print(f"\nExpected Performance (net of fees and taxes, annualized over {horizon} years):")

@@ -28,6 +28,7 @@ import pandas as pd
 from scipy.optimize import minimize
 
 from investment_calculator.modules.net_returns import NetReturns, net_return_moments
+from investment_calculator.modules.placements import asset_exposures
 from investment_calculator.placement_catalog import PlacementCatalog
 from investment_calculator.wrapper_allocation import (
     TOLERANCE,
@@ -73,9 +74,12 @@ def placement_constraints(
     n_periods: int,
     lower: float = 0.0,
     upper: float = 1.0,
+    max_equity: float | None = None,
+    min_bond: float | None = None,
 ) -> WeightConstraints:
     """
-    Bornes de poids et plafonds de versement des enveloppes, pour des placements.
+    Bornes de poids, plafonds de versement des enveloppes et contraintes du
+    profil (actions au plus, obligations au moins), pour des placements.
 
     Args:
         catalog: catalogue qui rattache chaque placement à son enveloppe.
@@ -83,10 +87,20 @@ def placement_constraints(
         total_contributions: versements totaux de l'utilisateur, en euros.
         n_periods: nombre d'années de versement, pour les plafonds annuels.
         lower, upper: bornes communes du poids de chaque placement.
+        max_equity: part du portefeuille exposée aux actions, au plus ; ``None``
+            pour ne pas contraindre. L'exposition de chaque placement vient de
+            :func:`~investment_calculator.modules.placements.asset_exposures`.
+        min_bond: part du portefeuille exposée aux obligations, au moins.
 
     Raises:
-        ValueError: versements nuls ou négatifs.
+        ValueError: versements nuls ou négatifs, ou contrainte du profil hors de
+            [0, 1].
     """
+    for name, value in (("max_equity", max_equity), ("min_bond", min_bond)):
+        if value is not None and not 0.0 <= value <= 1.0:
+            raise ValueError(
+                f"{name} = {value} : une part du portefeuille est comprise entre 0 et 1."
+            )
     if total_contributions <= 0:
         raise ValueError(
             f"Les versements totaux doivent être strictement positifs (reçu "
@@ -107,6 +121,19 @@ def placement_constraints(
         notes.append(
             f"L'enveloppe {wrapper_id} accepte {_euros(capacity)} sur "
             f"{_euros(total_contributions)} versés, soit {share:.1%} au plus. "
+        )
+    exposures = asset_exposures(catalog, list(placement_ids))
+    if max_equity is not None:
+        rows.append(exposures["equity"].to_numpy())
+        bounds.append(max(max_equity - TOLERANCE, 0.0))
+        notes.append(f"Le profil limite les actions à {max_equity:.0%} du portefeuille. ")
+    if min_bond is not None:
+        # Au moins min_bond : s'écrit -exposition·w <= -min_bond.
+        rows.append(-exposures["bond"].to_numpy())
+        bounds.append(-min(min_bond + TOLERANCE, 1.0))
+        notes.append(
+            f"Le profil demande au moins {min_bond:.0%} d'obligations "
+            f"(fonds en euros compté au prorata de son actif). "
         )
     n = len(placement_ids)
     return WeightConstraints(

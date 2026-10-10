@@ -17,7 +17,9 @@ from investment_calculator.modules.placement_optimizer import (
     optimize_horizon,
     placement_constraints,
 )
+from investment_calculator.modules.placements import asset_exposures
 from investment_calculator.placement_catalog import PlacementCatalog, load_placement_catalog
+from investment_calculator.wrapper_allocation import InfeasibleConstraintsError
 
 FR_2026 = load_placement_catalog("fr-2026")
 PEA_CAP = FR_2026.regime.wrapper("pea")["contribution_limit"]
@@ -177,3 +179,63 @@ def test_frontiere_efficiente_croissante_et_contrainte() -> None:
     assert (np.diff(frontier["volatility"]) > -1e-9).all()
     with pytest.raises(ValueError, match="au moins 2 points"):
         efficient_frontier(net, 1, _free(net), n_points=1)
+
+
+def test_exposition_des_placements_de_fr_2026() -> None:
+    exposures = asset_exposures(FR_2026, FR_2026.placement_ids)
+    assert exposures.loc["cto_actions"].tolist() == [1.0, 0.0]
+    assert exposures.loc["cto_obligations"].tolist() == [0.0, 1.0]
+    assert exposures.loc["livret_a"].tolist() == [0.0, 0.0]
+    # Fonds en euros au prorata de son actif général (choix de seb, 2026-10-10).
+    assets = FR_2026.placement("av_fonds_euros")["support"]["assets"]
+    equity = sum(a["weight"] for a in assets if a.get("series") == "stock_return")
+    bond = sum(a["weight"] for a in assets if a["kind"] == "book_bonds")
+    assert exposures.loc["av_fonds_euros"].tolist() == pytest.approx([equity, bond])
+
+
+def _three_placements() -> NetReturns:
+    rng = np.random.default_rng(1)
+    returns = np.column_stack([
+        0.08 + 0.15 * rng.standard_normal(2000),   # actions
+        0.03 + 0.05 * rng.standard_normal(2000),   # obligations
+        0.025 + 0.01 * rng.standard_normal(2000),  # fonds euros
+    ])
+    return _net(["cto_actions", "cto_obligations", "av_fonds_euros"], returns)
+
+
+def test_plafond_d_actions_du_profil_respecte() -> None:
+    net = _three_placements()
+    free = optimize_horizon(net, 1, _free(net), risk_aversion=1.0)
+    assert free.weights["cto_actions"] > 0.9  # sans contrainte, presque tout en actions
+    constraints = placement_constraints(
+        FR_2026, net.placement_ids, total_contributions=10_000.0, n_periods=1, max_equity=0.5
+    )
+    weights = optimize_horizon(net, 1, constraints, risk_aversion=1.0).weights
+    exposure = asset_exposures(FR_2026, net.placement_ids)["equity"]
+    assert float(weights @ exposure) <= 0.5 + 1e-6
+    assert "50%" in constraints.explanation
+
+
+def test_minimum_d_obligations_du_profil_respecte() -> None:
+    net = _three_placements()
+    constraints = placement_constraints(
+        FR_2026, net.placement_ids, total_contributions=10_000.0, n_periods=1, min_bond=0.6
+    )
+    weights = optimize_horizon(net, 1, constraints, risk_aversion=1.0).weights
+    exposure = asset_exposures(FR_2026, net.placement_ids)["bond"]
+    assert float(weights @ exposure) >= 0.6 - 1e-6
+
+
+def test_contraintes_du_profil_impossibles() -> None:
+    # Ni actions ni obligations possibles avec le seul Livret A : 50 % d'obligations
+    # au moins est hors d'atteinte, l'erreur le dit.
+    net = _net(["livret_a"], np.full((10, 1), 0.02))
+    constraints = placement_constraints(
+        FR_2026, ["livret_a"], total_contributions=1_000.0, n_periods=1, min_bond=0.5
+    )
+    with pytest.raises(InfeasibleConstraintsError, match="contraintes du profil"):
+        optimize_horizon(net, 1, constraints, risk_aversion=5.0)
+    with pytest.raises(ValueError, match="entre 0 et 1"):
+        placement_constraints(
+            FR_2026, ["livret_a"], total_contributions=1_000.0, n_periods=1, max_equity=1.5
+        )

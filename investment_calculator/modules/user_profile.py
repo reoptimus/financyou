@@ -320,13 +320,16 @@ class UserProfileManager:
         # Constraints
         constraints = user_profile.get('constraints', {})
 
+        # Sans contrainte saisie : 100 % d'actions permis, aucune obligation exigée.
         max_equity = constraints.get('max_equity_allocation', 1.0)
         min_bond = constraints.get('min_bond_allocation', 0.0)
 
         if max_equity + min_bond > 1.0:
-            warnings.append("Max equity + min bond > 100%, adjusting constraints")
-            max_equity = 0.8
-            min_bond = 0.1
+            raise ValueError(
+                f"Contraintes incompatibles : au plus {max_equity:.0%} d'actions et au "
+                f"moins {min_bond:.0%} d'obligations dépassent 100 %. Baissez l'une des "
+                "deux (max_equity_allocation, min_bond_allocation)."
+            )
 
         validated['constraints'] = {
             'max_equity_allocation': max_equity,

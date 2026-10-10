@@ -106,10 +106,11 @@ class WeightConstraints:
         if point is None:
             raise InfeasibleConstraintsError(
                 "Aucune allocation ne respecte à la fois les bornes de poids, "
-                "l'éligibilité des enveloppes et leurs plafonds de versement. "
-                f"{self.explanation}"
+                "l'éligibilité des enveloppes, leurs plafonds de versement et les "
+                f"contraintes du profil. {self.explanation}"
                 "Ajoutez une enveloppe sans plafond qui accepte ces actifs, "
-                "ou assouplissez les bornes de poids."
+                "assouplissez les bornes de poids, ou les contraintes d'actions et "
+                "d'obligations du profil."
             )
         return point
 
