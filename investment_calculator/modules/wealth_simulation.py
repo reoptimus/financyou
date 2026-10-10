@@ -19,6 +19,10 @@ comme dans GSE++ : la valeur projetée est la somme exacte des trajectoires de
 chaque versement (assemblage linéaire). Seul l'impôt de sortie, calculé par
 enveloppe, n'est pas linéaire.
 
+L'épargne existante (:class:`Holding`) reste dans ses placements : elle n'est
+ni réallouée ni soumise à des frais d'entrée, garde son prix de revient et
+l'ancienneté de son enveloppe, et rejoint l'enveloppe à la liquidation.
+
 Les retraits avant l'horizon ne sont pas modélisés : ils sont refusés.
 """
 
@@ -38,7 +42,34 @@ from investment_calculator.wrapper_tax import liquidation_tax
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["WealthSimulation", "contribution_flows", "simulate_wealth"]
+__all__ = ["Holding", "WealthSimulation", "contribution_flows", "simulate_wealth"]
+
+
+@dataclass(frozen=True)
+class Holding:
+    """
+    Épargne existante, laissée dans un placement du catalogue.
+
+    Attributes:
+        placement_id: placement du catalogue qui la porte.
+        value: valeur actuelle, en euros.
+        contributions: versements cumulés, en euros : prix de revient d'un
+            compte-titres ou d'un PEA, primes versées d'une assurance-vie.
+        years_held: ancienneté de l'enveloppe, en années.
+    """
+
+    placement_id: str
+    value: float
+    contributions: float
+    years_held: float
+
+    def __post_init__(self) -> None:
+        if self.value < 0 or self.contributions < 0 or self.years_held < 0:
+            raise ValueError(
+                f"Épargne existante sur {self.placement_id!r} : valeur, versements et "
+                f"ancienneté doivent être positifs (reçu {self.value}, "
+                f"{self.contributions}, {self.years_held})."
+            )
 
 
 @dataclass
@@ -130,6 +161,7 @@ def simulate_wealth(
     weights: pd.Series,
     flows: np.ndarray,
     horizon: int,
+    holdings: tuple[Holding, ...] = (),
 ) -> WealthSimulation:
     """
     Projeter le patrimoine net d'une allocation entre placements.
@@ -144,6 +176,9 @@ def simulate_wealth(
             ``optimize_horizon(...).weights``.
         flows: versements par année (:func:`contribution_flows`).
         horizon: année de liquidation, de 1 à la durée des scénarios.
+        holdings: épargne existante, laissée dans ses placements. L'ancienneté
+            d'une enveloppe est la plus grande entre ``profile.wrapper_seniority``
+            et celle de ses avoirs.
 
     Raises:
         ValueError: poids qui ne somment pas à 1, placement absent de GSE+,
@@ -151,7 +186,8 @@ def simulate_wealth(
     """
     if not np.isclose(float(weights.sum()), 1.0) or (weights < -TOLERANCE).any():
         raise ValueError(f"Les poids doivent être positifs et sommer à 1 (somme {weights.sum()}).")
-    missing = [p for p in weights.index if p not in gross.columns]
+    missing = [p for p in [*weights.index, *(h.placement_id for h in holdings)]
+               if p not in gross.columns]
     if missing:
         raise ValueError(
             f"Placements absents de GSE+ : {missing}. Disponibles : {list(gross.columns)}."
@@ -172,10 +208,11 @@ def simulate_wealth(
     entry_fees = entry_fee_rates(catalog, list(weights.index))
     paths = np.zeros((n_scenarios, horizon + 1))
     books: dict[str, _WrapperBook] = {}
-    for pid, weight in weights.items():
-        if weight <= 0:
-            continue
-        placement = catalog.placement(str(pid))
+    seniority = {w: float(y) for w, y in profile.wrapper_seniority.items()}
+
+    def project(pid: str, paid: np.ndarray, fee: float, value0: float, basis0: float) -> None:
+        """Projeter une position : mise de départ, puis versements de fin d'année."""
+        placement = catalog.placement(pid)
         wrapper = str(placement["wrapper"])
         spec = regime.wrapper(wrapper)
         returns = ordered[pid].to_numpy(dtype=float).reshape(n_scenarios, n_periods)[:, :horizon]
@@ -189,10 +226,8 @@ def simulate_wealth(
             income_yield = _distributed_yield(
                 str(support.get("series") or support.get("reference_series")), returns
             )
-        fee = entry_fees[str(pid)]
-        paid = flows * float(weight)
-        value = np.full(n_scenarios, paid[0] * (1.0 - fee))
-        basis = np.full(n_scenarios, paid[0])
+        value = np.full(n_scenarios, value0 + paid[0] * (1.0 - fee))
+        basis = np.full(n_scenarios, basis0 + paid[0])
         taxed = np.zeros(n_scenarios)
         paths[:, 0] += value
         for t in range(horizon):
@@ -211,8 +246,18 @@ def simulate_wealth(
         book.value += value
         book.basis += basis
         book.taxed += taxed
-        book.paid += float(paid.sum())
+        book.paid += basis0 + float(paid.sum())
         book.annual_income = book.annual_income or income_yield is not None
+
+    for pid, weight in weights.items():
+        if weight > 0:
+            project(str(pid), flows * float(weight), entry_fees[str(pid)], 0.0, 0.0)
+    no_flow = np.zeros(horizon + 1)
+    for holding in holdings:
+        # Ni frais d'entrée ni réallocation : l'avoir garde sa valeur et son prix de revient.
+        project(holding.placement_id, no_flow, 0.0, holding.value, holding.contributions)
+        wrapper = str(catalog.placement(holding.placement_id)["wrapper"])
+        seniority[wrapper] = max(seniority.get(wrapper, 0.0), holding.years_held)
 
     net_terminal = np.zeros(n_scenarios)
     contributions: dict[str, float] = {}
@@ -224,7 +269,7 @@ def simulate_wealth(
             wrapper,
             contributions=book.paid,
             final_value=book.value,
-            holding_years=float(profile.wrapper_seniority.get(wrapper, 0.0)) + horizon,
+            holding_years=seniority.get(wrapper, 0.0) + horizon,
             couple=profile.couple,
             cost_basis=book.basis if book.annual_income else None,
         )

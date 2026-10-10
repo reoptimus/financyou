@@ -129,12 +129,16 @@ class WeightConstraints:
         return low, high
 
 
-def contribution_capacity(regime: TaxRegime, wrapper_id: str, n_periods: int) -> float:
+def contribution_capacity(
+    regime: TaxRegime, wrapper_id: str, n_periods: int, already_paid: float = 0.0
+) -> float:
     """
     Versements cumulés qu'une enveloppe accepte sur ``n_periods`` années, en euros.
 
     ``inf`` pour une enveloppe sans plafond ; un plafond annuel est multiplié
-    par le nombre d'années.
+    par le nombre d'années. ``already_paid`` (versements déjà faits sur une
+    enveloppe détenue) s'impute sur un plafond à vie, pas sur un plafond annuel,
+    qui porte sur les années à venir.
 
     Raises:
         ValueError: période de plafond inconnue du code.
@@ -145,7 +149,7 @@ def contribution_capacity(regime: TaxRegime, wrapper_id: str, n_periods: int) ->
         return float("inf")
     period = wrapper.get("contribution_limit_period", "lifetime")
     if period == "lifetime":
-        return float(limit)
+        return max(float(limit) - already_paid, 0.0)
     if period == "annual":
         return float(limit) * n_periods
     raise ValueError(

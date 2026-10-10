@@ -20,7 +20,7 @@ Michaud n'est pas encore porté (``Script_Bootstrap_V5_quick.R`` manque au dép�
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -76,6 +76,7 @@ def placement_constraints(
     upper: float = 1.0,
     max_equity: float | None = None,
     min_bond: float | None = None,
+    existing_contributions: Mapping[str, float] | None = None,
 ) -> WeightConstraints:
     """
     Bornes de poids, plafonds de versement des enveloppes et contraintes du
@@ -91,6 +92,8 @@ def placement_constraints(
             pour ne pas contraindre. L'exposition de chaque placement vient de
             :func:`~investment_calculator.modules.placements.asset_exposures`.
         min_bond: part du portefeuille exposée aux obligations, au moins.
+        existing_contributions: versements déjà faits, par enveloppe, sur
+            l'épargne existante ; ils s'imputent sur les plafonds à vie.
 
     Raises:
         ValueError: versements nuls ou négatifs, ou contrainte du profil hors de
@@ -111,7 +114,8 @@ def placement_constraints(
     bounds: list[float] = []
     notes: list[str] = []
     for wrapper_id in dict.fromkeys(wrappers):
-        capacity = contribution_capacity(catalog.regime, wrapper_id, n_periods)
+        already_paid = (existing_contributions or {}).get(wrapper_id, 0.0)
+        capacity = contribution_capacity(catalog.regime, wrapper_id, n_periods, already_paid)
         share = capacity / total_contributions
         if share >= 1.0 - TOLERANCE:
             continue

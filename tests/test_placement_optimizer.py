@@ -239,3 +239,11 @@ def test_contraintes_du_profil_impossibles() -> None:
         placement_constraints(
             FR_2026, ["livret_a"], total_contributions=1_000.0, n_periods=1, max_equity=1.5
         )
+
+
+def test_versements_existants_s_imputent_sur_le_plafond_du_pea() -> None:
+    constraints = placement_constraints(
+        FR_2026, ["pea_actions", "cto_actions"], total_contributions=300_000.0, n_periods=10,
+        existing_contributions={"pea": 100_000.0},
+    )
+    assert constraints.b_ub[0] == pytest.approx((PEA_CAP - 100_000.0) / 300_000.0, abs=1e-6)

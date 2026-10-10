@@ -295,21 +295,35 @@ class UserProfileManager:
                 "Consider debt reduction first."
             )
 
-        if current_savings > 0:
-            # Lacune déclarée : l'épargne existante doit rester dans ses placements
-            # (choix du 2026-10-10), ce qui demande de saisir où elle est placée, son
-            # ancienneté et sa plus-value latente. Ce n'est pas encore fait.
+        # Épargne existante détaillée par placement : elle reste en place (choix du
+        # 2026-10-10). Chaque avoir donne son placement, sa valeur, ses versements
+        # cumulés et l'ancienneté de son enveloppe.
+        holdings = []
+        for k, item in enumerate(financial.get('existing_holdings', [])):
+            missing = [f for f in ('placement', 'value', 'contributions', 'years_held')
+                       if f not in item]
+            if missing:
+                raise ValueError(
+                    f"L'avoir existant n° {k + 1} n'a pas {missing}. Chaque avoir donne "
+                    "placement, value (valeur actuelle), contributions (versements "
+                    "cumulés) et years_held (ancienneté de l'enveloppe)."
+                )
+            holdings.append({f: item[f] for f in ('placement', 'value', 'contributions',
+                                                   'years_held')})
+        unplaced = current_savings - sum(float(h['value']) for h in holdings)
+        if unplaced > 0.5:
+            # Lacune déclarée : sans détail par placement, cette épargne n'est pas projetée.
             warnings.append(
-                f"L'épargne existante ({current_savings:,.0f}) n'est pas encore prise en "
-                "compte : la projection ne porte que sur les versements de l'échéancier."
+                f"L'épargne existante non détaillée ({unplaced:,.0f}) n'est pas prise en "
+                "compte : décrivez-la dans financial_situation.existing_holdings."
             )
-            logger.warning("Épargne existante de %.0f non projetée (lacune connue).",
-                           current_savings)
+            logger.warning("Épargne existante de %.0f non détaillée, non projetée.", unplaced)
 
         validated['financial_situation'] = {
             'current_savings': current_savings,
             'annual_income': annual_income,
             'annual_expenses': annual_expenses,
+            'existing_holdings': holdings,
             'debt': {
                 'mortgage': debt.get('mortgage', 0),
                 'student_loans': debt.get('student_loans', 0),

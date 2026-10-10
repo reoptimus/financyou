@@ -640,6 +640,25 @@ class TestNoInventedDefaults:
         results = user_profile.UserProfileManager().process(profile_config)
         assert results['validated_profile']['financial_situation']['annual_expenses'] is None
 
+    def test_epargne_existante_detaillee_non_signalee(self):
+        profile_config = create_simple_test_profile()
+        profile_config['user_profile']['financial_situation']['existing_holdings'] = [
+            {'placement': 'pea_actions', 'value': 50000, 'contributions': 40000,
+             'years_held': 6},
+        ]
+        results = user_profile.UserProfileManager().process(profile_config)
+        assert not any("pargne existante" in w for w in results['validation_warnings'])
+        holdings = results['validated_profile']['financial_situation']['existing_holdings']
+        assert holdings[0]['placement'] == 'pea_actions'
+
+    def test_avoir_existant_incomplet_refuse(self):
+        profile_config = create_simple_test_profile()
+        profile_config['user_profile']['financial_situation']['existing_holdings'] = [
+            {'placement': 'pea_actions', 'value': 50000},
+        ]
+        with pytest.raises(ValueError, match="contributions"):
+            user_profile.UserProfileManager().process(profile_config)
+
     def test_epargne_existante_signalee_comme_lacune(self):
         results = user_profile.UserProfileManager().process(create_simple_test_profile())
         assert any("pargne existante" in w for w in results['validation_warnings'])
