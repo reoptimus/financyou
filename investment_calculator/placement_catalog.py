@@ -32,6 +32,7 @@ __all__ = [
     "CatalogValidationError",
     "DraftCatalogError",
     "PlacementCatalog",
+    "list_placement_catalogs",
     "load_placement_catalog",
 ]
 
@@ -154,6 +155,27 @@ class PlacementCatalog:
             f"Aucun placement {placement_id!r} dans le catalogue {self.id}. "
             f"Placements disponibles : {self.placement_ids}."
         )
+
+
+def list_placement_catalogs(*, include_draft: bool = False) -> list[str]:
+    """
+    Identifiants des catalogues livrés, triés.
+
+    C'est la source de vérité pour l'interface : les catalogues proposés se
+    déduisent des fichiers présents. Les brouillons sont exclus par défaut.
+    """
+    ids = []
+    for path in sorted(PACKAGE_CATALOG_DIR.glob("*.json")):
+        if path.name == SCHEMA_PATH.name:
+            continue
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Catalogue illisible, ignoré : %s (%s)", path, exc)
+            continue
+        if include_draft or document.get("status") != "draft":
+            ids.append(path.stem)
+    return ids
 
 
 def load_placement_catalog(

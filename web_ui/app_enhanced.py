@@ -17,8 +17,11 @@ import streamlit as st
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from investment_calculator import tax_regime
-from investment_calculator.modules import optimizer, scenario_generator, tax_engine, user_profile
+from investment_calculator.placement_catalog import (
+    list_placement_catalogs,
+    load_placement_catalog,
+)
+from web_ui.pipeline import run_projection
 
 # Page configuration
 st.set_page_config(
@@ -74,14 +77,25 @@ def render_sidebar():
         st.markdown("---")
         st.markdown("### ⚙️ Settings")
 
-        # La liste des pays proposés se déduit des régimes fiscaux livrés,
-        # jamais d'une énumération figée — voir
-        # investment_calculator/tax_regimes/README.md.
-        available_regimes = tax_regime.list_regimes(include_draft=False)
-        st.session_state.jurisdiction = st.selectbox(
-            "Tax Jurisdiction",
-            [r.country_code for r in available_regimes],
-            key="jurisdiction_select"
+        # Les catalogues proposés se déduisent des fichiers livrés ; chacun
+        # porte le régime fiscal de son pays et de son millésime (ADR 0002).
+        st.session_state.catalog_id = st.selectbox(
+            "Placement catalog",
+            list_placement_catalogs(),
+            key="catalog_select"
+        )
+        placement_ids = load_placement_catalog(st.session_state.catalog_id).placement_ids
+        reference_options = ["None", *placement_ids]
+        st.session_state.risk_free_placement = st.selectbox(
+            "Sharpe ratio reference placement",
+            reference_options,
+            index=reference_options.index("livret_a") if "livret_a" in placement_ids else 0,
+            key="reference_select"
+        )
+        st.session_state.risk_aversion = st.slider(
+            "Risk aversion (λ)",
+            0.5, 20.0, 5.0, 0.5,
+            key="risk_aversion_slider"
         )
 
         st.session_state.num_scenarios = st.slider(
@@ -480,17 +494,20 @@ def display_projection_results(results):
                 st.metric("Expected Return", f"{portfolio['expected_return']:.2%}")
 
         with col2:
-            if 'volatility' in portfolio:
-                st.metric("Portfolio Risk", f"{portfolio['volatility']:.2%}")
+            if 'expected_volatility' in portfolio:
+                st.metric("Portfolio Risk", f"{portfolio['expected_volatility']:.2%}")
 
         with col3:
-            if 'sharpe_ratio' in portfolio:
+            if portfolio.get('sharpe_ratio') is not None:
                 st.metric("Sharpe Ratio", f"{portfolio['sharpe_ratio']:.2f}")
 
         with col4:
-            personal_info = results['profile']['validated_profile']['personal_info']
-            time_horizon = personal_info['life_expectancy'] - personal_info['age']
-            st.metric("Time Horizon", f"{time_horizon} years")
+            st.metric("Time Horizon", f"{portfolio['horizon']} years")
+
+        st.caption(
+            f"Net of fees and taxes, annualized over {portfolio['horizon']} years "
+            f"(catalog {portfolio['placement_catalog']})."
+        )
 
     with tabs[1]:
         st.markdown("### Projections Including Your Projects")
@@ -509,7 +526,7 @@ def display_projection_results(results):
         if st.checkbox("Show Optimal Portfolio Weights"):
             weights = results['optimization']['optimal_portfolio']['weights']
             df = pd.DataFrame({
-                'Asset': list(weights.keys()),
+                'Placement': list(weights.keys()),
                 'Weight': list(weights.values())
             })
             st.dataframe(df.style.format({'Weight': '{:.2%}'}))
@@ -544,9 +561,9 @@ def page_analysis():
                 fig = px.scatter(
                     frontier,
                     x='volatility',
-                    y='expected_return',
-                    title='Efficient Frontier',
-                    labels={'volatility': 'Risk (Volatility)', 'expected_return': 'Expected Return'}
+                    y='return',
+                    title='Efficient Frontier (net of fees and taxes)',
+                    labels={'volatility': 'Risk (Volatility)', 'return': 'Expected Return'}
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -599,46 +616,14 @@ def run_comprehensive_analysis():
             'withdrawal_schedule': []
         }
 
-        # Run pipeline
-        gen = scenario_generator.ScenarioGenerator(random_seed=42)
-        scenario_results = gen.generate({
-            'num_scenarios': st.session_state.get('num_scenarios', 100),
-            'time_horizon': (
-                profile_config['user_profile']['investment_preferences']['time_horizon']
-            ),
-            'timestep': 1.0,
-            'use_stochastic': False
-        })
-
-        regime = tax_regime.load_regime(st.session_state.get('jurisdiction', 'FR'))
-        tax_eng = tax_engine.TaxEngine()
-        tax_results = tax_eng.apply_taxes({
-            'scenarios': scenario_results['scenarios'],
-            'tax_config': regime.to_scenario_tax_config(reference_household_income=50_000),
-            'investment_allocation': {
-                'stocks': {'taxable': 0.6, 'tax_deferred': 0.3, 'tax_free': 0.1},
-                'bonds': {'taxable': 0.5, 'tax_deferred': 0.4, 'tax_free': 0.1},
-                'real_estate': {'taxable': 0.7, 'tax_deferred': 0.2, 'tax_free': 0.1}
-            }
-        })
-
-        manager = user_profile.UserProfileManager()
-        profile_results = manager.process(profile_config)
-
-        opt = optimizer.PortfolioOptimizer()
-        optimization_results = opt.optimize({
-            'scenarios': tax_results['after_tax_scenarios'],
-            'user_constraints': profile_config['user_profile']['constraints'],
-            'investment_time_series': profile_results['investment_time_series'],
-            'optimization_objective': 'max_sharpe'
-        })
-
-        return {
-            'scenarios': scenario_results,
-            'tax': tax_results,
-            'profile': profile_results,
-            'optimization': optimization_results
-        }
+        reference = st.session_state.get('risk_free_placement', 'None')
+        return run_projection(
+            profile_config,
+            num_scenarios=st.session_state.get('num_scenarios', 100),
+            catalog_id=st.session_state.get('catalog_id', 'fr-2026'),
+            risk_aversion=st.session_state.get('risk_aversion', 5.0),
+            risk_free_placement=None if reference == 'None' else reference,
+        )
 
     except Exception as e:
         st.error(f"Error during analysis: {str(e)}")
