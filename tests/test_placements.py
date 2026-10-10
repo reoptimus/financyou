@@ -93,6 +93,14 @@ def test_fonds_euros_plancher_avant_frais() -> None:
     np.testing.assert_allclose(served.to_numpy(), [(1 + 0.036) * (1 - 0.0066) - 1, -0.0066])
 
 
+# Le modèle annuel que fr-2026 utilisait avant l'actif général : point de comparaison.
+ANNUAL_EURO_FUND = {
+    "support": {"model": "euro_fund", "reference_series": "bond_return",
+                "pass_through": 0.85, "floor_rate": 0.0},
+    "fees": {"entry_rate": 0.0055, "annual_rate": 0.0067},
+}
+
+
 def _smoothed(renewal_years: float | None = 8.0, initial_yield: float | None = 0.02) -> dict:
     return {
         "support": {"model": "euro_fund_smoothed", "reference_series": "interest_rate",
@@ -151,7 +159,9 @@ def test_fonds_euros_lisse_volatilite_realiste_sur_le_gse() -> None:
     scenarios = ScenarioGenerator(random_seed=42).generate(
         {"num_scenarios": 200, "time_horizon": 30, "timestep": 1.0, "use_stochastic": False}
     )["scenarios"]
-    annual = build_gross_placements(scenarios, FR_2026, ["av_fonds_euros"])["av_fonds_euros"]
+    annual = build_gross_placements(
+        scenarios, _catalog(av_fonds_euros=ANNUAL_EURO_FUND), ["av_fonds_euros"]
+    )["av_fonds_euros"]
     smoothed = build_gross_placements(
         scenarios, _catalog(av_fonds_euros=_smoothed()), ["av_fonds_euros"]
     )["av_fonds_euros"]
@@ -326,7 +336,9 @@ def test_actif_general_volatilite_realiste_sur_le_gse() -> None:
         assets, initial_rate=0.043, release_divisor=2.65, annual_fee=0.0067,
     ))
     general = build_gross_placements(scenarios, catalog, ["av_fonds_euros"])["av_fonds_euros"]
-    annual = build_gross_placements(scenarios, FR_2026, ["av_fonds_euros"])["av_fonds_euros"]
+    annual = build_gross_placements(
+        scenarios, _catalog(av_fonds_euros=ANNUAL_EURO_FUND), ["av_fonds_euros"]
+    )["av_fonds_euros"]
     year_to_year = general.groupby(level="scenario_id").diff().abs().mean()
     assert general.std() < 0.3 * annual.std()
     assert year_to_year < 0.01
@@ -346,3 +358,18 @@ def test_actif_general_accepte_par_le_schema() -> None:
                 {"kind": "gse_series", "weight": 0.1, "series": "stock_return"},
             ])["support"]
     pc._validate(document, pc.PACKAGE_CATALOG_DIR / "test.json", load_regime("fr-2026"))
+
+
+def test_fonds_euros_fr_2026_calage() -> None:
+    """Preuve du calage de fr-2026 : sur 1 000 scénarios, le fonds euros sert en
+    moyenne entre 2 % et 3,5 % net (2,63 % observé en 2024, ACPR n° 175) et varie
+    de moins d'un point par an."""
+    from investment_calculator.modules.scenario_generator import ScenarioGenerator
+
+    scenarios = ScenarioGenerator(random_seed=42).generate(
+        {"num_scenarios": 1000, "time_horizon": 30, "timestep": 1.0, "use_stochastic": False}
+    )["scenarios"]
+    served = build_gross_placements(scenarios, FR_2026, ["av_fonds_euros"])["av_fonds_euros"]
+    year_to_year = served.groupby(level="scenario_id").diff().abs().mean()
+    assert 0.02 < served.mean() < 0.035
+    assert year_to_year < 0.01
