@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from investment_calculator.modules import scenario_generator, user_profile
-from investment_calculator.modules.placement_plan import plan_placements
+from investment_calculator.modules.placement_plan import plan_placements, profile_holdings
 from investment_calculator.placement_catalog import load_placement_catalog
 
 
@@ -56,6 +56,7 @@ def run_projection(
         risk_free_placement=risk_free_placement,
         max_equity=profile_results['validated_profile']['constraints']['max_equity_allocation'],
         min_bond=profile_results['validated_profile']['constraints']['min_bond_allocation'],
+        holdings=profile_holdings(profile_results['validated_profile']),
     )
     return {
         'scenarios': scenario_results,

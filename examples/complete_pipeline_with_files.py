@@ -40,7 +40,7 @@ from investment_calculator.modules import (
     user_profile,
     reporting
 )
-from investment_calculator.modules.placement_plan import plan_placements
+from investment_calculator.modules.placement_plan import plan_placements, profile_holdings
 from investment_calculator.modules.placements import build_gross_placements
 from investment_calculator.placement_catalog import load_placement_catalog
 
@@ -240,6 +240,7 @@ def main():
         goal_amount=optimization_config['goal_amount'],
         max_equity=validated['constraints']['max_equity_allocation'],
         min_bond=validated['constraints']['min_bond_allocation'],
+        holdings=profile_holdings(validated),
     )
 
     optimal = optimization_results['optimal_portfolio']

@@ -40,7 +40,11 @@ from investment_calculator.modules.placement_optimizer import (
     placement_constraints,
 )
 from investment_calculator.modules.placements import build_gross_placements
-from investment_calculator.modules.wealth_simulation import contribution_flows, simulate_wealth
+from investment_calculator.modules.wealth_simulation import (
+    Holding,
+    contribution_flows,
+    simulate_wealth,
+)
 from investment_calculator.placement_catalog import PlacementCatalog
 
 logger = logging.getLogger(__name__)
@@ -62,6 +66,19 @@ def max_drawdown(gross: pd.DataFrame, weights: pd.Series, horizon: int) -> float
     return float(np.median((1.0 - value / peak).max(axis=1)))
 
 
+def profile_holdings(validated_profile: dict[str, Any]) -> tuple[Holding, ...]:
+    """Épargne existante du profil validé (``user_profile``), en avoirs à projeter."""
+    return tuple(
+        Holding(
+            placement_id=str(h["placement"]),
+            value=float(h["value"]),
+            contributions=float(h["contributions"]),
+            years_held=float(h["years_held"]),
+        )
+        for h in validated_profile["financial_situation"].get("existing_holdings", [])
+    )
+
+
 def plan_placements(
     scenarios: pd.DataFrame,
     catalog: PlacementCatalog,
@@ -78,6 +95,7 @@ def plan_placements(
     frontier_points: int = 20,
     max_equity: float | None = None,
     min_bond: float | None = None,
+    holdings: tuple[Holding, ...] = (),
 ) -> dict[str, Any]:
     """
     Allocation optimale entre les placements du catalogue et patrimoine projeté.
@@ -97,6 +115,10 @@ def plan_placements(
         max_equity, min_bond: contraintes du profil (``max_equity_allocation``,
             ``min_bond_allocation``) ; voir
             :func:`~investment_calculator.modules.placement_optimizer.placement_constraints`.
+        holdings: épargne existante, laissée dans ses placements : elle n'est pas
+            réallouée, s'ajoute au patrimoine projeté, donne son ancienneté à son
+            enveloppe et s'impute sur les plafonds à vie. L'optimisation ne porte
+            que sur les nouveaux versements.
 
     Raises:
         ValueError: placement de référence inconnu, ou entrées refusées par
@@ -114,15 +136,28 @@ def plan_placements(
             "L'objectif 'max_sharpe' demande risk_free_placement, le placement dont le "
             "rendement net moyen sert de taux sans risque (par exemple 'livret_a')."
         )
+    unknown = [h.placement_id for h in holdings if h.placement_id not in placement_ids]
+    if unknown:
+        raise ValueError(
+            f"Épargne existante sur des placements absents du catalogue {catalog.id} : "
+            f"{unknown}. Placements disponibles : {placement_ids}."
+        )
     flows = contribution_flows(time_series, horizon)
     total = float(flows.sum())
+    seniority = dict(wrapper_seniority or {})
+    existing: dict[str, float] = {}
+    for holding in holdings:
+        wrapper = str(catalog.placement(holding.placement_id)["wrapper"])
+        seniority[wrapper] = max(seniority.get(wrapper, 0.0), holding.years_held)
+        existing[wrapper] = existing.get(wrapper, 0.0) + holding.contributions
     profile = TaxProfile(
-        invested_amount=total, couple=couple, wrapper_seniority=wrapper_seniority or {}
+        invested_amount=total + sum(existing.values()), couple=couple,
+        wrapper_seniority=seniority,
     )
     net = build_net_returns(gross, catalog, profile, [horizon])
     constraints = placement_constraints(
         catalog, placement_ids, total_contributions=total, n_periods=horizon,
-        max_equity=max_equity, min_bond=min_bond,
+        max_equity=max_equity, min_bond=min_bond, existing_contributions=existing,
     )
     risk_free_rate = (
         float(net.annualized(horizon)[risk_free_placement].mean())
@@ -136,7 +171,7 @@ def plan_placements(
     weights = allocation.weights.clip(lower=0.0)
     weights = weights / weights.sum()
 
-    simulation = simulate_wealth(gross, catalog, profile, weights, flows, horizon)
+    simulation = simulate_wealth(gross, catalog, profile, weights, flows, horizon, holdings)
     sharpe = (
         (allocation.expected_return - risk_free_rate) / allocation.volatility
         if risk_free_rate is not None and allocation.volatility > 0
@@ -173,6 +208,12 @@ def plan_placements(
         "constraints_explanation": constraints.explanation,
         "known_gaps": catalog.known_gaps,
     }
+    if holdings:
+        results["existing_holdings"] = [
+            {"placement": h.placement_id, "value": h.value,
+             "contributions": h.contributions, "years_held": h.years_held}
+            for h in holdings
+        ]
     if goal_amount is not None:
         terminal = simulation.net_terminal
         results["goal_analysis"] = {

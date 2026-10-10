@@ -10,7 +10,11 @@ import pandas as pd
 import pytest
 
 from investment_calculator.modules.net_returns import TaxProfile, build_net_returns
-from investment_calculator.modules.wealth_simulation import contribution_flows, simulate_wealth
+from investment_calculator.modules.wealth_simulation import (
+    Holding,
+    contribution_flows,
+    simulate_wealth,
+)
 from investment_calculator.placement_catalog import load_placement_catalog
 from investment_calculator.wrapper_tax import liquidation_tax
 
@@ -120,3 +124,48 @@ def test_retrait_a_l_horizon_ignore() -> None:
     np.testing.assert_array_equal(contribution_flows(series, 2), [10_000.0, 1_000.0, 0.0])
     with pytest.raises(NotImplementedError, match="années \\[2\\]"):
         contribution_flows(series, 3)
+
+
+def test_epargne_existante_reste_en_place() -> None:
+    # Un avoir en assurance-vie : pas de frais d'entrée, il suit son placement et
+    # rejoint le contrat avec ses primes et son ancienneté.
+    gross = _gross()
+    horizon = 6
+    flows = np.array([10_000.0] + [0.0] * 10)
+    weights = _weights(pea_actions=1.0)
+    holding = Holding("av_fonds_euros", value=60_000.0, contributions=50_000.0, years_held=5)
+    with_h = simulate_wealth(gross, FR_2026, PROFILE, weights, flows, horizon, (holding,))
+    without = simulate_wealth(gross, FR_2026, PROFILE, weights, flows, horizon)
+    returns = gross["av_fonds_euros"].sort_index().to_numpy().reshape(50, 10)[:, :horizon]
+    grown = 60_000.0 * np.prod(1.0 + returns, axis=1)
+    np.testing.assert_allclose(with_h.value_paths[:, -1] - without.value_paths[:, -1], grown)
+    assert with_h.contributions["assurance_vie"] == 50_000.0
+    expected = liquidation_tax(
+        FR_2026.regime, "assurance_vie", contributions=50_000.0, final_value=grown,
+        holding_years=5 + horizon, couple=False,
+    )
+    np.testing.assert_allclose(with_h.net_terminal - without.net_terminal, expected.net_value)
+
+
+def test_anciennete_de_l_epargne_existante_profite_aux_nouveaux_versements() -> None:
+    # Un contrat ouvert il y a 8 ans : les nouveaux versements y sont liquidés
+    # avec l'ancienneté du contrat, pas celle du versement.
+    gross = _gross()
+    flows = np.array([20_000.0] + [0.0] * 10)
+    weights = _weights(av_uc_actions=1.0)
+    old = Holding("av_uc_actions", value=0.0, contributions=0.0, years_held=8)
+    sim = simulate_wealth(gross, FR_2026, PROFILE, weights, flows, 3, (old,))
+    seasoned = simulate_wealth(
+        gross, FR_2026, TaxProfile(1.0, wrapper_seniority={"assurance_vie": 8}), weights, flows, 3
+    )
+    np.testing.assert_allclose(sim.net_terminal, seasoned.net_terminal)
+
+
+def test_epargne_existante_invalide() -> None:
+    with pytest.raises(ValueError, match="positifs"):
+        Holding("pea_actions", value=-1.0, contributions=0.0, years_held=1)
+    with pytest.raises(ValueError, match="absents de GSE"):
+        simulate_wealth(
+            _gross(), FR_2026, PROFILE, _weights(pea_actions=1.0),
+            np.array([1_000.0] + [0.0] * 10), 3, (Holding("per", 1.0, 1.0, 1.0),),
+        )
