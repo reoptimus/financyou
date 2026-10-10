@@ -14,6 +14,54 @@ from investment_calculator.modules.placement_plan import plan_placements, profil
 from investment_calculator.placement_catalog import load_placement_catalog
 
 
+def build_profile_config(form: dict[str, Any]) -> dict[str, Any]:
+    """
+    Configuration du profil à partir de la saisie du formulaire.
+
+    Seules les valeurs saisies sont transmises : rien n'est complété à la place
+    de l'utilisateur. Les clés attendues sont ``age``, ``retirement_age``,
+    ``annual_income``, ``monthly_amount``, ``annual_increase`` et ``holdings``
+    (liste de dictionnaires ``placement``, ``value``, ``contributions``,
+    ``years_held``) ; ``annual_expenses``, ``max_equity`` et ``min_bond`` sont
+    facultatives (``None`` si non renseignées).
+
+    Raises:
+        KeyError: une saisie obligatoire manque.
+    """
+    horizon = int(form['retirement_age']) - int(form['age'])
+    holdings = [dict(h) for h in form['holdings']]
+    financial: dict[str, Any] = {
+        'current_savings': sum(float(h['value']) for h in holdings),
+        'annual_income': float(form['annual_income']),
+        'existing_holdings': holdings,
+    }
+    if form.get('annual_expenses') is not None:
+        financial['annual_expenses'] = float(form['annual_expenses'])
+    constraints: dict[str, float] = {}
+    if form.get('max_equity') is not None:
+        constraints['max_equity_allocation'] = float(form['max_equity'])
+    if form.get('min_bond') is not None:
+        constraints['min_bond_allocation'] = float(form['min_bond'])
+    return {
+        'user_profile': {
+            'personal_info': {
+                'age': int(form['age']),
+                'retirement_age': int(form['retirement_age']),
+            },
+            'financial_situation': financial,
+            'investment_preferences': {'time_horizon': horizon},
+            'constraints': constraints,
+        },
+        'contribution_schedule': [{
+            'start_year': 0,
+            'end_year': horizon,
+            'monthly_amount': float(form['monthly_amount']),
+            'annual_increase': float(form['annual_increase']),
+        }],
+        'withdrawal_schedule': [],
+    }
+
+
 def run_projection(
     profile_config: dict[str, Any],
     *,
@@ -21,12 +69,14 @@ def run_projection(
     catalog_id: str,
     risk_aversion: float,
     risk_free_placement: str | None,
+    couple: bool = False,
 ) -> dict[str, Any]:
     """
     Projeter le profil sur les placements du catalogue choisi.
 
     L'horizon est celui du profil (``investment_preferences.time_horizon``) ;
-    les scénarios sont générés sur cette durée, graine 42.
+    les scénarios sont générés sur cette durée, graine 42. ``couple`` vaut pour
+    l'imposition à la sortie (abattement de l'assurance-vie).
 
     Returns:
         ``scenarios``, ``profile``, ``catalog`` (identifiant) et ``optimization``
@@ -57,6 +107,7 @@ def run_projection(
         max_equity=profile_results['validated_profile']['constraints']['max_equity_allocation'],
         min_bond=profile_results['validated_profile']['constraints']['min_bond_allocation'],
         holdings=profile_holdings(profile_results['validated_profile']),
+        couple=couple,
     )
     return {
         'scenarios': scenario_results,
