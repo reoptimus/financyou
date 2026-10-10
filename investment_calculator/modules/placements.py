@@ -96,7 +96,7 @@ def _smoothed_euro_fund(
         portfolio_yield[i] = previous
 
     served = np.maximum(pass_through * portfolio_yield, floor)
-    result = np.empty_like(served)
+    result: np.ndarray = np.empty_like(served)
     result[order] = _after_fee(served, annual_fee)
     return result
 
