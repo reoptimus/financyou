@@ -33,6 +33,7 @@ import pandas as pd
 from investment_calculator.modules.net_returns import TaxProfile, _distributed_yield
 from investment_calculator.modules.placements import entry_fee_rates
 from investment_calculator.placement_catalog import PlacementCatalog
+from investment_calculator.wrapper_allocation import TOLERANCE
 from investment_calculator.wrapper_tax import liquidation_tax
 
 logger = logging.getLogger(__name__)
@@ -148,7 +149,7 @@ def simulate_wealth(
         ValueError: poids qui ne somment pas à 1, placement absent de GSE+,
             horizon hors des scénarios, ou aucun versement.
     """
-    if abs(float(weights.sum()) - 1.0) > 1e-6 or (weights < -1e-9).any():
+    if not np.isclose(float(weights.sum()), 1.0) or (weights < -TOLERANCE).any():
         raise ValueError(f"Les poids doivent être positifs et sommer à 1 (somme {weights.sum()}).")
     missing = [p for p in weights.index if p not in gross.columns]
     if missing:
