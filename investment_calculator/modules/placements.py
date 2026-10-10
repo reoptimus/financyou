@@ -54,6 +54,53 @@ def _after_fee(returns: np.ndarray, annual_fee: float) -> np.ndarray:
     return result
 
 
+def _smoothed_euro_fund(
+    placement: dict[str, Any], scenarios: pd.DataFrame, annual_fee: float
+) -> np.ndarray:
+    """
+    Fonds en euros lissé : le rendement servi suit le rendement comptable d'un
+    portefeuille obligataire dont une fraction ``1 / renewal_years`` est
+    renouvelée chaque année au taux de référence du GSE.
+
+    Rendement du portefeuille : ``y(t) = y(t-1) + (r(t) - y(t-1)) / renewal_years``,
+    avec ``y(-1) = initial_yield``. Rendement servi :
+    ``max(pass_through × y(t), floor_rate)``, puis frais de gestion. Les lignes
+    sont supposées annuelles, comme partout dans GSE+.
+    """
+    support = placement["support"]
+    pid = placement["id"]
+    pass_through = _required(support["pass_through"], pid, "support.pass_through")
+    floor = _required(support["floor_rate"], pid, "support.floor_rate")
+    initial_yield = _required(support["initial_yield"], pid, "support.initial_yield")
+    renewal_years = _required(support["renewal_years"], pid, "support.renewal_years")
+    if renewal_years < 1.0:
+        raise ValueError(
+            f"Le placement {pid!r} a renewal_years = {renewal_years} : il faut au moins "
+            f"1 an (1 = tout le portefeuille est renouvelé chaque année, sans lissage)."
+        )
+
+    # Récurrence dans l'ordre du temps de chaque scénario, quel que soit l'ordre
+    # des lignes reçues ; le résultat est rendu dans l'ordre d'origine.
+    order = np.lexsort((
+        scenarios["time_period"].to_numpy(dtype=float),
+        pd.factorize(scenarios["scenario_id"])[0],
+    ))
+    ids = scenarios["scenario_id"].to_numpy()[order]
+    reference = scenarios[support["reference_series"]].to_numpy(dtype=float)[order]
+    portfolio_yield = np.empty_like(reference)
+    previous = initial_yield
+    for i, rate in enumerate(reference):
+        if i > 0 and ids[i] != ids[i - 1]:
+            previous = initial_yield
+        previous = previous + (rate - previous) / renewal_years
+        portfolio_yield[i] = previous
+
+    served = np.maximum(pass_through * portfolio_yield, floor)
+    result: np.ndarray = np.empty_like(served)
+    result[order] = _after_fee(served, annual_fee)
+    return result
+
+
 def _support_returns(
     placement: dict[str, Any], scenarios: pd.DataFrame, annual_fee: float
 ) -> np.ndarray:
@@ -77,6 +124,9 @@ def _support_returns(
         result = _after_fee(served, annual_fee)
         return result
 
+    if model == "euro_fund_smoothed":
+        return _smoothed_euro_fund(placement, scenarios, annual_fee)
+
     if model == "regulated_rate":
         # Arrêté du 27 janvier 2021 : moyenne pondérée du taux court et de
         # l'inflation, arrondie au pas le plus proche (vers le haut à égalité),
@@ -93,7 +143,8 @@ def _support_returns(
 
     raise NotImplementedError(
         f"Modèle de support {model!r} (placement {pid!r}) non pris en charge par GSE+. "
-        f"Modèles pris en charge : gse_series, euro_fund, regulated_rate."
+        f"Modèles pris en charge : gse_series, euro_fund, euro_fund_smoothed, "
+        f"regulated_rate."
     )
 
 
@@ -165,7 +216,7 @@ def _series_needed(placement: dict[str, Any]) -> list[str]:
     support = placement["support"]
     if support["model"] == "gse_series":
         return [str(support["series"])]
-    if support["model"] == "euro_fund":
+    if support["model"] in ("euro_fund", "euro_fund_smoothed"):
         return [str(support["reference_series"])]
     if support["model"] == "regulated_rate":
         return ["interest_rate", "inflation"]

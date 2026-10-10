@@ -104,6 +104,36 @@
               },
               {
                 "type": "object",
+                "description": "Fonds en euros lissé : le rendement servi suit le rendement comptable d'un portefeuille obligataire dont 1/renewal_years est réinvesti chaque année au taux de référence du GSE, y(t) = y(t-1) + (r(t) - y(t-1)) / renewal_years ; puis max(pass_through × y(t), floor_rate) et frais de gestion.",
+                "required": ["model", "reference_series", "renewal_years", "initial_yield", "pass_through", "floor_rate"],
+                "additionalProperties": false,
+                "properties": {
+                  "model": { "const": "euro_fund_smoothed" },
+                  "reference_series": {
+                    "$ref": "#/$defs/gse_series",
+                    "description": "Taux auquel l'assureur place les sommes réinvesties chaque année."
+                  },
+                  "renewal_years": {
+                    "type": ["number", "null"],
+                    "minimum": 1,
+                    "description": "Durée de renouvellement du portefeuille, en années. null : valeur pas encore sourcée, refusée dans un catalogue validé."
+                  },
+                  "initial_yield": {
+                    "$ref": "#/$defs/rate_or_unknown",
+                    "description": "Rendement comptable du portefeuille à la date de départ, avant redistribution."
+                  },
+                  "pass_through": {
+                    "$ref": "#/$defs/rate_or_unknown",
+                    "description": "Part du rendement du portefeuille servie avant frais de gestion."
+                  },
+                  "floor_rate": {
+                    "$ref": "#/$defs/rate_or_unknown",
+                    "description": "Plancher du rendement servi avant frais de gestion."
+                  }
+                }
+              },
+              {
+                "type": "object",
                 "description": "Taux réglementé : max(plancher, arrondi(poids_taux × taux court + poids_inflation × inflation)).",
                 "required": ["model", "short_rate_weight", "inflation_weight", "rounding_step", "floor_rate"],
                 "additionalProperties": false,
