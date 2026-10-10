@@ -2,57 +2,46 @@
 
 ## Overview
 
-FinancYou is a comprehensive financial planning and investment optimization system composed of 5 distinct modules that work together in a clear pipeline:
+FinancYou projects a household's wealth after tax. Its logic is a chain of
+three scenario layers, and the optimisation runs on the last one:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          FINANCYOU WORKFLOW                              │
-└─────────────────────────────────────────────────────────────────────────┘
-
     ┌──────────────────────────────┐
-    │  MODULE 1: GSE               │
-    │  Economic Scenario Generator │
-    │                              │
-    │  Input:  Simulation Params   │
-    │  Output: Economic Scenarios  │
+    │  GSE (scenario_generator)    │  stock, bond, rate, inflation
     └──────────────┬───────────────┘
-                   │
                    ▼
     ┌──────────────────────────────┐
-    │  MODULE 2: GSE+              │
-    │  Tax-Integrated Scenarios    │
-    │                              │
-    │  Input:  Scenarios + Taxes   │
-    │  Output: After-Tax Tables    │
+    │  GSE+ (placements)           │  return of each household placement
+    │                              │  (CTO, PEA, assurance-vie, Livret A),
+    │                              │  net of annual fees, before tax
     └──────────────┬───────────────┘
-                   │
                    ▼
     ┌──────────────────────────────┐         ┌──────────────────────┐
-    │  MODULE 3: User Input        │◄────────│  Web UI / API        │
-    │  Investment Time Series      │         │                      │
-    │                              │         └──────────────────────┘
-    │  Input:  User Profile + UI   │
-    │  Output: Investment Plan     │
-    └──────────────┬───────────────┘
-                   │
+    │  GSE++ (net_returns)         │◄────────│  User profile        │
+    │  net of fees and exit tax,   │         │  (user_profile,      │
+    │  per scenario × horizon      │         │   web UI)            │
+    └──────────────┬───────────────┘         └──────────────────────┘
                    ▼
     ┌──────────────────────────────┐
-    │  MODULE 4: MOCA              │
-    │  Portfolio Optimizer         │
-    │                              │
-    │  Input:  Scenarios + Plan    │
-    │  Output: Optimized Portfolio │
+    │  Markowitz                   │  mean and volatility of GSE++ at H,
+    │  (placement_optimizer)       │  under wrapper caps
     └──────────────┬───────────────┘
-                   │
                    ▼
     ┌──────────────────────────────┐
-    │  MODULE 5: Visualization     │
-    │  Reporting & Graphics        │
-    │                              │
-    │  Input:  All Results         │
-    │  Output: Charts & Reports    │
+    │  Projection                  │  user's actual flows
+    │  (wealth_simulation)         │
+    └──────────────┬───────────────┘
+                   ▼
+    ┌──────────────────────────────┐
+    │  Reporting                   │
     └──────────────────────────────┘
 ```
+
+`placement_plan.plan_placements` runs GSE+ → projection. Taxes and placements
+are input data: `investment_calculator/tax_regimes/` and
+`investment_calculator/placement_catalogs/`. Decisions:
+`docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md`,
+`docs/adr/0002-le-placement-est-l-unite-d-optimisation.md`.
 
 ## Module Specifications
 
@@ -124,86 +113,26 @@ FinancYou is a comprehensive financial planning and investment optimization syst
 
 ---
 
-### Module 2: Tax-Integrated Scenario Engine (GSE+)
+### Module 2: Placements and Taxes (GSE+ and GSE++)
 
-**Location**: `investment_calculator/modules/tax_engine.py`
+**Location**: `investment_calculator/modules/placements.py`,
+`investment_calculator/modules/net_returns.py`, `investment_calculator/wrapper_tax.py`
 
-**Purpose**: Apply tax treatment to economic scenarios based on account types and jurisdiction rules.
+**Purpose**: GSE+ maps each placement of the catalogue to its underlying GSE
+variable and subtracts its annual fees. GSE++ applies, per wrapper, the exit
+tax of the regime the catalogue names, for the user's `TaxProfile` (amount
+invested, couple, wrapper seniority) and for each horizon.
 
-**Input Structure**:
-```python
-{
-    'scenarios': pd.DataFrame,      # From Module 1
+**Input**: GSE scenarios, a `PlacementCatalog` (`load_placement_catalog('fr-2026')`),
+a `TaxProfile`, a list of horizons.
 
-    'tax_config': {
-        'jurisdiction': str,        # Country code (e.g., 'FR', 'US', 'UK')
-        'account_types': {
-            'taxable': {
-                'income_tax_rate': float,         # e.g., 0.30
-                'capital_gains_rate': float,      # e.g., 0.15
-                'dividend_tax_rate': float,       # e.g., 0.25
-                'interest_tax_rate': float        # e.g., 0.30
-            },
-            'tax_deferred': {
-                'contribution_deduction': bool,   # Tax deduction on contributions
-                'withdrawal_tax_rate': float      # Tax on withdrawals
-            },
-            'tax_free': {
-                'contribution_limit': float,      # Annual limit
-                'age_restrictions': dict          # Withdrawal rules
-            }
-        },
-        'social_charges': float,    # Social security taxes (e.g., 0.172 for France)
-        'wealth_tax': {
-            'enabled': bool,
-            'threshold': float,     # Wealth tax threshold
-            'rate': float          # Wealth tax rate
-        }
-    },
+**Output**:
+- GSE+: DataFrame indexed by `(scenario_id, time_period)`, one column per placement;
+- GSE++: net multiples per scenario × horizon × placement, with
+  `annualized(h)` for annualised net returns.
 
-    'investment_allocation': {
-        'stocks': {'taxable': float, 'tax_deferred': float, 'tax_free': float},
-        'bonds': {...},
-        'real_estate': {...}
-    }
-}
-```
-
-**Output Structure**:
-```python
-{
-    'after_tax_scenarios': pd.DataFrame,  # Same structure as scenarios but after-tax
-                                         # Columns include original + '_after_tax' versions
-
-    'tax_tables': {
-        'annual_tax_by_account': pd.DataFrame,  # Annual taxes paid per account type
-        'cumulative_tax': pd.DataFrame,         # Cumulative tax burden over time
-        'tax_drag': pd.DataFrame,              # Performance drag due to taxes
-        'effective_tax_rate': pd.DataFrame     # Effective tax rate per scenario
-    },
-
-    'account_balances': {
-        'taxable': pd.DataFrame,      # After-tax balances by scenario and time
-        'tax_deferred': pd.DataFrame,
-        'tax_free': pd.DataFrame,
-        'total': pd.DataFrame         # Total across all accounts
-    },
-
-    'optimization_insights': {
-        'tax_loss_harvesting_opportunities': list,
-        'optimal_withdrawal_sequence': list,  # Which account to draw from first
-        'roth_conversion_analysis': dict      # Tax-deferred to tax-free conversion
-    }
-}
-```
-
-**Key Features**:
-- Multi-jurisdiction tax rules
-- Account type modeling (taxable, IRA, Roth, 401k, PEA, etc.)
-- Tax-advantaged rebalancing
-- Withdrawal strategy optimization
-
-**Dependencies**: Module 1, NumPy, Pandas
+Draft catalogues and regimes are refused at load time. Gaps are declared in
+`known_gaps`. Detail and examples: `MODULES_GUIDE.md`.
 
 ---
 
@@ -336,120 +265,24 @@ FinancYou is a comprehensive financial planning and investment optimization syst
 
 ---
 
-### Module 4: Portfolio Optimization (MOCA)
+### Module 4: Portfolio Optimization and Projection
 
-**Location**: `investment_calculator/modules/optimizer.py`
+**Location**: `investment_calculator/modules/placement_optimizer.py`,
+`investment_calculator/modules/wealth_simulation.py`,
+`investment_calculator/modules/placement_plan.py`
 
-**Purpose**: Optimize portfolio allocation and simulate investment outcomes across scenarios.
+**Purpose**: Markowitz by placement on the moments of GSE++ at horizon H
+(objectives `mean_variance`, `min_volatility`, `target_return`, `max_sharpe`),
+under the wrapper contribution caps only; efficient frontier; projection of the
+user's contributions with the chosen weights.
 
-**Input Structure**:
-```python
-{
-    'scenarios': pd.DataFrame,          # After-tax scenarios from Module 2
+**Input** (`plan_placements`): GSE scenarios, catalogue, `investment_time_series`,
+`horizon`, `objective` and its parameters, optional `risk_free_placement`
+and `goal_amount`.
 
-    'user_constraints': dict,           # From Module 3 validated profile
-
-    'investment_time_series': pd.DataFrame,  # From Module 3
-
-    'optimization_objective': str,      # 'max_return', 'max_sharpe', 'min_volatility',
-                                       # 'min_cvar', 'risk_parity', 'target_return'
-
-    'optimization_params': {
-        'target_return': float,         # If using target return objective
-        'risk_aversion': float,         # Risk aversion coefficient (1-10)
-        'confidence_level': float,      # For VaR/CVaR (e.g., 0.95)
-        'min_weight': float,           # Minimum asset weight (e.g., 0.0)
-        'max_weight': float,           # Maximum asset weight (e.g., 1.0)
-        'transaction_costs': {
-            'stocks': float,
-            'bonds': float,
-            'real_estate': float
-        },
-        'rebalancing_threshold': float  # Trigger rebalancing when drift exceeds %
-    },
-
-    'asset_universe': {
-        'stocks': {
-            'instruments': list,        # List of stock indices/funds
-            'constraints': dict
-        },
-        'bonds': {...},
-        'real_estate': {...},
-        'alternatives': {...}
-    }
-}
-```
-
-**Output Structure**:
-```python
-{
-    'optimal_portfolio': {
-        'weights': dict,                # Optimal allocation {asset: weight}
-        'expected_return': float,       # Annualized expected return
-        'expected_volatility': float,   # Annualized volatility
-        'sharpe_ratio': float,
-        'max_drawdown': float
-    },
-
-    'efficient_frontier': pd.DataFrame,  # Risk-return efficient frontier
-                                        # Columns: ['return', 'volatility', 'sharpe',
-                                        #          'stock_weight', 'bond_weight', ...]
-
-    'simulation_results': {
-        'terminal_wealth': pd.DataFrame,    # Final wealth for each scenario
-                                           # Columns: ['scenario_id', 'wealth',
-                                           #          'real_wealth', 'percentile']
-
-        'wealth_paths': pd.DataFrame,       # Full wealth trajectory
-                                           # Shape: (scenarios, time_periods)
-
-        'statistics': {
-            'mean_terminal_wealth': float,
-            'median_terminal_wealth': float,
-            'std_terminal_wealth': float,
-            'percentiles': {
-                '5': float,
-                '25': float,
-                '50': float,
-                '75': float,
-                '95': float
-            },
-            'probability_of_success': float,  # % scenarios meeting goal
-            'shortfall_risk': float,         # Average shortfall in bad scenarios
-            'var_95': float,                 # Value at Risk (95%)
-            'cvar_95': float                 # Conditional VaR (95%)
-        }
-    },
-
-    'rebalancing_schedule': pd.DataFrame,   # When and how to rebalance
-                                           # Columns: ['period', 'action',
-                                           #          'from_asset', 'to_asset',
-                                           #          'amount', 'cost']
-
-    'sensitivity_analysis': {
-        'return_sensitivity': dict,    # Impact of return assumptions
-        'volatility_sensitivity': dict, # Impact of volatility assumptions
-        'correlation_sensitivity': dict # Impact of correlation assumptions
-    },
-
-    'goal_analysis': {
-        'goal_amount': float,          # Target wealth from user profile
-        'probability_of_achieving': float,
-        'expected_surplus_deficit': float,
-        'years_to_goal': dict          # Probability distribution of time to goal
-    }
-}
-```
-
-**Key Features**:
-- Multiple optimization methods (mean-variance, max Sharpe, CVaR, etc.)
-- Monte Carlo simulation across all scenarios
-- Efficient frontier generation
-- Risk metrics (VaR, CVaR, drawdowns)
-- Dynamic rebalancing with transaction costs
-- Sensitivity analysis
-
-**Dependencies**: Modules 2, 3; NumPy, Pandas, SciPy, cvxpy (for optimization)
+**Output**: `optimal_portfolio`, `efficient_frontier`, `simulation_results`,
+`constraints_explanation`, `known_gaps`, `goal_analysis`. Field list:
+`MODULES_GUIDE.md`.
 
 ---
 
@@ -463,9 +296,9 @@ FinancYou is a comprehensive financial planning and investment optimization syst
 ```python
 {
     'scenarios': dict,              # From Module 1
-    'tax_results': dict,            # From Module 2
+    'tax_results': dict,            # Optional; the pipeline passes {}
     'user_profile': dict,           # From Module 3
-    'optimization_results': dict,   # From Module 4
+    'optimization_results': dict,   # From plan_placements
 
     'report_config': {
         'report_type': str,         # 'summary', 'detailed', 'regulatory', 'custom'
@@ -571,72 +404,55 @@ FinancYou is a comprehensive financial planning and investment optimization syst
 ## Data Flow Example
 
 ```python
-# Step 1: Generate economic scenarios
-from investment_calculator.modules import scenario_generator
+from investment_calculator.modules import reporting, scenario_generator, user_profile
+from investment_calculator.modules.placement_plan import plan_placements
+from investment_calculator.placement_catalog import load_placement_catalog
 
-gse = scenario_generator.ScenarioGenerator()
-scenarios = gse.generate({
+# 1. GSE: economic scenarios
+scenarios = scenario_generator.ScenarioGenerator(random_seed=42).generate({
     'num_scenarios': 1000,
     'time_horizon': 30,
-    'timestep': 1/12,
-    'use_stochastic': True,
-    'calibration_date': '2025-01-01',
-    'currency': 'EUR'
+    'timestep': 1.0,
+    'use_stochastic': False,
 })
 
-# Step 2: Apply taxes
-from investment_calculator.modules import tax_engine
-
-tax_eng = tax_engine.TaxEngine()
-after_tax = tax_eng.apply_taxes({
-    'scenarios': scenarios['scenarios'],
-    'tax_config': {
-        'jurisdiction': 'FR',
-        'account_types': {...}
+# 2. User profile and contributions
+profile = user_profile.UserProfileManager().process({
+    'user_profile': {
+        'personal_info': {'age': 35, 'retirement_age': 65, 'life_expectancy': 90},
+        'financial_situation': {'current_savings': 0, 'annual_income': 60000,
+                                'annual_expenses': 40000},
+        'investment_preferences': {'risk_tolerance': 'moderate', 'time_horizon': 30},
     },
-    'investment_allocation': {...}
+    'contribution_schedule': [{'start_year': 0, 'end_year': 30, 'monthly_amount': 500}],
+    'withdrawal_schedule': [],
 })
 
-# Step 3: Get user input
-from investment_calculator.modules import user_profile
+# 3. GSE+ -> GSE++ -> Markowitz by placement -> wealth projection
+catalog = load_placement_catalog('fr-2026')
+results = plan_placements(
+    scenarios['scenarios'],
+    catalog,
+    profile['investment_time_series'],
+    horizon=30,
+    objective='mean_variance',
+    risk_aversion=5.0,
+    risk_free_placement='livret_a',
+    goal_amount=500_000,
+)
+print(results['optimal_portfolio']['weights'])
+print(results['simulation_results']['statistics']['median_terminal_wealth'])
 
-user_input = user_profile.UserProfileManager()
-profile = user_input.process({
-    'user_profile': {...},  # From web UI
-    'contribution_schedule': [...],
-    'withdrawal_schedule': [...]
+# 4. Report
+report = reporting.ReportGenerator().generate({
+    'optimization_results': results,
+    'report_config': {'format': 'html'},
 })
-
-# Step 4: Optimize portfolio
-from investment_calculator.modules import optimizer
-
-moca = optimizer.PortfolioOptimizer()
-optimal = moca.optimize({
-    'scenarios': after_tax['after_tax_scenarios'],
-    'user_constraints': profile['validated_profile']['constraints'],
-    'investment_time_series': profile['investment_time_series'],
-    'optimization_objective': 'max_sharpe'
-})
-
-# Step 5: Generate reports
-from investment_calculator.modules import reporting
-
-reporter = reporting.ReportGenerator()
-report = reporter.generate({
-    'scenarios': scenarios,
-    'tax_results': after_tax,
-    'user_profile': profile,
-    'optimization_results': optimal,
-    'report_config': {
-        'report_type': 'detailed',
-        'format': 'html',
-        'language': 'en'
-    }
-})
+print(len(report['report']['html']))
 
 # Access results
-print(report['executive_summary']['one_page_summary'])
-report['figures']['wealth_trajectories']['figure'].show()
+print(results['optimal_portfolio']['weights'])
+html = report['report']['html']
 ```
 
 ## Design Principles
@@ -652,7 +468,7 @@ report['figures']['wealth_trajectories']['figure'].show()
 
 ## Technology Stack
 
-- **Core**: Python 3.9+
+- **Core**: Python 3.11+
 - **Numerical**: NumPy, SciPy, Pandas
 - **Optimization**: cvxpy, scipy.optimize
 - **Visualization**: Matplotlib, Plotly, Seaborn
@@ -668,4 +484,4 @@ report['figures']['wealth_trajectories']['figure'].show()
 3. Build integration tests for the full pipeline
 4. Develop web UI/API layer
 5. Deploy interactive dashboard
-6. Add more asset classes and strategies
+6. Add real estate and Michaud resampling
