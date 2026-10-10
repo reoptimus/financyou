@@ -7,11 +7,12 @@ This directory contains JSON configuration files for running the complete Financ
 | File | Purpose | Used By |
 |------|---------|---------|
 | `scenario_config.json` | Economic scenario parameters | Module 1 (GSE) |
-| `tax_config_us.json` | US tax configuration | Module 2 (GSE+) |
-| `tax_config_fr.json` | French tax configuration | Module 2 (GSE+) |
 | `user_profile_conservative.json` | Conservative investor (age 55) | Module 3 (User Profile) |
 | `user_profile_aggressive.json` | Aggressive investor (age 28) | Module 3 (User Profile) |
-| `optimization_config.json` | Portfolio optimization settings | Module 4 (Optimizer) |
+| `optimization_config.json` | Catalogue, objective and goal | Module 4 (Optimizer) |
+
+Taxes and placements are not example files: they are model data, in
+`investment_calculator/tax_regimes/` and `investment_calculator/placement_catalogs/`.
 
 ## File Descriptions
 
@@ -34,48 +35,6 @@ Controls how economic scenarios are generated.
 
 ---
 
-### tax_config_us.json
-
-US tax configuration and account allocation.
-
-**Key Parameters**:
-- `jurisdiction` (US): Tax jurisdiction (automatically loads tax rates)
-- `investment_allocation`: How assets are distributed across account types
-  - `taxable`: Regular brokerage accounts
-  - `tax_deferred`: 401k, Traditional IRA
-  - `tax_free`: Roth IRA, Roth 401k
-
-**US Tax Rates** (loaded automatically):
-- Dividend tax: 15%
-- Capital gains tax: 15%
-- Income tax: 25%
-- Social charges: 7.65%
-
-**When to Edit**:
-- Change asset allocation across account types
-- Model different investment strategies
-
----
-
-### tax_config_fr.json
-
-French tax configuration (PFU system).
-
-**Key Parameters**:
-- `jurisdiction` (FR): French tax jurisdiction
-- `investment_allocation`: Asset distribution (optimized for PEA)
-
-**French Tax Rates** (loaded automatically):
-- PFU (flat tax): 30%
-- Prélèvements sociaux: 17.2%
-- PEA advantages included
-
-**When to Edit**:
-- Optimize PEA vs CTO allocation
-- Model different account strategies
-
----
-
 ### user_profile_conservative.json
 
 Conservative investor approaching retirement.
@@ -87,7 +46,7 @@ Conservative investor approaching retirement.
 - Income: $120,000/year
 - Risk tolerance: Conservative
 - Max equity: 50%
-- Min bonds: 40%
+- Min bonds: 40% (equity and bond limits are not applied by the optimiser yet)
 
 **Contribution**:
 - $2,000/month for next 10 years
@@ -112,7 +71,7 @@ Aggressive young investor building wealth.
 - Student loans: $35,000
 - Risk tolerance: Aggressive
 - Max equity: 95%
-- Min bonds: 5%
+- Min bonds: 5% (equity and bond limits are not applied by the optimiser yet)
 
 **Contribution**:
 - Phase 1: $750/month (years 1-15, 4% annual increase)
@@ -127,23 +86,24 @@ Aggressive young investor building wealth.
 
 ### optimization_config.json
 
-Portfolio optimization parameters.
+Portfolio optimization parameters (Markowitz on GSE++, see
+`docs/adr/0002-le-placement-est-l-unite-d-optimisation.md`).
 
 **Key Parameters**:
-- `optimization_objective`: Method to use
-  - `max_sharpe`: Maximize risk-adjusted returns (recommended)
-  - `min_volatility`: Minimize risk
-  - `max_return`: Maximize returns (ignores risk)
-  - `target_return`: Target specific return level
-  - `risk_parity`: Equal risk contribution
-- `goal_amount` (2000000): Target wealth ($2 million)
-- `transaction_costs`: Trading costs by asset class
-- `rebalancing_threshold` (0.05): Rebalance when drift > 5%
+- `placement_catalog` (`fr-2026`): placements, fees, tax regime and wrapper caps
+- `optimization_objective`: method to use
+  - `mean_variance`: maximise mean − λ/2 × variance, λ = `optimization_params.risk_aversion`
+  - `min_volatility`: minimise risk
+  - `target_return`: minimise risk for `optimization_params.target_return`
+  - `max_sharpe`: maximise the Sharpe ratio against `risk_free_placement`
+- `risk_free_placement` (`livret_a`): reference placement of the Sharpe ratio
+- `goal_amount`: target wealth at the horizon, net of exit tax
+
+The horizon is the profile's, capped by the scenarios' duration.
 
 **When to Edit**:
-- Try different optimization objectives
+- Try different optimization objectives or risk aversion
 - Change target wealth goal
-- Adjust rebalancing frequency
 
 ---
 
@@ -157,7 +117,6 @@ python examples/complete_pipeline_with_files.py
 
 This uses:
 - `scenario_config.json`
-- `tax_config_us.json`
 - `user_profile_aggressive.json`
 - `optimization_config.json`
 
@@ -170,26 +129,15 @@ This uses:
    ```
 3. **Check outputs** in `outputs/` directory
 
-### Example: Conservative US Investor
+### Example: Conservative Investor
 
-Edit `complete_pipeline_with_files.py` line 76:
+In `complete_pipeline_with_files.py`, change:
 ```python
-# Change from:
 user_profile_data = load_json_config('user_profile_aggressive.json')
-
-# To:
-user_profile_data = load_json_config('user_profile_conservative.json')
 ```
-
-### Example: French Investor
-
-Edit `complete_pipeline_with_files.py` line 75:
+to:
 ```python
-# Change from:
-tax_config_data = load_json_config('tax_config_us.json')
-
-# To:
-tax_config_data = load_json_config('tax_config_fr.json')
+user_profile_data = load_json_config('user_profile_conservative.json')
 ```
 
 ---
@@ -249,4 +197,4 @@ For questions about:
 
 ---
 
-**Last Updated**: 2025-11-22
+**Last Updated**: 2026-10-10

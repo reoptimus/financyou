@@ -1,127 +1,101 @@
 # FinancYou Modules
 
-This directory contains the 5 core modules of the FinancYou system.
+This directory holds the pipeline GSE → GSE+ → GSE++ → Markowitz → wealth
+projection → report. The unit of optimisation is the **placement** (a support
+held in a tax wrapper, e.g. "PEA actions" or "assurance-vie fonds euros"); see
+`docs/adr/0002-le-placement-est-l-unite-d-optimisation.md`.
 
 ## Module Organization
 
 ```
 modules/
-├── __init__.py                 # Package initialization
-├── scenario_generator.py       # Module 1: Economic Scenario Generator (GSE)
-├── tax_engine.py              # Module 2: Tax-Integrated Scenarios (GSE+)
-├── user_profile.py            # Module 3: User Input & Investment Time Series
-├── optimizer.py               # Module 4: Portfolio Optimization (MOCA)
-└── reporting.py               # Module 5: Visualization & Reporting
+├── scenario_generator.py   # GSE: stock, bond, rate and inflation scenarios
+├── placements.py           # GSE+: annual return of each placement, net of annual fees
+├── net_returns.py          # GSE++: return net of fees and exit tax, per scenario × horizon
+├── user_profile.py         # User profile and contribution/withdrawal time series
+├── placement_optimizer.py  # Markowitz on GSE++ moments, under wrapper caps
+├── wealth_simulation.py    # Projection of the user's actual flows
+├── placement_plan.py       # Orchestration of the above, report-ready output
+└── reporting.py            # Charts and reports
 ```
 
-## Module Pipeline
+Placements and their fees come from a catalogue,
+`investment_calculator/placement_catalogs/<id>.json` (`fr-2026`: CTO actions,
+CTO obligations, PEA actions, AV fonds euros, AV UC actions, Livret A). Taxes
+come from the tax regime the catalogue names
+(`investment_calculator/tax_regimes/fr-2026.json`), applied per wrapper by
+`investment_calculator/wrapper_tax.py`. No rate lives in the code.
+
+## Pipeline
 
 ```
-User Input
+GSE (scenario_generator)
+    ↓ stock_return, bond_return, interest_rate, inflation
+GSE+ (placements.build_gross_placements)
+    ↓ annual return per placement, before tax
+GSE++ (net_returns.build_net_returns)      ← TaxProfile (amount invested, couple, seniority)
+    ↓ net multiple per scenario × horizon × placement
+Markowitz (placement_optimizer.optimize_horizon)   ← placement_constraints (wrapper caps)
+    ↓ weights per placement
+Projection (wealth_simulation.simulate_wealth)     ← user_profile flows
     ↓
-[Module 3: User Profile] ──→ Investment Plan
-    ↓
-[Module 1: Scenario Generator] ──→ Economic Scenarios
-    ↓
-[Module 2: Tax Engine] ──→ After-Tax Scenarios
-    ↓
-[Module 4: Optimizer] ──→ Optimal Portfolio + Simulations
-    ↓
-[Module 5: Reporting] ──→ Reports + Visualizations
+Report (reporting.ReportGenerator)
 ```
+
+`placement_plan.plan_placements` chains GSE+ to the projection in one call.
 
 ## Quick Start
 
 ```python
-from investment_calculator.modules import (
-    scenario_generator,
-    tax_engine,
-    user_profile,
-    optimizer,
-    reporting
+from investment_calculator.modules import reporting, scenario_generator, user_profile
+from investment_calculator.modules.placement_plan import plan_placements
+from investment_calculator.placement_catalog import load_placement_catalog
+
+scenarios = scenario_generator.ScenarioGenerator(random_seed=42).generate({
+    'num_scenarios': 1000, 'time_horizon': 30, 'timestep': 1.0, 'use_stochastic': False,
+})
+profile = user_profile.UserProfileManager().process({
+    'user_profile': {
+        'personal_info': {'age': 35, 'retirement_age': 65, 'life_expectancy': 90},
+        'financial_situation': {'current_savings': 0, 'annual_income': 60000,
+                                'annual_expenses': 40000},
+        'investment_preferences': {'risk_tolerance': 'moderate', 'time_horizon': 30},
+    },
+    'contribution_schedule': [{'start_year': 0, 'end_year': 30, 'monthly_amount': 500}],
+    'withdrawal_schedule': [],
+})
+catalog = load_placement_catalog('fr-2026')
+results = plan_placements(
+    scenarios['scenarios'], catalog, profile['investment_time_series'],
+    horizon=30, objective='mean_variance', risk_aversion=5.0,
+    risk_free_placement='livret_a', goal_amount=500_000,
 )
-
-# Step 1: Generate scenarios
-gen = scenario_generator.ScenarioGenerator()
-scenarios = gen.generate({
-    'num_scenarios': 1000,
-    'time_horizon': 30,
-    'timestep': 1.0,
-    'use_stochastic': True
-})
-
-# Step 2: Apply taxes
-engine = tax_engine.TaxEngine()
-tax_results = engine.apply_taxes({
-    'scenarios': scenarios['scenarios'],
-    'tax_config': tax_engine.TaxConfigPreset.get_preset('US'),
-    'investment_allocation': {...}
-})
-
-# Step 3: Process user profile
-manager = user_profile.UserProfileManager()
-profile_results = manager.process({
-    'user_profile': {...},
-    'contribution_schedule': [...],
-    'withdrawal_schedule': [...]
-})
-
-# Step 4: Optimize
-opt = optimizer.PortfolioOptimizer()
-optimization_results = opt.optimize({
-    'scenarios': tax_results['after_tax_scenarios'],
-    'user_constraints': profile_results['validated_profile']['constraints'],
-    'optimization_objective': 'max_sharpe'
-})
-
-# Step 5: Generate report
-reporter = reporting.ReportGenerator()
-report = reporter.generate({
-    'scenarios': scenarios,
-    'tax_results': tax_results,
-    'user_profile': profile_results,
-    'optimization_results': optimization_results
+report = reporting.ReportGenerator().generate({
+    'optimization_results': results, 'report_config': {'format': 'html'},
 })
 ```
+
+Objectives: `mean_variance` (needs `risk_aversion`), `min_volatility`,
+`target_return` (needs `target_return`), `max_sharpe` (needs
+`risk_free_placement`). Without a reference placement the Sharpe ratio is not
+computed and is `None`.
+
+`results` contains `optimal_portfolio` (weights, `expected_return`,
+`expected_volatility`, `sharpe_ratio`, `max_drawdown`, `horizon`…),
+`efficient_frontier`, `simulation_results` (wealth paths before exit tax,
+terminal wealth net of tax, statistics), `constraints_explanation`,
+`known_gaps` and, when a goal is given, `goal_analysis`.
 
 ## Documentation
 
-- **Architecture**: See `/ARCHITECTURE.md` for detailed input/output specifications
-- **Guide**: See `/MODULES_GUIDE.md` for detailed usage guide
-- **Examples**: See `/examples/complete_workflow_modules.py` for full workflow
-
-## Design Principles
-
-Each module follows these principles:
-
-1. **Clear I/O**: Standardized dictionary input and output structures
-2. **Independence**: Each module can be used standalone
-3. **Documentation**: Comprehensive docstrings and type hints
-4. **Testability**: Easy to test with mock data
-5. **Extensibility**: Easy to add new features
+- **Architecture**: `/ARCHITECTURE.md`
+- **Guide**: `/MODULES_GUIDE.md`
+- **Examples**: `/examples/complete_pipeline_with_files.py`, `/examples/complete_workflow_modules.py`
 
 ## Testing
 
-Run tests for all modules:
-
 ```bash
-pytest tests/test_scenario_generator.py
-pytest tests/test_tax_engine.py
-pytest tests/test_user_profile.py
-pytest tests/test_optimizer.py
-pytest tests/test_reporting.py
+pytest tests/test_placements.py tests/test_net_returns.py tests/test_placement_optimizer.py \
+       tests/test_wealth_simulation.py tests/test_placement_plan.py
+pytest tests/   # everything
 ```
-
-Or all at once:
-
-```bash
-pytest tests/
-```
-
-## Version
-
-Current version: 2.0.0
-
-## License
-
-See main repository LICENSE file.

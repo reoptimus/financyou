@@ -200,13 +200,9 @@ pip install -e .
 
 Then use in Python:
 ```python
-from investment_calculator.modules import (
-    scenario_generator,
-    tax_engine,
-    user_profile,
-    optimizer,
-    reporting
-)
+from investment_calculator.modules import reporting, scenario_generator, user_profile
+from investment_calculator.modules.placement_plan import plan_placements
+from investment_calculator.placement_catalog import load_placement_catalog
 ```
 
 ### Web Interface Only
