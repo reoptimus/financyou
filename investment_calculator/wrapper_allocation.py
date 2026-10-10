@@ -228,6 +228,31 @@ def _finite_or_inf(value: float | None) -> float:
     return float("inf") if value is None else float(value)
 
 
+def contribution_capacity(regime: TaxRegime, wrapper_id: str, n_periods: int) -> float:
+    """
+    Versements cumulés qu'une enveloppe accepte sur ``n_periods`` années, en euros.
+
+    ``inf`` pour une enveloppe sans plafond ; un plafond annuel est multiplié
+    par le nombre d'années.
+
+    Raises:
+        ValueError: période de plafond inconnue du code.
+    """
+    wrapper = regime.wrapper(wrapper_id)
+    limit = wrapper.get("contribution_limit")
+    if limit is None:
+        return float("inf")
+    period = wrapper.get("contribution_limit_period", "lifetime")
+    if period == "lifetime":
+        return float(limit)
+    if period == "annual":
+        return float(limit) * n_periods
+    raise ValueError(
+        f"Période de plafond {period!r} non gérée pour l'enveloppe "
+        f"{wrapper_id!r} (attendu : 'lifetime' ou 'annual')."
+    )
+
+
 def build_wrapper_rules(
     regime: TaxRegime,
     asset_names: Sequence[str],
@@ -288,21 +313,7 @@ def build_wrapper_rules(
     capacity_amount: dict[str, float] = {}
     capacity_share: dict[str, float] = {}
     for wrapper_id in available:
-        wrapper = regime.wrapper(wrapper_id)
-        limit = wrapper.get("contribution_limit")
-        if limit is None:
-            amount = float("inf")
-        else:
-            period = wrapper.get("contribution_limit_period", "lifetime")
-            if period == "lifetime":
-                amount = float(limit)
-            elif period == "annual":
-                amount = float(limit) * n_periods
-            else:
-                raise ValueError(
-                    f"Période de plafond {period!r} non gérée pour l'enveloppe "
-                    f"{wrapper_id!r} (attendu : 'lifetime' ou 'annual')."
-                )
+        amount = contribution_capacity(regime, wrapper_id, n_periods)
         capacity_amount[wrapper_id] = amount
         capacity_share[wrapper_id] = amount / total_contributions
 
