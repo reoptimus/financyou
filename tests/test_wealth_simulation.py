@@ -112,3 +112,11 @@ def test_retraits_refuses() -> None:
         contribution_flows(series, 5)
     flows = contribution_flows(pd.DataFrame({"contribution": [5.0, 1.0]}), 3)
     np.testing.assert_array_equal(flows, [5.0, 1.0, 0.0, 0.0])
+
+
+def test_retrait_a_l_horizon_ignore() -> None:
+    # Le départ à la retraite tombe à l'horizon : le patrimoine y est liquidé.
+    series = pd.DataFrame({"net_flow": [10_000.0, 1_000.0, -3_000.0, -3_000.0]})
+    np.testing.assert_array_equal(contribution_flows(series, 2), [10_000.0, 1_000.0, 0.0])
+    with pytest.raises(NotImplementedError, match="années \\[2\\]"):
+        contribution_flows(series, 3)

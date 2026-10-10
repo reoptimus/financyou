@@ -87,7 +87,8 @@ def contribution_flows(time_series: pd.DataFrame, n_periods: int) -> np.ndarray:
 
     Raises:
         ValueError: série vide ou sans colonne de versements.
-        NotImplementedError: la série contient un retrait avant l'horizon.
+        NotImplementedError: la série contient un retrait avant l'horizon. Un
+            retrait à l'horizon même est ignoré : le patrimoine y est liquidé.
     """
     if time_series.empty:
         raise ValueError(
@@ -103,6 +104,14 @@ def contribution_flows(time_series: pd.DataFrame, n_periods: int) -> np.ndarray:
     flows = np.zeros(n_periods + 1)
     values = series.to_numpy(dtype=float)[: n_periods + 1]
     flows[: len(values)] = values
+    if flows[n_periods] < 0:
+        # Un retrait à l'horizon même coïncide avec la liquidation : tout le
+        # patrimoine est alors restitué, le retrait n'a rien à retrancher.
+        logger.info(
+            "Retrait de %.0f à l'horizon %d ignoré : le patrimoine y est liquidé.",
+            -flows[n_periods], n_periods,
+        )
+        flows[n_periods] = 0.0
     if (flows < 0).any():
         years = np.flatnonzero(flows < 0).tolist()
         raise NotImplementedError(

@@ -127,3 +127,12 @@ def test_valide_sans_personne_refuse() -> None:
             placement["support"].update(pass_through=1.0, floor_rate=0.0)
     with pytest.raises(CatalogValidationError, match="validated_by"):
         _validate(document)
+
+
+def test_liste_des_catalogues_sans_brouillon(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert "fr-2026" in pc.list_placement_catalogs()
+    _draft_dir(tmp_path, monkeypatch)
+    (tmp_path / "valide-2026.json").write_text(json.dumps(FR_2026), encoding="utf-8")
+    (tmp_path / "illisible.json").write_text("{", encoding="utf-8")
+    assert pc.list_placement_catalogs() == ["valide-2026"]
+    assert pc.list_placement_catalogs(include_draft=True) == ["valide-2026", "zz-2026"]
