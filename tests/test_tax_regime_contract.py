@@ -36,7 +36,15 @@ from investment_calculator.tax_regime import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TAX_ENGINE = REPO_ROOT / "investment_calculator" / "modules" / "tax_engine.py"
+#: Code qui applique l'impôt : le test de garde y interdit tout paramètre fiscal.
+#: Les placements (GSE+) et l'optimiseur ne lisent pas le régime ; ils restent
+#: hors de ce périmètre.
+MOTEUR_FISCAL = [
+    REPO_ROOT / "investment_calculator" / "wrapper_tax.py",
+    REPO_ROOT / "investment_calculator" / "modules" / "net_returns.py",
+    REPO_ROOT / "investment_calculator" / "modules" / "wealth_simulation.py",
+    REPO_ROOT / "investment_calculator" / "modules" / "placement_plan.py",
+]
 
 #: Régime minimal, valide selon le schéma, utilisé pour tester le MÉCANISME de
 #: refus des brouillons sans dépendre du statut d'un régime livré (fr-2026 est
@@ -314,26 +322,11 @@ def test_l_absence_de_plafond_s_ecrit_null_et_non_infini():
 # 4. Test de garde : aucun paramètre fiscal en dur dans le moteur
 # --------------------------------------------------------------------------- #
 
-#: Littéraux tolérés dans ``tax_engine.py``, avec la raison et l'échéance de
+#: Littéraux tolérés dans le moteur fiscal, avec la raison et l'échéance de
 #: leur disparition. Toute nouvelle valeur non listée ici fait échouer la CI.
-#: Clé : ``"<fonction>:<valeur>"``.
-LITTERAUX_TOLERES: dict[str, str] = {
-    # Les hypothèses de marché (rendement du dividende, répartition
-    # loyer/appréciation, part réalisée annuellement) ont déménagé à l'étape
-    # 1.A.6 dans investment_calculator/market_assumptions/ ; elles ne sont
-    # plus des littéraux de ce fichier et n'ont donc plus leur place ici.
-    # Garde-fous numériques, sans contenu fiscal.
-    "_calculate_after_tax_scenarios:0.01": "epsilon de division, pas un taux",
-    "_calculate_tax_tables:0.001": "epsilon de division, pas un taux",
-    # Allocation par défaut d'une fonction de commodité : c'est une entrée
-    # d'exemple, pas une règle d'imposition.
-    "apply_taxes_simple:0.7": "allocation par défaut de la fonction de commodité",
-    "apply_taxes_simple:0.8": "allocation par défaut de la fonction de commodité",
-    "apply_taxes_simple:0.5": "allocation par défaut de la fonction de commodité",
-    "apply_taxes_simple:0.4": "allocation par défaut de la fonction de commodité",
-    "apply_taxes_simple:0.2": "allocation par défaut de la fonction de commodité",
-    "apply_taxes_simple:0.1": "allocation par défaut de la fonction de commodité",
-}
+#: Clé : ``"<fichier>:<fonction>:<valeur>"``. La liste est vide depuis le
+#: retrait de ``TaxEngine`` (refonte, sous-étape 7b) et doit le rester.
+LITTERAUX_TOLERES: dict[str, str] = {}
 
 
 def _litteraux_suspects(path: Path) -> list[tuple[str, float | int, int, str]]:
@@ -366,9 +359,10 @@ def _litteraux_suspects(path: Path) -> list[tuple[str, float | int, int, str]]:
         if not (est_taux or est_seuil):
             continue
         fonction = portee.get(noeud.lineno, "<module>")
-        suspects.append(
-            (f"{fonction}:{valeur}", valeur, noeud.lineno, lignes[noeud.lineno - 1].strip())
-        )
+        suspects.append((
+            f"{path.name}:{fonction}:{valeur}", valeur, noeud.lineno,
+            lignes[noeud.lineno - 1].strip(),
+        ))
     return suspects
 
 
@@ -377,7 +371,7 @@ def test_aucun_parametre_fiscal_en_dur_dans_le_moteur():
     GARDE D'ARCHITECTURE.
 
     Si ce test échoue, c'est qu'un taux, un seuil ou un abattement a été écrit
-    dans ``tax_engine.py``. La correction n'est pas d'allonger la liste des
+    dans le moteur fiscal (``MOTEUR_FISCAL``). La correction n'est pas d'allonger la liste des
     tolérances : c'est de déplacer la valeur dans le régime fiscal du pays
     concerné, sous ``investment_calculator/tax_regimes/``.
 
@@ -385,7 +379,8 @@ def test_aucun_parametre_fiscal_en_dur_dans_le_moteur():
     """
     inconnus = [
         (cle, ligne, code)
-        for cle, _valeur, ligne, code in _litteraux_suspects(TAX_ENGINE)
+        for path in MOTEUR_FISCAL
+        for cle, _valeur, ligne, code in _litteraux_suspects(path)
         if cle not in LITTERAUX_TOLERES
     ]
     if inconnus:
@@ -393,7 +388,7 @@ def test_aucun_parametre_fiscal_en_dur_dans_le_moteur():
             f"    ligne {ligne} — {cle}\n        {code}" for cle, ligne, code in inconnus
         )
         pytest.fail(
-            "Paramètre fiscal codé en dur dans tax_engine.py :\n"
+            "Paramètre fiscal codé en dur dans le moteur fiscal :\n"
             f"{details}\n\n"
             "La fiscalité est une donnée d'entrée du modèle. Déplacez cette valeur "
             "dans investment_calculator/tax_regimes/<pays>-<millésime>.json plutôt "
@@ -404,7 +399,9 @@ def test_aucun_parametre_fiscal_en_dur_dans_le_moteur():
 
 def test_la_dette_de_litteraux_ne_grossit_pas():
     """La liste des tolérances est un plafond, pas un budget à consommer."""
-    presents = {cle for cle, _v, _l, _c in _litteraux_suspects(TAX_ENGINE)}
+    presents = {
+        cle for path in MOTEUR_FISCAL for cle, _v, _l, _c in _litteraux_suspects(path)
+    }
     obsoletes = set(LITTERAUX_TOLERES) - presents
     assert not obsoletes, (
         "Ces tolérances ne correspondent plus à aucune valeur du moteur ; "
@@ -418,8 +415,12 @@ def test_aucune_juridiction_en_dur_dans_le_moteur():
 
     Ce test empêche la réintroduction d'un dictionnaire de presets en Python.
     """
-    source = TAX_ENGINE.read_text(encoding="utf-8")
-    arbre = ast.parse(source)
+    for path in MOTEUR_FISCAL:
+        _refuser_dictionnaire_par_juridiction(path)
+
+
+def _refuser_dictionnaire_par_juridiction(path: Path) -> None:
+    arbre = ast.parse(path.read_text(encoding="utf-8"))
     for noeud in ast.walk(arbre):
         if not isinstance(noeud, ast.Dict):
             continue
@@ -431,34 +432,24 @@ def test_aucune_juridiction_en_dur_dans_le_moteur():
         if len({"US", "FR", "UK", "DE", "CA"} & cles) >= 2:
             pytest.fail(
                 f"Un dictionnaire indexé par juridiction est réapparu dans "
-                f"tax_engine.py (ligne {noeud.lineno}). Les régimes vivent dans "
+                f"{path.name} (ligne {noeud.lineno}). Les régimes vivent dans "
                 f"investment_calculator/tax_regimes/."
             )
 
 
 def test_taxconfigpreset_a_disparu():
     """
-    Fin de la transition (étape 1.A.5) : TaxConfigPreset et son fichier de
-    valeurs gelées devaient disparaître une fois le moteur branché sur les
-    régimes. Ce test échoue si quelqu'un les réintroduit.
+    Fin de la transition (étape 1.A.5) : le fichier de valeurs gelées de
+    TaxConfigPreset a disparu, et ``TaxEngine`` avec lui (refonte, sous-étape
+    7b). Ce test échoue si quelqu'un les réintroduit.
     """
-    from investment_calculator.modules import tax_engine
-
-    assert not hasattr(tax_engine, "TaxConfigPreset"), (
-        "TaxConfigPreset devait disparaître à la fin de l'étape 1.A ; voir "
-        "docs/adr/0001-le-regime-fiscal-est-une-donnee-d-entree.md."
-    )
     legacy_path = REPO_ROOT / "investment_calculator" / "tax_regimes" / "_legacy_presets.json"
     assert not legacy_path.exists(), (
         "_legacy_presets.json devait être supprimé avec TaxConfigPreset."
     )
+    ancien_moteur = REPO_ROOT / "investment_calculator" / "modules" / "tax_engine.py"
+    assert not ancien_moteur.exists(), (
+        "TaxEngine a été retiré : l'impôt s'applique par enveloppe dans wrapper_tax "
+        "et GSE++ (ADR 0002)."
+    )
 
-
-def test_le_moteur_consomme_directement_un_regime():
-    """Le pont vers l'ancien moteur passe par TaxRegime, pas par un preset."""
-    from investment_calculator.modules import tax_engine
-
-    config = tax_engine._default_tax_config()
-    assert config["jurisdiction"] == "FR"
-    assert config["social_charges"] == 0.172
-    assert config["wealth_tax"]["threshold"] == 1_300_000

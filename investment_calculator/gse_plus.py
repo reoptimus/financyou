@@ -99,8 +99,8 @@ class TaxConfig:
         """
         Construire une configuration à partir d'un régime fiscal réel.
 
-        Comme :meth:`investment_calculator.tax_regime.TaxRegime.to_scenario_tax_config`,
-        c'est un pont vers une taxonomie plus grossière qu'un régime :
+        Comme l'ancien pont ``TaxRegime.to_scenario_tax_config`` (retiré avec
+        ``TaxEngine``), c'est un pont vers une taxonomie plus grossière qu'un régime :
         ``TaxConfig`` raisonne par catégorie de revenu générique calquée sur
         le système américain (revenu ordinaire, plus-value long terme,
         dividende qualifié, sécurité sociale, taxe d'état), qui ne
@@ -111,20 +111,20 @@ class TaxConfig:
           ``qualified_dividend_rate`` et ``non_qualified_dividend_rate``
           reçoivent tous la part *impôt sur le revenu* du prélèvement
           forfaitaire (``flat_tax_income_rate``), jamais son taux global —
-          pour la même raison que dans ``to_scenario_tax_config`` : ne pas
+          pour la même raison que dans l'ancien pont : ne pas
           recompter les prélèvements sociaux, déjà portés séparément par
           ``social_security_rate``.
         * ``ordinary_income_rate`` et ``tax_deferred_withdrawal_rate``
           reçoivent un taux moyen déduit du barème progressif à
-          ``reference_household_income`` (voir ``to_scenario_tax_config``
-          pour la justification de ce paramètre).
+          ``reference_household_income``, revenu de foyer choisi par
+          l'appelant pour réduire un barème progressif à un taux unique.
         * ``social_security_rate`` reçoit le taux des prélèvements sociaux du
           régime ; ``medicare_rate`` est mis à 0 (notion sans équivalent
           français, déjà couverte ici par ``social_security_rate``).
         * ``state_tax_rate`` est mis à 0 : pas d'équivalent français de
           l'impôt d'état américain.
         * ``wealth_tax_rate`` reçoit le taux marginal de la première tranche
-          non nulle de l'IFI, comme dans ``to_scenario_tax_config``.
+          non nulle de l'IFI.
         * ``standard_deduction`` est mis à 0 : le quotient familial français
           divise le revenu, il ne le diminue pas comme une déduction
           forfaitaire — les deux mécanismes ne sont pas équivalents.
