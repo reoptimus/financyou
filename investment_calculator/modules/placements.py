@@ -54,6 +54,54 @@ def _after_fee(returns: np.ndarray, annual_fee: float) -> np.ndarray:
     return result
 
 
+def _time_order(scenarios: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Ordre des lignes qui parcourt chaque scénario dans l'ordre du temps, et
+    marqueur des lignes qui ouvrent un nouveau scénario dans cet ordre.
+
+    Les modèles à mémoire (portefeuille renouvelé, provision) suivent cet ordre,
+    quel que soit l'ordre des lignes reçues ; leur résultat est rendu dans
+    l'ordre d'origine par ``result[order] = ...``.
+    """
+    order = np.lexsort((
+        scenarios["time_period"].to_numpy(dtype=float),
+        pd.factorize(scenarios["scenario_id"])[0],
+    ))
+    ids = scenarios["scenario_id"].to_numpy()[order]
+    starts = np.ones(len(ids), dtype=bool)
+    starts[1:] = ids[1:] != ids[:-1]
+    return order, starts
+
+
+def _book_yield(
+    reference: np.ndarray,
+    starts: np.ndarray,
+    initial_yield: float,
+    renewal_years: float,
+    placement_id: str,
+) -> np.ndarray:
+    """
+    Rendement comptable d'un portefeuille obligataire dont une fraction
+    ``1 / renewal_years`` est réinvestie chaque année au taux de référence :
+    ``y(t) = y(t-1) + (r(t) - y(t-1)) / renewal_years``, avec ``y(-1) = initial_yield``.
+    Les tableaux sont dans l'ordre de :func:`_time_order`.
+    """
+    if renewal_years < 1.0:
+        raise ValueError(
+            f"Le placement {placement_id!r} a renewal_years = {renewal_years} : il faut "
+            f"au moins 1 an (1 = tout le portefeuille est renouvelé chaque année, sans "
+            f"lissage)."
+        )
+    portfolio_yield = np.empty_like(reference)
+    previous = initial_yield
+    for i, rate in enumerate(reference):
+        if starts[i]:
+            previous = initial_yield
+        previous = previous + (rate - previous) / renewal_years
+        portfolio_yield[i] = previous
+    return portfolio_yield
+
+
 def _smoothed_euro_fund(
     placement: dict[str, Any], scenarios: pd.DataFrame, annual_fee: float
 ) -> np.ndarray:
@@ -73,31 +121,95 @@ def _smoothed_euro_fund(
     floor = _required(support["floor_rate"], pid, "support.floor_rate")
     initial_yield = _required(support["initial_yield"], pid, "support.initial_yield")
     renewal_years = _required(support["renewal_years"], pid, "support.renewal_years")
-    if renewal_years < 1.0:
-        raise ValueError(
-            f"Le placement {pid!r} a renewal_years = {renewal_years} : il faut au moins "
-            f"1 an (1 = tout le portefeuille est renouvelé chaque année, sans lissage)."
-        )
 
-    # Récurrence dans l'ordre du temps de chaque scénario, quel que soit l'ordre
-    # des lignes reçues ; le résultat est rendu dans l'ordre d'origine.
-    order = np.lexsort((
-        scenarios["time_period"].to_numpy(dtype=float),
-        pd.factorize(scenarios["scenario_id"])[0],
-    ))
-    ids = scenarios["scenario_id"].to_numpy()[order]
+    order, starts = _time_order(scenarios)
     reference = scenarios[support["reference_series"]].to_numpy(dtype=float)[order]
-    portfolio_yield = np.empty_like(reference)
-    previous = initial_yield
-    for i, rate in enumerate(reference):
-        if i > 0 and ids[i] != ids[i - 1]:
-            previous = initial_yield
-        previous = previous + (rate - previous) / renewal_years
-        portfolio_yield[i] = previous
+    portfolio_yield = _book_yield(reference, starts, initial_yield, renewal_years, pid)
 
     served = np.maximum(pass_through * portfolio_yield, floor)
     result: np.ndarray = np.empty_like(served)
     result[order] = _after_fee(served, annual_fee)
+    return result
+
+
+def _general_account_euro_fund(
+    placement: dict[str, Any], scenarios: pd.DataFrame, annual_fee: float
+) -> np.ndarray:
+    """
+    Fonds en euros adossé à l'actif général de l'assureur, lissé par la
+    provision pour participation aux bénéfices (PPB).
+
+    Chaque année :
+
+    1. rendement de l'actif ``a(t)`` = somme pondérée des actifs du support :
+       une série du GSE (valeur de marché) ou un portefeuille obligataire en
+       valeur comptable (:func:`_book_yield`) ;
+    2. réserve disponible ``B(t) = P(t-1) + pass_through × a(t)``, avec
+       ``P(-1) = initial_rate`` (stock de PPB en fraction de l'encours) ;
+    3. taux servi ``s(t) = max(B(t) / release_divisor, floor_rate)`` ;
+    4. provision restante ``P(t) = max(B(t) - s(t), 0)`` : la provision n'est
+       jamais négative, l'assureur absorbe ce qu'elle ne couvre pas (capital
+       garanti) ;
+    5. frais de gestion puis marge de l'assureur, prélevés comme des frais sur
+       l'encours.
+
+    La provision est exprimée en fraction de l'encours, sans tenir compte de la
+    croissance de l'encours d'une année sur l'autre.
+    """
+    support = placement["support"]
+    pid = placement["id"]
+    pass_through = _required(support["pass_through"], pid, "support.pass_through")
+    floor = _required(support["floor_rate"], pid, "support.floor_rate")
+    margin = _required(support["insurer_margin"], pid, "support.insurer_margin")
+    reserve = support["profit_sharing_reserve"]
+    initial_reserve = _required(
+        reserve["initial_rate"], pid, "support.profit_sharing_reserve.initial_rate"
+    )
+    divisor = _required(
+        reserve["release_divisor"], pid, "support.profit_sharing_reserve.release_divisor"
+    )
+    if divisor < 1.0:
+        raise ValueError(
+            f"Le placement {pid!r} a release_divisor = {divisor} : il faut au moins 1 "
+            f"(1 = toute la provision est servie chaque année, sans lissage)."
+        )
+
+    order, starts = _time_order(scenarios)
+    asset_return = np.zeros(len(order))
+    total_weight = 0.0
+    for k, asset in enumerate(support["assets"]):
+        name = f"support.assets[{k}]"
+        weight = _required(asset["weight"], pid, f"{name}.weight")
+        total_weight += weight
+        if asset["kind"] == "gse_series":
+            returns = scenarios[asset["series"]].to_numpy(dtype=float)[order]
+        else:  # book_bonds, seule autre valeur admise par le schéma
+            reference = scenarios[asset["reference_series"]].to_numpy(dtype=float)[order]
+            returns = _book_yield(
+                reference,
+                starts,
+                _required(asset["initial_yield"], pid, f"{name}.initial_yield"),
+                _required(asset["renewal_years"], pid, f"{name}.renewal_years"),
+                pid,
+            )
+        asset_return += weight * returns
+    if abs(total_weight - 1.0) > 1e-9:
+        raise ValueError(
+            f"Les poids de l'actif général du placement {pid!r} font {total_weight:.6g} "
+            f"au lieu de 1. Corrigez support.assets[].weight dans le catalogue."
+        )
+
+    served = np.empty_like(asset_return)
+    provision = initial_reserve
+    for i, a in enumerate(asset_return):
+        if starts[i]:
+            provision = initial_reserve
+        available = provision + pass_through * a
+        served[i] = max(available / divisor, floor)
+        provision = max(available - served[i], 0.0)
+
+    result: np.ndarray = np.empty_like(served)
+    result[order] = _after_fee(served, annual_fee + margin)
     return result
 
 
@@ -127,6 +239,9 @@ def _support_returns(
     if model == "euro_fund_smoothed":
         return _smoothed_euro_fund(placement, scenarios, annual_fee)
 
+    if model == "euro_fund_general_account":
+        return _general_account_euro_fund(placement, scenarios, annual_fee)
+
     if model == "regulated_rate":
         # Arrêté du 27 janvier 2021 : moyenne pondérée du taux court et de
         # l'inflation, arrondie au pas le plus proche (vers le haut à égalité),
@@ -144,7 +259,7 @@ def _support_returns(
     raise NotImplementedError(
         f"Modèle de support {model!r} (placement {pid!r}) non pris en charge par GSE+. "
         f"Modèles pris en charge : gse_series, euro_fund, euro_fund_smoothed, "
-        f"regulated_rate."
+        f"euro_fund_general_account, regulated_rate."
     )
 
 
@@ -218,6 +333,11 @@ def _series_needed(placement: dict[str, Any]) -> list[str]:
         return [str(support["series"])]
     if support["model"] in ("euro_fund", "euro_fund_smoothed"):
         return [str(support["reference_series"])]
+    if support["model"] == "euro_fund_general_account":
+        return sorted({
+            str(asset["series"] if asset["kind"] == "gse_series" else asset["reference_series"])
+            for asset in support["assets"]
+        })
     if support["model"] == "regulated_rate":
         return ["interest_rate", "inflation"]
     return []

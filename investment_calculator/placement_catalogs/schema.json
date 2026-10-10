@@ -134,6 +134,84 @@
               },
               {
                 "type": "object",
+                "description": "Fonds en euros adossé à l'actif général de l'assureur : rendement de l'actif a(t) = somme pondérée des actifs ; réserve disponible B(t) = P(t-1) + pass_through × a(t), avec P(-1) = initial_rate ; taux servi max(B(t) / release_divisor, floor_rate) ; provision restante P(t) = max(B(t) - servi, 0) ; puis frais de gestion et marge de l'assureur.",
+                "required": ["model", "assets", "pass_through", "profit_sharing_reserve", "floor_rate", "insurer_margin"],
+                "additionalProperties": false,
+                "properties": {
+                  "model": { "const": "euro_fund_general_account" },
+                  "assets": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": "Composition de l'actif général ; les poids font 1.",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "description": "Actif suivi en valeur de marché : une série du GSE.",
+                          "required": ["kind", "weight", "series"],
+                          "additionalProperties": false,
+                          "properties": {
+                            "kind": { "const": "gse_series" },
+                            "weight": { "$ref": "#/$defs/rate_or_unknown" },
+                            "series": { "$ref": "#/$defs/gse_series" }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "description": "Obligations en valeur comptable : portefeuille dont 1/renewal_years est réinvesti chaque année au taux de référence, y(t) = y(t-1) + (r(t) - y(t-1)) / renewal_years.",
+                          "required": ["kind", "weight", "reference_series", "renewal_years", "initial_yield"],
+                          "additionalProperties": false,
+                          "properties": {
+                            "kind": { "const": "book_bonds" },
+                            "weight": { "$ref": "#/$defs/rate_or_unknown" },
+                            "reference_series": { "$ref": "#/$defs/gse_series" },
+                            "renewal_years": {
+                              "type": ["number", "null"],
+                              "minimum": 1,
+                              "description": "Durée de renouvellement du portefeuille, en années. null : valeur pas encore sourcée, refusée dans un catalogue validé."
+                            },
+                            "initial_yield": {
+                              "$ref": "#/$defs/rate_or_unknown",
+                              "description": "Rendement comptable du portefeuille à la date de départ."
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "pass_through": {
+                    "$ref": "#/$defs/rate_or_unknown",
+                    "description": "Part du rendement de l'actif versée aux assurés, directement ou via la provision."
+                  },
+                  "profit_sharing_reserve": {
+                    "type": "object",
+                    "description": "Provision pour participation aux bénéfices (PPB), en fraction de l'encours.",
+                    "required": ["initial_rate", "release_divisor"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "initial_rate": {
+                        "$ref": "#/$defs/rate_or_unknown",
+                        "description": "Stock de provision à la date de départ, en fraction de l'encours."
+                      },
+                      "release_divisor": {
+                        "type": ["number", "null"],
+                        "minimum": 1,
+                        "description": "Chaque année, 1/release_divisor de la réserve disponible est servi. 1 : pas de lissage. null : valeur pas encore sourcée."
+                      }
+                    }
+                  },
+                  "floor_rate": {
+                    "$ref": "#/$defs/rate_or_unknown",
+                    "description": "Plancher du rendement servi avant frais de gestion."
+                  },
+                  "insurer_margin": {
+                    "$ref": "#/$defs/rate_or_unknown",
+                    "description": "Marge de l'assureur, prélevée chaque année sur l'encours comme des frais. 0 si le calage ne l'exige pas."
+                  }
+                }
+              },
+              {
+                "type": "object",
                 "description": "Taux réglementé : max(plancher, arrondi(poids_taux × taux court + poids_inflation × inflation)).",
                 "required": ["model", "short_rate_weight", "inflation_weight", "rounding_step", "floor_rate"],
                 "additionalProperties": false,
