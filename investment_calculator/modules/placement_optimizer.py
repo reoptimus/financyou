@@ -41,6 +41,7 @@ __all__ = [
     "OBJECTIVES",
     "HorizonAllocation",
     "OptimizationError",
+    "efficient_frontier",
     "optimize_by_horizon",
     "optimize_horizon",
     "placement_constraints",
@@ -104,8 +105,8 @@ def placement_constraints(
         # Marge d'un epsilon : un solveur respecte ses contraintes à ~1e-7 près.
         bounds.append(max(share - TOLERANCE, 0.0))
         notes.append(
-            f"L'enveloppe {wrapper_id} accepte {capacity:,.0f} € sur "
-            f"{total_contributions:,.0f} € versés, soit {share:.1%} au plus. ".replace(",", " ")
+            f"L'enveloppe {wrapper_id} accepte {_euros(capacity)} sur "
+            f"{_euros(total_contributions)} versés, soit {share:.1%} au plus. "
         )
     n = len(placement_ids)
     return WeightConstraints(
@@ -116,6 +117,10 @@ def placement_constraints(
         b_ub=np.array(bounds),
         explanation="".join(notes),
     )
+
+
+def _euros(amount: float) -> str:
+    return f"{amount:,.0f} €".replace(",", " ")
 
 
 def _solve(
@@ -251,3 +256,39 @@ def optimize_by_horizon(
         for h in selected
     }
     return pd.DataFrame(columns)
+
+
+def efficient_frontier(
+    net: NetReturns,
+    horizon: int,
+    constraints: WeightConstraints,
+    *,
+    n_points: int = 20,
+) -> pd.DataFrame:
+    """
+    Frontière efficiente à l'horizon H : volatilité minimale pour des rendements
+    nets cibles, du portefeuille de variance minimale au rendement maximal
+    atteignable sous les contraintes.
+
+    Un point que le solveur n'atteint pas est omis et journalisé, jamais
+    remplacé par une valeur approchée.
+
+    Returns:
+        Un tableau aux colonnes ``return`` et ``volatility``, trié par rendement.
+    """
+    if n_points < 2:
+        raise ValueError(f"La frontière demande au moins 2 points (reçu {n_points}).")
+    mean_s, _ = net_return_moments(net, horizon)
+    low = optimize_horizon(net, horizon, constraints, objective="min_volatility")
+    _, high = constraints.return_range(mean_s.to_numpy())
+    points = [(low.expected_return, low.volatility)]
+    for target in np.linspace(low.expected_return, high, n_points)[1:]:
+        try:
+            allocation = optimize_horizon(
+                net, horizon, constraints, objective="target_return", target_return=target
+            )
+        except OptimizationError as error:
+            logger.warning("Point de frontière %.4f omis : %s", target, error)
+            continue
+        points.append((allocation.expected_return, allocation.volatility))
+    return pd.DataFrame(points, columns=["return", "volatility"])

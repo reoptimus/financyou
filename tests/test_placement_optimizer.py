@@ -162,3 +162,18 @@ def test_poids_par_horizon_sur_les_vrais_scenarios() -> None:
     assert list(weights.index) == ids
     np.testing.assert_allclose(weights.sum().to_numpy(), 1.0, atol=1e-6)
     assert (weights.loc["livret_a"] <= LIVRET_CAP / 50_000.0 + 1e-9).all()
+
+
+def test_frontiere_efficiente_croissante_et_contrainte() -> None:
+    from investment_calculator.modules.placement_optimizer import efficient_frontier
+
+    net = _two_assets()
+    frontier = efficient_frontier(net, 1, _free(net), n_points=8)
+    low = optimize_horizon(net, 1, _free(net), objective="min_volatility")
+    high = net.annualized(1).mean().max()
+    assert list(frontier.columns) == ["return", "volatility"]
+    assert frontier["return"].iloc[0] == pytest.approx(low.expected_return)
+    assert frontier["return"].iloc[-1] == pytest.approx(high, abs=1e-6)
+    assert (np.diff(frontier["volatility"]) > -1e-9).all()
+    with pytest.raises(ValueError, match="au moins 2 points"):
+        efficient_frontier(net, 1, _free(net), n_points=1)

@@ -326,7 +326,11 @@ class ReportGenerator:
 
         ax.set_xlabel('Year', fontsize=12)
         ax.set_ylabel('Wealth ($)', fontsize=12)
-        ax.set_title('Projected Wealth Trajectories', fontsize=14, fontweight='bold')
+        title = 'Projected Wealth Trajectories'
+        label = optimization_results['simulation_results'].get('wealth_paths_label')
+        if label:
+            title += f' ({label})'
+        ax.set_title(title, fontsize=14, fontweight='bold')
         ax.legend()
         ax.grid(True, alpha=0.3)
 
@@ -548,7 +552,10 @@ class ReportGenerator:
             summary_text += f"  Expected Return: {portfolio.get('expected_return', 0)*100:.2f}%\n"
             expected_vol = portfolio.get('expected_volatility', 0) * 100
             summary_text += f"  Expected Volatility: {expected_vol:.2f}%\n"
-            summary_text += f"  Sharpe Ratio: {portfolio.get('sharpe_ratio', 0):.2f}\n\n"
+            # Un ratio non calculé ne s'affiche pas comme un zéro.
+            sharpe = portfolio.get('sharpe_ratio')
+            sharpe_text = f"{sharpe:.2f}" if sharpe is not None else "not computed"
+            summary_text += f"  Sharpe Ratio: {sharpe_text}\n\n"
 
         # Risk metrics
         if 'simulation_results' in opt_results:
