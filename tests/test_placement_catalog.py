@@ -28,14 +28,30 @@ def _validate(document: dict) -> None:
     pc._validate(document, pc.PACKAGE_CATALOG_DIR / "test.json", load_regime("fr-2026"))
 
 
-def test_brouillon_refuse_par_defaut() -> None:
+def _draft_dir(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Un répertoire de catalogues qui ne contient qu'un brouillon zz-2026."""
+    document = copy.deepcopy(FR_2026)
+    document.update(id="zz-2026", status="draft",
+                    validation={"validated_by": None, "validated_on": None})
+    (tmp_path / "zz-2026.json").write_text(json.dumps(document), encoding="utf-8")
+    monkeypatch.setattr(pc, "PACKAGE_CATALOG_DIR", tmp_path)
+
+
+def test_brouillon_refuse_par_defaut(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _draft_dir(tmp_path, monkeypatch)
     with pytest.raises(DraftCatalogError, match="allow_draft=True"):
-        load_placement_catalog("fr-2026")
+        load_placement_catalog("zz-2026")
 
 
-def test_brouillon_charge_sur_demande() -> None:
-    catalog = load_placement_catalog("fr-2026", allow_draft=True)
-    assert catalog.status == "draft"
+def test_brouillon_charge_sur_demande(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _draft_dir(tmp_path, monkeypatch)
+    assert load_placement_catalog("zz-2026", allow_draft=True).status == "draft"
+
+
+def test_fr_2026_valide_et_charge_par_defaut() -> None:
+    catalog = load_placement_catalog("fr-2026")
+    assert catalog.status == "validated"
+    assert catalog.document["validation"]["validated_by"]
     assert catalog.regime.id == "fr-2026"
     assert catalog.placement_ids == [
         "cto_actions", "cto_obligations", "pea_actions",
@@ -50,7 +66,7 @@ def test_catalogue_inconnu() -> None:
 
 
 def test_placement_inconnu() -> None:
-    catalog = load_placement_catalog("fr-2026", allow_draft=True)
+    catalog = load_placement_catalog("fr-2026")
     with pytest.raises(KeyError, match="Placements disponibles"):
         catalog.placement("pinel")
 
@@ -95,6 +111,7 @@ def test_valide_avec_valeur_inconnue_refuse() -> None:
     document = copy.deepcopy(FR_2026)
     document["status"] = "validated"
     document["validation"] = {"validated_by": "Une Personne", "validated_on": "2026-10-09"}
+    document["placements"][0]["fees"]["entry_rate"] = None
     with pytest.raises(CatalogValidationError, match="valeur inconnue") as excinfo:
         _validate(document)
     assert "placements[0].fees.entry_rate" in str(excinfo.value)

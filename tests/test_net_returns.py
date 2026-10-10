@@ -20,17 +20,17 @@ from investment_calculator.modules.net_returns import (
 from investment_calculator.modules.placements import UnsourcedValueError
 from investment_calculator.placement_catalog import PlacementCatalog, load_placement_catalog
 
-DRAFT = load_placement_catalog("fr-2026", allow_draft=True)
-PS = DRAFT.regime.social_rate          # prélèvements sociaux du régime
-PFU_IR = DRAFT.regime.flat_tax_income_rate
+FR_2026 = load_placement_catalog("fr-2026")
+PS = FR_2026.regime.social_rate          # prélèvements sociaux du régime
+PFU_IR = FR_2026.regime.flat_tax_income_rate
 
 
 def _catalog(entry: float = 0.0, annual: float = 0.0) -> PlacementCatalog:
-    """Le brouillon fr-2026 avec des frais connus partout (valeurs de test)."""
-    document = copy.deepcopy(DRAFT.document)
+    """Le catalogue fr-2026 avec des frais connus partout (valeurs de test)."""
+    document = copy.deepcopy(FR_2026.document)
     for placement in document["placements"]:
         placement["fees"] = {"entry_rate": entry, "annual_rate": annual}
-    return PlacementCatalog(document=document, source=DRAFT.source, regime=DRAFT.regime)
+    return PlacementCatalog(document=document, source=FR_2026.source, regime=FR_2026.regime)
 
 
 def _gross(column: str, paths: list[list[float]]) -> pd.DataFrame:
@@ -96,7 +96,7 @@ def test_cto_dividendes_imposes_chaque_annee() -> None:
 
 def test_livret_a_sans_impot() -> None:
     gross = _gross("livret_a", [[0.015] * 4])
-    net = build_net_returns(gross, DRAFT, PROFILE, [4])
+    net = build_net_returns(gross, FR_2026, PROFILE, [4])
     assert net.multiples[0, 0, 0] == pytest.approx(1.015 ** 4)
 
 
@@ -108,14 +108,17 @@ def test_frais_d_entree_preleves_sur_le_versement() -> None:
 
 def test_frais_d_entree_non_sources_refuses() -> None:
     gross = _gross("pea_actions", [[0.1, 0.1]])
+    document = copy.deepcopy(FR_2026.document)
+    document["placements"][2]["fees"]["entry_rate"] = None  # pea_actions
+    catalog = PlacementCatalog(document=document, source=FR_2026.source, regime=FR_2026.regime)
     with pytest.raises(UnsourcedValueError, match="entry_rate"):
-        build_net_returns(gross, DRAFT, PROFILE, [2])
+        build_net_returns(gross, catalog, PROFILE, [2])
 
 
 def test_horizon_hors_des_scenarios_refuse() -> None:
     gross = _gross("livret_a", [[0.01] * 3])
     with pytest.raises(ValueError, match="entre 1 et 3"):
-        build_net_returns(gross, DRAFT, PROFILE, [4])
+        build_net_returns(gross, FR_2026, PROFILE, [4])
 
 
 def test_montant_nul_refuse() -> None:
