@@ -3,8 +3,9 @@
 
 Le dépôt a contenu une cascade fiscale faite de nombres inventés, des soldes de
 comptes à 0, un calendrier de rééquilibrage vide et des analyses de
-sensibilité vides. Ce test parcourt toutes les sorties de l'optimiseur, du
-moteur fiscal et du rapport sur un petit pipeline complet, et échoue dès
+sensibilité vides. Ce test parcourt toutes les sorties de la chaîne
+GSE+ → GSE++ → Markowitz par placement et du rapport sur un petit pipeline
+complet, et échoue dès
 qu'une valeur affichable est vide ou ne varie pas d'un scénario à l'autre.
 """
 
@@ -12,11 +13,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from investment_calculator.modules import optimizer, reporting, scenario_generator, tax_engine
+from investment_calculator.modules import reporting, scenario_generator
+from investment_calculator.modules.placement_plan import plan_placements
+from investment_calculator.placement_catalog import load_placement_catalog
 
 # Colonnes légitimement constantes : identifiants, et patrimoine initial
 # (identique dans tous les scénarios par construction).
-EXEMPT_COLUMNS = {'scenario_id', 'time_period', 'period', 'year_0'}
+EXEMPT_COLUMNS = {'scenario_id', 'time_period', 'period', '0'}
 
 
 @pytest.fixture(scope='module')
@@ -29,21 +32,22 @@ def pipeline_outputs():
         'currency': 'EUR',
         'yield_curve_id': 'eiopa-fr-2018-04',
     })['scenarios']
-    tax_results = tax_engine.apply_taxes_simple(scenarios, jurisdiction='FR')
-    opt_results = optimizer.PortfolioOptimizer().optimize({
-        'scenarios': tax_results['after_tax_scenarios'],
-        'investment_time_series': pd.DataFrame({
-            'period': range(10), 'contribution': [1000.0] * 10, 'net_flow': [1000.0] * 10
-        }),
-        'optimization_objective': 'max_sharpe',
-        'goal_amount': 20000,
-    })
+    opt_results = plan_placements(
+        scenarios,
+        load_placement_catalog('fr-2026'),
+        pd.DataFrame({'period': range(11), 'net_flow': [1000.0] * 11}),
+        horizon=10,
+        objective='mean_variance',
+        risk_aversion=5.0,
+        risk_free_placement='livret_a',
+        goal_amount=12000,
+        frontier_points=5,
+    )
     report = reporting.ReportGenerator().generate({
         'optimization_results': opt_results,
-        'tax_results': tax_results,
         'report_config': {'format': 'json'},
     })
-    return {'tax': tax_results, 'optimizer': opt_results, 'report': report}
+    return {'optimizer': opt_results, 'report': report}
 
 
 def _find_empty_or_constant(value, path):
@@ -75,10 +79,6 @@ def test_optimizer_outputs_are_neither_empty_nor_constant(pipeline_outputs):
     assert _find_empty_or_constant(pipeline_outputs['optimizer'], 'optimizer') == []
 
 
-def test_tax_outputs_are_neither_empty_nor_constant(pipeline_outputs):
-    assert _find_empty_or_constant(pipeline_outputs['tax'], 'tax') == []
-
-
 def test_report_tables_and_summary_are_neither_empty_nor_constant(pipeline_outputs):
     report = pipeline_outputs['report']
     problems = _find_empty_or_constant(report['tables'], 'tables')
@@ -99,11 +99,5 @@ def test_fake_tax_waterfall_is_refused(pipeline_outputs):
     with pytest.raises(ValueError, match='inventées'):
         reporting.ReportGenerator().generate({
             'optimization_results': pipeline_outputs['optimizer'],
-            'tax_results': pipeline_outputs['tax'],
             'report_config': {'format': 'json', 'charts': ['tax_impact_waterfall']},
         })
-
-
-def test_real_wealth_is_deflated_by_inflation(pipeline_outputs):
-    terminal = pipeline_outputs['optimizer']['simulation_results']['terminal_wealth']
-    assert (terminal['real_wealth'] < terminal['wealth']).mean() > 0.9
