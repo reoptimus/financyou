@@ -604,3 +604,43 @@ class TestDataQuality:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+class TestNoInventedDefaults:
+    """Aucune valeur inventée : ce que l'utilisateur ne dit pas n'est pas supposé."""
+
+    def test_sans_echeancier_aucun_versement(self):
+        profile_config = create_simple_test_profile()
+        profile_config['contribution_schedule'] = []
+        series = user_profile.UserProfileManager().process(profile_config)['investment_time_series']
+        assert (series['contribution'] == 0).all()
+
+    def test_sans_echeancier_de_retrait_aucun_retrait(self):
+        # Avant : les dépenses annuelles étaient retirées d'office dès la retraite.
+        series = user_profile.UserProfileManager().process(
+            create_simple_test_profile()
+        )['investment_time_series']
+        assert (series['withdrawal'] == 0).all()
+
+    def test_hausse_annuelle_obligatoire(self):
+        profile_config = create_simple_test_profile()
+        del profile_config['contribution_schedule'][0]['annual_increase']
+        with pytest.raises(ValueError, match="annual_increase"):
+            user_profile.UserProfileManager().process(profile_config)
+
+    def test_revenu_obligatoire(self):
+        profile_config = create_simple_test_profile()
+        del profile_config['user_profile']['financial_situation']['annual_income']
+        with pytest.raises(ValueError, match="annual_income"):
+            user_profile.UserProfileManager().process(profile_config)
+
+    def test_depenses_absentes_restent_inconnues(self):
+        profile_config = create_simple_test_profile()
+        del profile_config['user_profile']['financial_situation']['annual_expenses']
+        results = user_profile.UserProfileManager().process(profile_config)
+        assert results['validated_profile']['financial_situation']['annual_expenses'] is None
+
+    def test_epargne_existante_signalee_comme_lacune(self):
+        results = user_profile.UserProfileManager().process(create_simple_test_profile())
+        assert any("pargne existante" in w for w in results['validation_warnings'])
+        assert results['investment_time_series']['contribution'].iloc[0] == 12_000

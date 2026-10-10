@@ -270,8 +270,15 @@ class UserProfileManager:
         # Financial situation
         financial = user_profile.get('financial_situation', {})
         current_savings = max(0, financial.get('current_savings', 0))
-        annual_income = max(0, financial.get('annual_income', 50000))
-        annual_expenses = max(0, financial.get('annual_expenses', annual_income * 0.7))
+        if 'annual_income' not in financial:
+            raise ValueError(
+                "Le revenu annuel (financial_situation.annual_income) manque : il n'a "
+                "pas de valeur par défaut. Renseignez-le, 0 si le foyer n'a pas de revenu."
+            )
+        annual_income = max(0, financial['annual_income'])
+        # Les dépenses ne servent qu'à l'information : absentes, elles restent inconnues.
+        expenses = financial.get('annual_expenses')
+        annual_expenses = None if expenses is None else max(0, expenses)
 
         debt = financial.get('debt', {})
         total_debt = (
@@ -287,6 +294,17 @@ class UserProfileManager:
                 f"High debt-to-income ratio: {debt_to_income:.1%}. "
                 "Consider debt reduction first."
             )
+
+        if current_savings > 0:
+            # Lacune déclarée : l'épargne existante doit rester dans ses placements
+            # (choix du 2026-10-10), ce qui demande de saisir où elle est placée, son
+            # ancienneté et sa plus-value latente. Ce n'est pas encore fait.
+            warnings.append(
+                f"L'épargne existante ({current_savings:,.0f}) n'est pas encore prise en "
+                "compte : la projection ne porte que sur les versements de l'échéancier."
+            )
+            logger.warning("Épargne existante de %.0f non projetée (lacune connue).",
+                           current_savings)
 
         validated['financial_situation'] = {
             'current_savings': current_savings,
@@ -371,28 +389,21 @@ class UserProfileManager:
         account_types = [''] * (time_horizon + 1)
         purposes = [''] * (time_horizon + 1)
 
-        # Fill in contributions from schedule
-        if not contribution_schedule:
-            # Default: contribute during working years
-            retirement_age = profile['personal_info']['retirement_age']
-            annual_income = profile['financial_situation']['annual_income']
-            annual_expenses = profile['financial_situation']['annual_expenses']
-            # Save 10% of surplus
-            annual_contribution = max(0, annual_income - annual_expenses) * 0.1
-
-            for year_idx in range(time_horizon + 1):
-                current_age = age + year_idx
-                if current_age < retirement_age:
-                    contributions[year_idx] = annual_contribution
-                    account_types[year_idx] = 'tax_deferred'
-                    purposes[year_idx] = 'retirement'
-        else:
-            # Use provided schedule
+        # Sans échéancier, aucun versement périodique : rien n'est supposé à la
+        # place de l'utilisateur.
+        for k, schedule in enumerate(contribution_schedule):
+            if 'annual_increase' not in schedule:
+                raise ValueError(
+                    f"L'échéancier de versement n° {k + 1} n'a pas de hausse annuelle "
+                    "(annual_increase) : elle n'a pas de valeur par défaut. "
+                    "Renseignez-la, 0 pour un versement constant."
+                )
+        if contribution_schedule:
             for schedule in contribution_schedule:
                 start_year = schedule.get('start_year', 0)
                 end_year = schedule.get('end_year', time_horizon)
                 monthly_amount = schedule.get('monthly_amount', 0)
-                annual_increase = schedule.get('annual_increase', 0.02)  # 2% default
+                annual_increase = schedule['annual_increase']
                 account_type = schedule.get('account_type', 'tax_deferred')
 
                 for year_idx in range(max(0, start_year), min(time_horizon + 1, end_year + 1)):
@@ -404,19 +415,8 @@ class UserProfileManager:
                     account_types[year_idx] = account_type
                     purposes[year_idx] = 'retirement'
 
-        # Fill in withdrawals from schedule
-        if not withdrawal_schedule:
-            # Default: withdraw during retirement
-            retirement_age = profile['personal_info']['retirement_age']
-            annual_expenses = profile['financial_situation']['annual_expenses']
-
-            for year_idx in range(time_horizon + 1):
-                current_age = age + year_idx
-                if current_age >= retirement_age:
-                    withdrawals[year_idx] = annual_expenses
-                    purposes[year_idx] = 'retirement_income'
-        else:
-            # Use provided schedule
+        # Sans échéancier, aucun retrait.
+        if withdrawal_schedule:
             for withdrawal in withdrawal_schedule:
                 year = withdrawal.get('year', 0)
                 amount = withdrawal.get('amount', 0)
@@ -672,7 +672,6 @@ def create_simple_profile(
             'financial_situation': {
                 'current_savings': current_savings,
                 'annual_income': annual_income,
-                'annual_expenses': annual_income * 0.7,
                 'debt': {'mortgage': 0, 'student_loans': 0, 'other': 0}
             },
             'investment_preferences': {
@@ -682,12 +681,6 @@ def create_simple_profile(
                 'esg_preferences': False,
                 'liquidity_needs': 0.05
             },
-            'constraints': {
-                'max_equity_allocation': 0.9,
-                'min_bond_allocation': 0.1,
-                'exclude_sectors': [],
-                'rebalancing_frequency': 'annual'
-            }
         },
         'contribution_schedule': [],
         'withdrawal_schedule': []
