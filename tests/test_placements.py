@@ -18,15 +18,15 @@ from investment_calculator.modules.placements import (
 )
 from investment_calculator.placement_catalog import PlacementCatalog, load_placement_catalog
 
-DRAFT = load_placement_catalog("fr-2026", allow_draft=True)
+FR_2026 = load_placement_catalog("fr-2026")
 
 
 def _catalog(**overrides: dict) -> PlacementCatalog:
-    """Le brouillon fr-2026, avec des valeurs de test pour les champs à null."""
-    document = copy.deepcopy(DRAFT.document)
+    """Le catalogue fr-2026, avec des valeurs de test pour les champs à null."""
+    document = copy.deepcopy(FR_2026.document)
     for placement in document["placements"]:
         placement.update(copy.deepcopy(overrides.get(placement["id"], {})))
-    return PlacementCatalog(document=document, source=DRAFT.source, regime=DRAFT.regime)
+    return PlacementCatalog(document=document, source=FR_2026.source, regime=FR_2026.regime)
 
 
 def _scenarios(**series: list[float]) -> pd.DataFrame:
@@ -106,14 +106,14 @@ def test_livret_a_formule_reglementaire(
     short_rate: float, inflation: float, expected: float
 ) -> None:
     scenarios = _scenarios(interest_rate=[short_rate] * 2, inflation=[inflation] * 2)
-    rate = build_gross_placements(scenarios, DRAFT, ["livret_a"])["livret_a"]
+    rate = build_gross_placements(scenarios, FR_2026, ["livret_a"])["livret_a"]
     np.testing.assert_allclose(rate.to_numpy(), [expected] * 2)
 
 
 def test_serie_absente_refusee() -> None:
     scenarios = _scenarios(stock_return=[0.1, 0.1]).drop(columns=["inflation"])
     with pytest.raises(ValueError, match="inflation"):
-        build_gross_placements(scenarios, DRAFT, ["livret_a"])
+        build_gross_placements(scenarios, FR_2026, ["livret_a"])
 
 
 def test_sur_les_vrais_scenarios() -> None:
@@ -122,7 +122,7 @@ def test_sur_les_vrais_scenarios() -> None:
     scenarios = ScenarioGenerator(random_seed=42).generate(
         {"num_scenarios": 20, "time_horizon": 5, "timestep": 1.0, "use_stochastic": False}
     )["scenarios"]
-    gse_plus = build_gross_placements(scenarios, DRAFT, ["av_uc_actions", "livret_a"])
+    gse_plus = build_gross_placements(scenarios, FR_2026, ["av_uc_actions", "livret_a"])
     assert gse_plus.shape == (100, 2)
     assert gse_plus.notna().all().all()
     assert (gse_plus["livret_a"] >= 0.005).all()

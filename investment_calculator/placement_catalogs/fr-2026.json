@@ -4,10 +4,10 @@
   "id": "fr-2026",
   "country": "FR",
   "tax_regime": "fr-2026",
-  "status": "draft",
+  "status": "validated",
   "validation": {
-    "validated_by": null,
-    "validated_on": null
+    "validated_by": "Sébastien Gallet",
+    "validated_on": "2026-10-10"
   },
   "sources": [
     {
@@ -86,7 +86,7 @@
     }
   ],
   "known_gaps": [
-    "STATUT BROUILLON : valeurs proposées par un agent le 2026-10-10, à valider par une personne. Le chargeur le refuse par défaut.",
+    "Valeurs proposées par un agent le 2026-10-10 avec leurs sources, validées par Sébastien Gallet le 2026-10-10 (choix « Valider tel quel » sur la PR #32).",
     "Toutes les valeurs de frais sont des moyennes de marché : un contrat ou un courtier donné peut être très au-dessus (frais d'entrée de plusieurs pour cent en agence) ou au-dessous (0 % en ligne).",
     "Frais d'entrée du compte-titres et du PEA : le plafond légal du courtage en ligne sur PEA (0,5 %) sert de borne prudente ; aucune moyenne de courtage n'a été trouvée. Pour le compte-titres, sans plafond légal, la même valeur est reprise par défaut.",
     "Frais annuels du compte-titres et du PEA : somme des frais moyens d'un ETF actions (AMF) et de la tenue de compte moyenne (OPEF). Le support est supposé indiciel ; un fonds actif coûte en moyenne 1,37 % par an (AMF, même lettre).",

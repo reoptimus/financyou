@@ -19,9 +19,9 @@ from investment_calculator.modules.placement_optimizer import (
 )
 from investment_calculator.placement_catalog import PlacementCatalog, load_placement_catalog
 
-DRAFT = load_placement_catalog("fr-2026", allow_draft=True)
-PEA_CAP = DRAFT.regime.wrapper("pea")["contribution_limit"]
-LIVRET_CAP = DRAFT.regime.wrapper("livret_a")["contribution_limit"]
+FR_2026 = load_placement_catalog("fr-2026")
+PEA_CAP = FR_2026.regime.wrapper("pea")["contribution_limit"]
+LIVRET_CAP = FR_2026.regime.wrapper("livret_a")["contribution_limit"]
 
 
 def _net(placements: list[str], annualized: np.ndarray, horizon: int = 1) -> NetReturns:
@@ -45,7 +45,7 @@ def _two_assets(seed: int = 0) -> NetReturns:
 
 
 def _free(net: NetReturns, total: float = 10_000.0):
-    return placement_constraints(DRAFT, net.placement_ids, total_contributions=total, n_periods=1)
+    return placement_constraints(FR_2026, net.placement_ids, total_contributions=total, n_periods=1)
 
 
 def test_moyenne_variance_solution_analytique_a_deux_placements() -> None:
@@ -91,7 +91,7 @@ def test_plafond_du_livret_a_respecte() -> None:
     net = _net(["livret_a", "cto_actions"], returns)
     total = 100_000.0
     constraints = placement_constraints(
-        DRAFT, net.placement_ids, total_contributions=total, n_periods=1
+        FR_2026, net.placement_ids, total_contributions=total, n_periods=1
     )
     allocation = optimize_horizon(net, 1, constraints, risk_aversion=5.0)
     assert allocation.weights["livret_a"] == pytest.approx(LIVRET_CAP / total, abs=1e-6)
@@ -101,7 +101,7 @@ def test_plafond_du_livret_a_respecte() -> None:
 def test_placements_d_une_meme_enveloppe_partagent_son_plafond() -> None:
     net = _net(["av_fonds_euros", "pea_actions"], np.zeros((3, 2)))
     constraints = placement_constraints(
-        DRAFT, ["pea_actions", "av_fonds_euros"], total_contributions=300_000.0, n_periods=10
+        FR_2026, ["pea_actions", "av_fonds_euros"], total_contributions=300_000.0, n_periods=10
     )
     assert constraints.a_ub.tolist() == [[1.0, 0.0]]
     assert constraints.b_ub[0] == pytest.approx(PEA_CAP / 300_000.0, abs=1e-6)
@@ -113,7 +113,7 @@ def test_placements_d_une_meme_enveloppe_partagent_son_plafond() -> None:
 def test_plafonds_qui_ne_couvrent_pas_les_versements() -> None:
     net = _net(["livret_a"], np.full((10, 1), 0.02))
     constraints = placement_constraints(
-        DRAFT, ["livret_a"], total_contributions=100_000.0, n_periods=1
+        FR_2026, ["livret_a"], total_contributions=100_000.0, n_periods=1
     )
     with pytest.raises(ValueError, match="livret_a"):
         optimize_horizon(net, 1, constraints, risk_aversion=5.0)
@@ -137,17 +137,17 @@ def test_rendement_cible_inatteignable_refuse() -> None:
 
 def test_versements_nuls_refuses() -> None:
     with pytest.raises(ValueError, match="strictement positifs"):
-        placement_constraints(DRAFT, ["livret_a"], total_contributions=0.0, n_periods=1)
+        placement_constraints(FR_2026, ["livret_a"], total_contributions=0.0, n_periods=1)
 
 
 def test_poids_par_horizon_sur_les_vrais_scenarios() -> None:
     from investment_calculator.modules.placements import build_gross_placements
     from investment_calculator.modules.scenario_generator import ScenarioGenerator
 
-    document = copy.deepcopy(DRAFT.document)
+    document = copy.deepcopy(FR_2026.document)
     for placement in document["placements"]:
         placement["fees"] = {"entry_rate": 0.0, "annual_rate": 0.0}  # valeurs de test
-    catalog = PlacementCatalog(document=document, source=DRAFT.source, regime=DRAFT.regime)
+    catalog = PlacementCatalog(document=document, source=FR_2026.source, regime=FR_2026.regime)
     ids = ["pea_actions", "cto_obligations", "livret_a"]
     scenarios = ScenarioGenerator(random_seed=42).generate(
         {"num_scenarios": 300, "time_horizon": 10, "timestep": 1.0, "use_stochastic": False}
