@@ -98,7 +98,7 @@
                   },
                   "floor_rate": {
                     "$ref": "#/$defs/rate_or_unknown",
-                    "description": "Plancher du rendement servi, net des frais de gestion."
+                    "description": "Plancher du rendement servi avant frais de gestion : les frais s'appliquent ensuite, comme pour un capital garanti hors frais."
                   }
                 }
               },

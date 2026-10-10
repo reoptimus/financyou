@@ -108,8 +108,11 @@ def test_frais_d_entree_preleves_sur_le_versement() -> None:
 
 def test_frais_d_entree_non_sources_refuses() -> None:
     gross = _gross("pea_actions", [[0.1, 0.1]])
+    document = copy.deepcopy(DRAFT.document)
+    document["placements"][2]["fees"]["entry_rate"] = None  # pea_actions
+    catalog = PlacementCatalog(document=document, source=DRAFT.source, regime=DRAFT.regime)
     with pytest.raises(UnsourcedValueError, match="entry_rate"):
-        build_net_returns(gross, DRAFT, PROFILE, [2])
+        build_net_returns(gross, catalog, PROFILE, [2])
 
 
 def test_horizon_hors_des_scenarios_refuse() -> None:

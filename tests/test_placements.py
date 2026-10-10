@@ -56,28 +56,41 @@ def test_sans_frais_un_placement_reproduit_sa_serie() -> None:
 
 def test_frais_annuels_preleves_sur_l_encours() -> None:
     scenarios = _scenarios(stock_return=[0.10, -0.20])
-    gse_plus = build_gross_placements(scenarios, DRAFT, ["av_uc_actions"])
+    catalog = _catalog(av_uc_actions={"fees": {"entry_rate": 0.0, "annual_rate": 0.0088}})
+    gse_plus = build_gross_placements(scenarios, catalog, ["av_uc_actions"])
     expected = (1 + scenarios["stock_return"].to_numpy()) * (1 - 0.0088) - 1
     np.testing.assert_allclose(gse_plus["av_uc_actions"].to_numpy(), expected)
 
 
+UNKNOWN_FEES = {"fees": {"entry_rate": None, "annual_rate": None}}
+
+
 def test_valeur_non_sourcee_refusee() -> None:
+    catalog = _catalog(
+        cto_actions=UNKNOWN_FEES,
+        pea_actions=UNKNOWN_FEES,
+        av_fonds_euros={"support": {"model": "euro_fund", "reference_series": "bond_return",
+                                    "pass_through": None, "floor_rate": 0.0}},
+    )
     with pytest.raises(UnsourcedValueError, match="fees.annual_rate"):
-        build_gross_placements(_scenarios(stock_return=[0.1, 0.1]), DRAFT, ["cto_actions"])
+        build_gross_placements(_scenarios(stock_return=[0.1, 0.1]), catalog, ["cto_actions"])
     with pytest.raises(UnsourcedValueError, match="pass_through"):
-        build_gross_placements(_scenarios(stock_return=[0.1, 0.1]), DRAFT, ["av_fonds_euros"])
+        build_gross_placements(_scenarios(stock_return=[0.1, 0.1]), catalog, ["av_fonds_euros"])
     with pytest.raises(UnsourcedValueError, match="fees.entry_rate"):
-        entry_fee_rates(DRAFT, ["pea_actions"])
+        entry_fee_rates(catalog, ["pea_actions"])
 
 
-def test_fonds_euros_plancher_net_de_frais() -> None:
+def test_fonds_euros_plancher_avant_frais() -> None:
+    # Capital garanti hors frais (OPEF 2026, p. 27) : une année blanche coûte
+    # les frais de gestion.
     catalog = _catalog(av_fonds_euros={
         "support": {"model": "euro_fund", "reference_series": "bond_return",
                     "pass_through": 0.9, "floor_rate": 0.0},
+        "fees": {"entry_rate": 0.0, "annual_rate": 0.0066},
     })
     scenarios = _scenarios(bond_return=[0.04, -0.05])
     served = build_gross_placements(scenarios, catalog, ["av_fonds_euros"])["av_fonds_euros"]
-    np.testing.assert_allclose(served.to_numpy(), [(1 + 0.036) * (1 - 0.0066) - 1, 0.0])
+    np.testing.assert_allclose(served.to_numpy(), [(1 + 0.036) * (1 - 0.0066) - 1, -0.0066])
 
 
 @pytest.mark.parametrize(

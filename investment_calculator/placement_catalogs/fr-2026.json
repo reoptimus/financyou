@@ -4,69 +4,142 @@
   "id": "fr-2026",
   "country": "FR",
   "tax_regime": "fr-2026",
-
   "status": "draft",
   "validation": {
     "validated_by": null,
     "validated_on": null
   },
-
   "sources": [
     {
-      "label": "France Assureurs, étude sur les frais de gestion de l'assurance-vie publiée le 6 mai 2026, citée par Toutsurmesfinances : 0,66 % sur les supports en euros et 0,88 % sur les unités de compte en 2025, inchangés depuis 2024. Source secondaire : l'étude elle-même n'a pas été consultée.",
-      "url": "https://www.toutsurmesfinances.com/actualites/a/assurance-vie-ce-que-les-frais-de-gestion-ont-coute-en-2025",
-      "consulted_on": "2026-10-09",
-      "covers": ["av_fonds_euros.fees.annual_rate", "av_uc_actions.fees.annual_rate"]
+      "label": "CCSF, Observatoire des produits d'épargne financière (OPEF), rapport annuel 2026 (données 2025), p. 4 : frais de gestion annuels moyens de l'assurance-vie « 0,67 % pour les fonds en euros, à 0,80 % pour les UC en gestion libre ». p. 27 : le capital investi en fonds euros « est garanti (hors frais de versement et de gestion) ».",
+      "url": "https://www.banque-france.fr/system/files/2026-06/OPEF2026.pdf",
+      "consulted_on": "2026-10-10",
+      "covers": [
+        "av_fonds_euros.fees.annual_rate",
+        "av_uc_actions.fees.annual_rate",
+        "av_fonds_euros.support.floor_rate"
+      ]
+    },
+    {
+      "label": "CCSF, OPEF, rapport 2026, cité par MoneyVox le 25 juin 2026 : frais sur versement moyens de l'assurance-vie en 2025, 0,55 % sur les fonds en euros et 0,57 % sur les unités de compte (données ACPR). Source secondaire : la section 2.3 du rapport n'a pas pu être lue.",
+      "url": "https://www.moneyvox.fr/assurance-vie/actualites/109415/votre-contrat-est-il-plus-gourmand-en-frais-que-la-moyenne",
+      "consulted_on": "2026-10-10",
+      "covers": [
+        "av_fonds_euros.fees.entry_rate",
+        "av_uc_actions.fees.entry_rate"
+      ]
+    },
+    {
+      "label": "CCSF, OPEF, rapport 2026, cité par Toutsurmesfinances le 25 juin 2026 : coût du service de tenue de compte, 0,15 % par an pour le compte-titres et 0,07 % pour le PEA en 2025 (panel de 24 établissements, investissement de 10 000 €). Source secondaire.",
+      "url": "https://www.toutsurmesfinances.com/actualites/?p=1047",
+      "consulted_on": "2026-10-10",
+      "covers": [
+        "cto_actions.fees.annual_rate",
+        "cto_obligations.fees.annual_rate",
+        "pea_actions.fees.annual_rate"
+      ]
+    },
+    {
+      "label": "AMF, La Lettre de l'Observatoire de l'épargne n° 65, avril 2026 : les ETF répliquant des indices d'actions affichent « des frais annuels moyens en légère baisse à 0,33 % (0,36 % en 2024) ».",
+      "url": "https://www.amf-france.org/sites/institutionnel/files/private/2026-04/loe-65_1.pdf",
+      "consulted_on": "2026-10-10",
+      "covers": [
+        "cto_actions.fees.annual_rate",
+        "cto_obligations.fees.annual_rate",
+        "pea_actions.fees.annual_rate",
+        "av_uc_actions.fees.annual_rate"
+      ]
+    },
+    {
+      "label": "Décret n° 2020-95 du 5 février 2020 (loi PACTE), plafonds des frais du PEA : frais de transaction de 0,5 % pour un ordre passé en ligne. Cité par Finary ; texte officiel non relu.",
+      "url": "https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000041539976",
+      "consulted_on": "2026-10-10",
+      "covers": [
+        "pea_actions.fees.entry_rate",
+        "cto_actions.fees.entry_rate",
+        "cto_obligations.fees.entry_rate"
+      ]
+    },
+    {
+      "label": "Code des assurances, art. L132-29 et A132-16 et suivants : l'assureur redistribue au moins 85 % de ses bénéfices financiers et 90 % de ses bénéfices techniques. Cité par Nalo ; texte officiel non relu.",
+      "url": "https://blog.nalo.fr/participation-benefices-assurance-vie/",
+      "consulted_on": "2026-10-10",
+      "covers": [
+        "av_fonds_euros.support.pass_through"
+      ]
     },
     {
       "label": "Arrêté du 27 janvier 2021 relatif aux taux d'intérêt des produits d'épargne réglementée, article 1er : taux du Livret A = le plus élevé entre la moyenne arithmétique de l'€STR et de l'inflation hors tabac (moyennes semestrielles), arrondie au dixième de point, et 0,5 %.",
       "url": "https://legifrance.gouv.fr/jorf/id/JORFTEXT000043114027",
       "consulted_on": "2026-10-09",
-      "covers": ["livret_a.support"]
+      "covers": [
+        "livret_a.support"
+      ]
     },
     {
       "label": "Service-public.gouv.fr, fiche F2365 : « Les opérations effectuées sur le livret A (ouverture, dépôt, retrait et clôture) sont gratuites. »",
       "url": "https://www.service-public.gouv.fr/particuliers/vosdroits/F2365",
       "consulted_on": "2026-10-09",
-      "covers": ["livret_a.fees"]
+      "covers": [
+        "livret_a.fees"
+      ]
     }
   ],
-
   "known_gaps": [
-    "STATUT BROUILLON : rédigé par un agent le 2026-10-09, à valider par une personne. Le chargeur le refuse par défaut.",
-    "Frais du compte-titres et du PEA (courtage, droits de garde, frais du fonds ou de l'ETF) : non sourcés, ils dépendent du courtier et du support. Laissés à null.",
-    "Frais d'entrée de l'assurance-vie : de zéro (contrats en ligne) à plusieurs pour cent selon le contrat ; aucune moyenne sourcée. Laissés à null.",
-    "Frais propres aux fonds logés en unités de compte : les 0,88 % de France Assureurs sont les frais du contrat, pas ceux des fonds. Non comptés.",
-    "Fonds en euros : la part du rendement obligataire servie (pass_through) n'est pas calibrée ; il faut la tirer de l'historique du taux moyen servi (ACPR) rapporté au rendement des OAT. La garantie en capital est-elle nette ou brute des frais de gestion selon les contrats ? Non tranché : floor_rate laissé à null.",
+    "STATUT BROUILLON : valeurs proposées par un agent le 2026-10-10, à valider par une personne. Le chargeur le refuse par défaut.",
+    "Toutes les valeurs de frais sont des moyennes de marché : un contrat ou un courtier donné peut être très au-dessus (frais d'entrée de plusieurs pour cent en agence) ou au-dessous (0 % en ligne).",
+    "Frais d'entrée du compte-titres et du PEA : le plafond légal du courtage en ligne sur PEA (0,5 %) sert de borne prudente ; aucune moyenne de courtage n'a été trouvée. Pour le compte-titres, sans plafond légal, la même valeur est reprise par défaut.",
+    "Frais annuels du compte-titres et du PEA : somme des frais moyens d'un ETF actions (AMF) et de la tenue de compte moyenne (OPEF). Le support est supposé indiciel ; un fonds actif coûte en moyenne 1,37 % par an (AMF, même lettre).",
+    "Obligations en compte-titres : faute de moyenne publiée pour les ETF obligataires, les frais d'un ETF actions sont repris, ce qui est probablement prudent.",
+    "Unités de compte : frais du contrat (0,80 %, gestion libre) plus frais d'un ETF actions (0,33 %). Les supports en UC coûtent en moyenne 1,60 % par an selon l'OPEF (source secondaire), car la plupart sont des fonds actifs.",
+    "Fonds en euros : pass_through = 0,85, minimum légal de redistribution des bénéfices financiers. Ce minimum s'apprécie sur l'ensemble de l'actif de l'assureur et peut être lissé sur 8 ans (provision pour participation aux bénéfices) ; il s'applique ici chaque année au rendement obligataire du GSE, sans lissage. Le code R d'origine retenait 0,9.",
+    "Fonds en euros : le plancher porte sur le rendement avant frais de gestion (capital garanti hors frais, OPEF p. 27) ; une année blanche coûte donc les frais de gestion. Certains contrats garantissent le capital net de frais : ils ne sont pas représentés.",
     "Livret A : le GSE n'a ni €STR ni inflation hors tabac. Le taux court (interest_rate) et l'inflation du GSE en tiennent lieu. Les dérogations du gouvernement à la formule ne sont pas modélisables.",
     "PEA : le GSE n'a qu'une série actions, sans distinction entre actions européennes (seules éligibles) et mondiales.",
     "Hors périmètre de ce premier catalogue : obligations en PEA, immobilier (en attente de la correction de RealEstateModel), PER (formule de sortie non sourcée)."
   ],
-
   "placements": [
     {
       "id": "cto_actions",
       "label": "Actions en compte-titres",
       "wrapper": "cto",
       "asset_class": "equity",
-      "support": { "model": "gse_series", "series": "stock_return" },
-      "fees": { "entry_rate": null, "annual_rate": null }
+      "support": {
+        "model": "gse_series",
+        "series": "stock_return"
+      },
+      "fees": {
+        "entry_rate": 0.005,
+        "annual_rate": 0.0048
+      }
     },
     {
       "id": "cto_obligations",
       "label": "Obligations en compte-titres",
       "wrapper": "cto",
       "asset_class": "bond",
-      "support": { "model": "gse_series", "series": "bond_return" },
-      "fees": { "entry_rate": null, "annual_rate": null }
+      "support": {
+        "model": "gse_series",
+        "series": "bond_return"
+      },
+      "fees": {
+        "entry_rate": 0.005,
+        "annual_rate": 0.0048
+      }
     },
     {
       "id": "pea_actions",
       "label": "Actions européennes en PEA",
       "wrapper": "pea",
       "asset_class": "equity_eu",
-      "support": { "model": "gse_series", "series": "stock_return" },
-      "fees": { "entry_rate": null, "annual_rate": null }
+      "support": {
+        "model": "gse_series",
+        "series": "stock_return"
+      },
+      "fees": {
+        "entry_rate": 0.005,
+        "annual_rate": 0.004
+      }
     },
     {
       "id": "av_fonds_euros",
@@ -76,18 +149,27 @@
       "support": {
         "model": "euro_fund",
         "reference_series": "bond_return",
-        "pass_through": null,
-        "floor_rate": null
+        "pass_through": 0.85,
+        "floor_rate": 0.0
       },
-      "fees": { "entry_rate": null, "annual_rate": 0.0066 }
+      "fees": {
+        "entry_rate": 0.0055,
+        "annual_rate": 0.0067
+      }
     },
     {
       "id": "av_uc_actions",
       "label": "Assurance-vie, unités de compte actions",
       "wrapper": "assurance_vie",
       "asset_class": "equity",
-      "support": { "model": "gse_series", "series": "stock_return" },
-      "fees": { "entry_rate": null, "annual_rate": 0.0088 }
+      "support": {
+        "model": "gse_series",
+        "series": "stock_return"
+      },
+      "fees": {
+        "entry_rate": 0.0057,
+        "annual_rate": 0.0113
+      }
     },
     {
       "id": "livret_a",
@@ -101,7 +183,10 @@
         "rounding_step": 0.001,
         "floor_rate": 0.005
       },
-      "fees": { "entry_rate": 0.0, "annual_rate": 0.0 }
+      "fees": {
+        "entry_rate": 0.0,
+        "annual_rate": 0.0
+      }
     }
   ]
 }

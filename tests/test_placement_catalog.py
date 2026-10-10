@@ -95,6 +95,7 @@ def test_valide_avec_valeur_inconnue_refuse() -> None:
     document = copy.deepcopy(FR_2026)
     document["status"] = "validated"
     document["validation"] = {"validated_by": "Une Personne", "validated_on": "2026-10-09"}
+    document["placements"][0]["fees"]["entry_rate"] = None
     with pytest.raises(CatalogValidationError, match="valeur inconnue") as excinfo:
         _validate(document)
     assert "placements[0].fees.entry_rate" in str(excinfo.value)

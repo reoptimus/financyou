@@ -68,13 +68,13 @@ def _support_returns(
         return result
 
     if model == "euro_fund":
-        # Rendement servi = part du rendement de référence, frais déduits,
-        # jamais sous le plancher garanti (plancher net de frais).
+        # Rendement servi = part du rendement de référence, jamais sous le
+        # plancher, puis frais de gestion : le capital est garanti hors frais.
         pass_through = _required(support["pass_through"], pid, "support.pass_through")
         floor = _required(support["floor_rate"], pid, "support.floor_rate")
         reference = scenarios[support["reference_series"]].to_numpy(dtype=float)
-        served = _after_fee(pass_through * reference, annual_fee)
-        result = np.maximum(served, floor)
+        served = np.maximum(pass_through * reference, floor)
+        result = _after_fee(served, annual_fee)
         return result
 
     if model == "regulated_rate":
