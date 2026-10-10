@@ -175,25 +175,3 @@ def liquidation_tax(
 
     net = value - income_tax - social_tax
     return LiquidationResult(gain=gain, income_tax=income_tax, social_tax=social_tax, net_value=net)
-
-
-
-def modelled_wrappers(regime: TaxRegime) -> tuple[list[str], dict[str, str]]:
-    """
-    Enveloppes dont l'impôt de sortie est modélisé, et les autres avec la raison.
-
-    Returns:
-        ``(modélisées, {enveloppe: raison})`` : la raison est le message de la
-        ``NotImplementedError`` que lèverait ``liquidation_tax``.
-    """
-    modelled: list[str] = []
-    gaps: dict[str, str] = {}
-    for wrapper_id in regime.wrapper_ids:
-        try:
-            for rule in regime.wrapper(wrapper_id).get("withdrawal_rules") or []:
-                _check_supported(regime, wrapper_id, rule)
-        except NotImplementedError as exc:
-            gaps[wrapper_id] = str(exc)
-        else:
-            modelled.append(wrapper_id)
-    return modelled, gaps

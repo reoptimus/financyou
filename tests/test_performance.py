@@ -1,15 +1,18 @@
 """
 Étape 1.C.5 : 1 000 scénarios × 30 ans en moins de 5 secondes.
 
-Mesure la fiscalité et l'optimisation (simulation comprise) sur des scénarios
-stochastiques de taille réelle. Avant vectorisation : environ 14 s.
+Mesure la chaîne GSE+ → GSE++ → Markowitz par placement, frontière et
+projection du patrimoine comprises, sur des scénarios stochastiques de taille
+réelle. Avant vectorisation de l'ancien moteur : environ 14 s.
 """
 
 import time
 
 import pandas as pd
 
-from investment_calculator.modules import optimizer, scenario_generator, tax_engine
+from investment_calculator.modules import scenario_generator
+from investment_calculator.modules.placement_plan import plan_placements
+from investment_calculator.placement_catalog import load_placement_catalog
 
 BUDGET_SECONDS = 5.0
 
@@ -25,12 +28,15 @@ def test_tax_and_optimization_of_1000_scenarios_over_30_years_under_budget():
     })['scenarios']
 
     start = time.perf_counter()
-    taxed = tax_engine.apply_taxes_simple(scenarios, jurisdiction='FR')
-    results = optimizer.PortfolioOptimizer().optimize({
-        'scenarios': taxed['after_tax_scenarios'],
-        'investment_time_series': pd.DataFrame({'period': range(31), 'net_flow': [1000.0] * 31}),
-        'optimization_objective': 'max_sharpe',
-    })
+    results = plan_placements(
+        scenarios,
+        load_placement_catalog('fr-2026'),
+        pd.DataFrame({'period': range(31), 'net_flow': [1000.0] * 31}),
+        horizon=30,
+        objective='mean_variance',
+        risk_aversion=5.0,
+        risk_free_placement='livret_a',
+    )
     elapsed = time.perf_counter() - start
 
     assert len(results['simulation_results']['terminal_wealth']) == 1000
