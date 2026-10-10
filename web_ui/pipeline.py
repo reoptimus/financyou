@@ -54,6 +54,8 @@ def run_projection(
         objective='mean_variance',
         risk_aversion=risk_aversion,
         risk_free_placement=risk_free_placement,
+        max_equity=profile_results['validated_profile']['constraints']['max_equity_allocation'],
+        min_bond=profile_results['validated_profile']['constraints']['min_bond_allocation'],
     )
     return {
         'scenarios': scenario_results,

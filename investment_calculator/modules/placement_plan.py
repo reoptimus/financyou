@@ -76,6 +76,8 @@ def plan_placements(
     couple: bool = False,
     wrapper_seniority: dict[str, float] | None = None,
     frontier_points: int = 20,
+    max_equity: float | None = None,
+    min_bond: float | None = None,
 ) -> dict[str, Any]:
     """
     Allocation optimale entre les placements du catalogue et patrimoine projeté.
@@ -92,6 +94,9 @@ def plan_placements(
         goal_amount: patrimoine net visé, pour la probabilité de l'atteindre.
         couple, wrapper_seniority: situation fiscale (:class:`TaxProfile`).
         frontier_points: nombre de points de la frontière efficiente.
+        max_equity, min_bond: contraintes du profil (``max_equity_allocation``,
+            ``min_bond_allocation``) ; voir
+            :func:`~investment_calculator.modules.placement_optimizer.placement_constraints`.
 
     Raises:
         ValueError: placement de référence inconnu, ou entrées refusées par
@@ -116,7 +121,8 @@ def plan_placements(
     )
     net = build_net_returns(gross, catalog, profile, [horizon])
     constraints = placement_constraints(
-        catalog, placement_ids, total_contributions=total, n_periods=horizon
+        catalog, placement_ids, total_contributions=total, n_periods=horizon,
+        max_equity=max_equity, min_bond=min_bond,
     )
     risk_free_rate = (
         float(net.annualized(horizon)[risk_free_placement].mean())

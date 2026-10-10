@@ -27,9 +27,17 @@ from investment_calculator.placement_catalog import PlacementCatalog
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["UnsourcedValueError", "build_gross_placements", "entry_fee_rates"]
+__all__ = [
+    "UnsourcedValueError", "asset_exposures", "build_gross_placements", "entry_fee_rates",
+]
 
 INDEX_COLUMNS = ("scenario_id", "time_period")
+
+# Classe d'exposition de chaque série du GSE, pour les contraintes du profil
+# (actions au plus, obligations au moins). Une série absente n'est ni l'une ni
+# l'autre : immobilier, monétaire, inflation.
+EXPOSURE_CLASSES = ("equity", "bond")
+_SERIES_EXPOSURE = {"stock_return": "equity", "bond_return": "bond"}
 
 
 class UnsourcedValueError(ValueError):
@@ -341,3 +349,50 @@ def _series_needed(placement: dict[str, Any]) -> list[str]:
     if support["model"] == "regulated_rate":
         return ["interest_rate", "inflation"]
     return []
+
+
+def asset_exposures(catalog: PlacementCatalog, placement_ids: list[str]) -> pd.DataFrame:
+    """
+    Part de chaque placement exposée aux actions et aux obligations.
+
+    L'exposition se déduit du support décrit dans le catalogue :
+
+    - une série du GSE compte pour sa classe (``stock_return`` en actions,
+      ``bond_return`` en obligations) ;
+    - un fonds en euros adossé à l'actif général compte au prorata de ses
+      actifs, les obligations en valeur comptable en obligations ;
+    - un fonds en euros purement obligataire (``euro_fund``,
+      ``euro_fund_smoothed``) compte entièrement en obligations ;
+    - un taux réglementé (Livret A) n'est ni l'un ni l'autre.
+
+    Returns:
+        Un tableau indexé par placement, colonnes ``equity`` et ``bond``, en
+        fraction du placement.
+    """
+    rows: dict[str, dict[str, float]] = {}
+    for pid in placement_ids:
+        support = catalog.placement(pid)["support"]
+        exposure = dict.fromkeys(EXPOSURE_CLASSES, 0.0)
+        model = support["model"]
+        if model == "gse_series":
+            asset_class = _SERIES_EXPOSURE.get(str(support["series"]))
+            if asset_class is not None:
+                exposure[asset_class] = 1.0
+        elif model in ("euro_fund", "euro_fund_smoothed"):
+            exposure["bond"] = 1.0
+        elif model == "euro_fund_general_account":
+            for k, asset in enumerate(support["assets"]):
+                weight = _required(asset["weight"], pid, f"support.assets[{k}].weight")
+                if asset["kind"] == "book_bonds":
+                    exposure["bond"] += weight
+                else:
+                    asset_class = _SERIES_EXPOSURE.get(str(asset["series"]))
+                    if asset_class is not None:
+                        exposure[asset_class] += weight
+        elif model != "regulated_rate":
+            raise NotImplementedError(
+                f"Exposition du modèle de support {model!r} (placement {pid!r}) non "
+                f"définie : complétez asset_exposures avant de l'utiliser."
+            )
+        rows[pid] = exposure
+    return pd.DataFrame.from_dict(rows, orient="index", columns=list(EXPOSURE_CLASSES))
