@@ -93,6 +93,74 @@ def test_fonds_euros_plancher_avant_frais() -> None:
     np.testing.assert_allclose(served.to_numpy(), [(1 + 0.036) * (1 - 0.0066) - 1, -0.0066])
 
 
+def _smoothed(renewal_years: float | None = 8.0, initial_yield: float | None = 0.02) -> dict:
+    return {
+        "support": {"model": "euro_fund_smoothed", "reference_series": "interest_rate",
+                    "renewal_years": renewal_years, "initial_yield": initial_yield,
+                    "pass_through": 0.85, "floor_rate": 0.0},
+        "fees": {"entry_rate": 0.0, "annual_rate": 0.0067},
+    }
+
+
+def test_fonds_euros_lisse_suit_le_portefeuille_renouvele() -> None:
+    # Un huitième du portefeuille est réinvesti chaque année au taux du GSE.
+    catalog = _catalog(av_fonds_euros=_smoothed())
+    scenarios = _scenarios(interest_rate=[0.06, 0.06, 0.00, 0.00])
+    served = build_gross_placements(scenarios, catalog, ["av_fonds_euros"])["av_fonds_euros"]
+    y1 = 0.02 + (0.06 - 0.02) / 8
+    y2 = y1 + (0.06 - y1) / 8
+    y1b = 0.02 + (0.00 - 0.02) / 8  # le second scénario repart du rendement initial
+    y2b = y1b + (0.00 - y1b) / 8
+    expected = [(1 + 0.85 * y) * (1 - 0.0067) - 1 for y in (y1, y2, y1b, y2b)]
+    np.testing.assert_allclose(served.to_numpy(), expected)
+
+
+def test_fonds_euros_lisse_independant_de_l_ordre_des_lignes() -> None:
+    catalog = _catalog(av_fonds_euros=_smoothed())
+    scenarios = _scenarios(interest_rate=[0.06, 0.01, 0.03, 0.00])
+    ordered = build_gross_placements(scenarios, catalog, ["av_fonds_euros"])
+    shuffled = build_gross_placements(scenarios.iloc[[3, 1, 0, 2]], catalog, ["av_fonds_euros"])
+    pd.testing.assert_frame_equal(ordered.sort_index(), shuffled.sort_index())
+
+
+def test_fonds_euros_sans_lissage_reproduit_le_modele_annuel() -> None:
+    # renewal_years = 1 : tout est réinvesti chaque année, y(t) = r(t).
+    catalog = _catalog(av_fonds_euros=_smoothed(renewal_years=1.0))
+    scenarios = _scenarios(interest_rate=[0.04, -0.05])
+    served = build_gross_placements(scenarios, catalog, ["av_fonds_euros"])["av_fonds_euros"]
+    np.testing.assert_allclose(served.to_numpy(), [(1 + 0.034) * (1 - 0.0067) - 1, -0.0067])
+
+
+def test_fonds_euros_lisse_valeurs_non_sourcees_refusees() -> None:
+    scenarios = _scenarios(interest_rate=[0.02, 0.02])
+    for name, kwargs in (("initial_yield", {"initial_yield": None}),
+                         ("renewal_years", {"renewal_years": None})):
+        catalog = _catalog(av_fonds_euros=_smoothed(**kwargs))
+        with pytest.raises(UnsourcedValueError, match=name):
+            build_gross_placements(scenarios, catalog, ["av_fonds_euros"])
+    with pytest.raises(ValueError, match="au moins"):
+        build_gross_placements(scenarios, _catalog(av_fonds_euros=_smoothed(0.5)),
+                               ["av_fonds_euros"])
+
+
+def test_fonds_euros_lisse_volatilite_realiste_sur_le_gse() -> None:
+    """Preuve : sur les vrais scénarios, le lissage ramène la volatilité annuelle
+    du taux servi sous celle du taux de référence, et loin du modèle annuel."""
+    from investment_calculator.modules.scenario_generator import ScenarioGenerator
+
+    scenarios = ScenarioGenerator(random_seed=42).generate(
+        {"num_scenarios": 200, "time_horizon": 30, "timestep": 1.0, "use_stochastic": False}
+    )["scenarios"]
+    annual = build_gross_placements(scenarios, FR_2026, ["av_fonds_euros"])["av_fonds_euros"]
+    smoothed = build_gross_placements(
+        scenarios, _catalog(av_fonds_euros=_smoothed()), ["av_fonds_euros"]
+    )["av_fonds_euros"]
+    # Variation moyenne du taux servi d'une année sur l'autre, dans chaque scénario.
+    year_to_year = smoothed.groupby(level="scenario_id").diff().abs().mean()
+    assert smoothed.std() < 0.25 * annual.std()
+    assert year_to_year < 0.005
+
+
 @pytest.mark.parametrize(
     ("short_rate", "inflation", "expected"),
     [
