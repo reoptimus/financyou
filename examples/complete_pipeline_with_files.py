@@ -7,9 +7,9 @@ to portfolio optimization using JSON configuration files.
 WHAT THIS DOES:
 1. Loads configuration from JSON files
 2. Generates 1000 economic scenarios
-3. Applies tax treatment
+3. Builds GSE+ (gross returns of the household placements)
 4. Processes user profile
-5. Optimizes portfolio
+5. Builds GSE++ (returns net of fees and taxes) and optimizes the placements
 6. Generates comprehensive report
 7. Saves all results
 
@@ -22,7 +22,6 @@ USAGE:
 CUSTOMIZATION:
     Edit JSON files in examples/input_files/ to customize:
     - scenario_config.json - Economic assumptions
-    - tax_config_fr.json - Tax configuration
     - user_profile_aggressive.json - Investor profile
     - optimization_config.json - Optimization parameters
 """
@@ -36,14 +35,14 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from investment_calculator import tax_regime
 from investment_calculator.modules import (
     scenario_generator,
-    tax_engine,
     user_profile,
-    optimizer,
     reporting
 )
+from investment_calculator.modules.placement_plan import plan_placements
+from investment_calculator.modules.placements import build_gross_placements
+from investment_calculator.placement_catalog import load_placement_catalog
 
 
 def remove_comments(obj):
@@ -109,9 +108,9 @@ def main():
     print("\nThis pipeline will:")
     print("  1. Load configuration from JSON files")
     print("  2. Generate economic scenarios")
-    print("  3. Apply tax treatment")
+    print("  3. Build GSE+ (household placements)")
     print("  4. Process user profile")
-    print("  5. Optimize portfolio")
+    print("  5. Build GSE++ (net of fees and taxes) and optimize placements")
     print("  6. Generate comprehensive report")
     print("  7. Save all results to 'outputs/' directory")
 
@@ -124,21 +123,17 @@ def main():
 
     # Load all configs
     scenario_config = load_json_config('scenario_config.json')
-    # Seul le régime français est vérifié aujourd'hui — voir
-    # investment_calculator/tax_regimes/README.md
-    tax_config_data = load_json_config('tax_config_fr.json')
     user_profile_data = load_json_config('user_profile_aggressive.json')
     optimization_config = load_json_config('optimization_config.json')
 
     print(f"  ✓ scenario_config.json")
-    print(f"  ✓ tax_config_fr.json")
     print(f"  ✓ user_profile_aggressive.json")
     print(f"  ✓ optimization_config.json")
 
     print(f"\nConfiguration summary:")
     print(f"  Scenarios to generate: {scenario_config['num_scenarios']}")
     print(f"  Time horizon: {scenario_config['time_horizon']} years")
-    print(f"  Tax jurisdiction: {tax_config_data['jurisdiction']}")
+    print(f"  Placement catalog: {optimization_config['placement_catalog']}")
     print(f"  Investor age: {user_profile_data['user_profile']['personal_info']['age']}")
     print(f"  Risk tolerance: {user_profile_data['user_profile']['investment_preferences']['risk_tolerance']}")
     print(f"  Optimization objective: {optimization_config['optimization_objective']}")
@@ -165,48 +160,19 @@ def main():
     print(f"  Stock-bond correlation: {diagnostics['correlations'].loc['stock_return', 'bond_return']:.2f}")
 
     # ========================================================================
-    # STEP 3: APPLY TAX TREATMENT
+    # STEP 3: BUILD GSE+ (HOUSEHOLD PLACEMENTS)
     # ========================================================================
-    print_section("STEP 3: APPLYING TAX TREATMENT")
+    print_section("STEP 3: BUILDING GSE+ (HOUSEHOLD PLACEMENTS)")
 
-    print(f"\nApplying {tax_config_data['jurisdiction']} tax rules...")
+    # Le catalogue décrit les placements (support, enveloppe, frais) ; il porte
+    # le régime fiscal de son pays et de son millésime.
+    catalog = load_placement_catalog(optimization_config['placement_catalog'])
+    gross = build_gross_placements(scenarios_df, catalog)
 
-    engine = tax_engine.TaxEngine()
-
-    # Charger le régime fiscal du pays et le traduire pour ce moteur
-    tax_config_preset = tax_regime.load_regime(
-        tax_config_data['jurisdiction']
-    ).to_scenario_tax_config(reference_household_income=50_000)
-
-    # Apply taxes
-    tax_results = engine.apply_taxes({
-        'scenarios': scenarios_df,
-        'tax_config': tax_config_preset,
-        'investment_allocation': tax_config_data['investment_allocation']
-    })
-
-    after_tax_scenarios = tax_results['after_tax_scenarios']
-
-    print(f"✓ Calculated after-tax returns")
-
-    if 'tax_tables' in tax_results and 'effective_tax_rate' in tax_results['tax_tables']:
-        effective_rates = tax_results['tax_tables']['effective_tax_rate']
-        if not effective_rates.empty:
-            print(f"\nTax Impact:")
-            print(f"  Mean effective tax rate: {effective_rates['effective_tax_rate'].mean():.1%}")
-            print(f"  Tax drag on returns: {after_tax_scenarios['annual_tax_drag'].mean():.2%}")
-
-    print(f"\nAllocation across account types:")
-    for asset, allocation in tax_config_data['investment_allocation'].items():
-        # Skip comment fields
-        if asset.startswith('_') or not isinstance(allocation, dict):
-            continue
-        print(f"  {asset}:")
-        for account_type, pct in allocation.items():
-            # Skip comment fields in nested dicts
-            if account_type.startswith('_') or not isinstance(pct, (int, float)):
-                continue
-            print(f"    {account_type}: {pct:.0%}")
+    print(f"\n✓ Catalog {catalog.id} ({catalog.status}), regime {catalog.regime.id}")
+    print(f"\nMean annual return net of annual fees, before tax:")
+    for placement_id, mean in gross.mean().items():
+        print(f"  {placement_id}: {mean:.2%}")
 
     # ========================================================================
     # STEP 4: PROCESS USER PROFILE
@@ -247,26 +213,32 @@ def main():
     print(f"  Average annual: ${summary_stats['average_annual_contribution']:,.0f}")
 
     # ========================================================================
-    # STEP 5: OPTIMIZE PORTFOLIO
+    # STEP 5: BUILD GSE++ AND OPTIMIZE PLACEMENTS
     # ========================================================================
-    print_section("STEP 5: OPTIMIZING PORTFOLIO")
+    print_section("STEP 5: BUILDING GSE++ AND OPTIMIZING PLACEMENTS")
 
-    print(f"\nOptimizing with objective: {optimization_config['optimization_objective']}")
+    # L'horizon est celui du profil, ramené à la durée des scénarios.
+    profile_horizon = validated['investment_preferences']['time_horizon']
+    horizon = min(profile_horizon, scenario_config['time_horizon'])
+    if horizon < profile_horizon:
+        print(f"\n⚠ Horizon reduced from {profile_horizon} to {horizon} years "
+              f"(length of the scenarios)")
 
-    opt = optimizer.PortfolioOptimizer()
+    params = optimization_config['optimization_params']
+    print(f"\nOptimizing with objective: {optimization_config['optimization_objective']} "
+          f"at horizon {horizon} years")
 
-    # Build optimization config
-    opt_config = {
-        'scenarios': after_tax_scenarios,
-        'user_constraints': validated['constraints'],
-        'investment_time_series': profile_results['investment_time_series'],
-        'optimization_objective': optimization_config['optimization_objective'],
-        'optimization_params': optimization_config['optimization_params'],
-        'wrapper_constraints': optimization_config.get('wrapper_constraints'),
-        'goal_amount': optimization_config['goal_amount']
-    }
-
-    optimization_results = opt.optimize(opt_config)
+    optimization_results = plan_placements(
+        scenarios_df,
+        catalog,
+        profile_results['investment_time_series'],
+        horizon=horizon,
+        objective=optimization_config['optimization_objective'],
+        risk_aversion=params.get('risk_aversion'),
+        target_return=params.get('target_return'),
+        risk_free_placement=optimization_config.get('risk_free_placement'),
+        goal_amount=optimization_config['goal_amount'],
+    )
 
     optimal = optimization_results['optimal_portfolio']
     sim_stats = optimization_results['simulation_results']['statistics']
@@ -275,27 +247,28 @@ def main():
     print(f"✓ Optimization complete")
 
     print(f"\nOptimal Portfolio:")
-    for asset, weight in optimal['weights'].items():
-        print(f"  {asset}: {weight:.1%}")
+    for placement_id, weight in optimal['weights'].items():
+        print(f"  {placement_id}: {weight:.1%}")
+    if optimization_results['constraints_explanation']:
+        print(f"\nContribution caps: {optimization_results['constraints_explanation']}")
 
-    if 'wrapper_allocation' in optimization_results:
-        print(f"\nWrapper placement (share of contributions):")
-        print(optimization_results['wrapper_allocation'].to_string(index=False))
-
-    print(f"\nExpected Performance:")
+    sharpe = optimal['sharpe_ratio']
+    print(f"\nExpected Performance (net of fees and taxes, annualized over {horizon} years):")
     print(f"  Expected return: {optimal['expected_return']:.2%}")
     print(f"  Expected volatility: {optimal['expected_volatility']:.2%}")
-    print(f"  Sharpe ratio: {optimal['sharpe_ratio']:.2f}")
+    print(f"  Sharpe ratio: {sharpe:.2f}" if sharpe is not None else "  Sharpe ratio: not computed")
     print(f"  Max drawdown: {optimal['max_drawdown']:.1%}")
 
-    print(f"\nMonte Carlo Simulation ({scenario_config['num_scenarios']} scenarios):")
-    print(f"  Median terminal wealth: ${sim_stats['median_terminal_wealth']:,.0f}")
-    print(f"  Mean terminal wealth: ${sim_stats['mean_terminal_wealth']:,.0f}")
-    print(f"  5th percentile: ${sim_stats['percentiles']['5']:,.0f}")
-    print(f"  95th percentile: ${sim_stats['percentiles']['95']:,.0f}")
+    print(f"\nMonte Carlo Simulation ({scenario_config['num_scenarios']} scenarios, "
+          f"after exit tax):")
+    print(f"  Total contributions: {sim_stats['total_contributions']:,.0f}")
+    print(f"  Median terminal wealth: {sim_stats['median_terminal_wealth']:,.0f}")
+    print(f"  Mean terminal wealth: {sim_stats['mean_terminal_wealth']:,.0f}")
+    print(f"  5th percentile: {sim_stats['percentiles']['5']:,.0f}")
+    print(f"  95th percentile: {sim_stats['percentiles']['95']:,.0f}")
 
     print(f"\nGoal Analysis:")
-    print(f"  Target: ${goal_analysis['goal_amount']:,.0f}")
+    print(f"  Target: {goal_analysis['goal_amount']:,.0f}")
     print(f"  Probability of achieving: {goal_analysis['probability_of_achieving']:.1%}")
 
     # ========================================================================
@@ -309,7 +282,7 @@ def main():
 
     report_results = reporter.generate({
         'scenarios': scenario_results,
-        'tax_results': tax_results,
+        'tax_results': {},
         'user_profile': profile_results,
         'optimization_results': optimization_results,
         'report_config': {
