@@ -165,7 +165,15 @@ entrées.
    être sourcées avant.
 8. **Immobilier à crédit.** `fct_discret_optim.R` et la suite, avec les
    crédits d'impôt. Cela dépend du modèle immobilier et des hypothèses de la
-   section 4. C'est la dernière étape et la plus lourde.
+   section 4. C'est la dernière étape et la plus lourde. La ligne `Ra<-` de
+   `Earn_Aft_Int_TaxesV3.R` a des erreurs connues. Elles seront nommées dans
+   la traduction fidèle, pas reproduites :
+   - l'abattement pour durée de détention porte sur la valeur au lieu du
+     gain ;
+   - la résidence principale paie l'impôt sur le revenu de la plus-value ;
+   - les prélèvements sociaux s'appliquent aux moins-values ;
+   - le taux de 7,5 % de l'assurance vie dans `Table_placements.xlsx` n'est
+     jamais lu.
 
 Hors de cet ordre, à décider plus tard : les obligations notées avec défauts
 (`Oblig_credit_spread_V1.R`) et la grille approchée (`fct_prod_soltot.R`).
