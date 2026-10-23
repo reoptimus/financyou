@@ -8,6 +8,7 @@ This package contains the core modules of the FinancYou system:
 3. placements, net_returns, placement_optimizer, wealth_simulation,
    placement_plan - GSE+ par placement, GSE++ net de frais et d'impôts,
    Markowitz par horizon et projection du patrimoine (ADR 0002)
+   household_cash_flow - projets du foyer et capital disponible par année
 4. reporting - Visualization & Reporting
 
 Each module has clear input/output structures documented in ARCHITECTURE.md
@@ -21,6 +22,7 @@ For a complete workflow example, see examples/complete_workflow_modules.py
 """
 
 from investment_calculator.modules import (
+    household_cash_flow,
     net_returns,
     placement_optimizer,
     placement_plan,
@@ -39,6 +41,7 @@ __all__ = [
     'placement_optimizer',
     'wealth_simulation',
     'placement_plan',
+    'household_cash_flow',
     'reporting'
 ]
 
@@ -53,5 +56,6 @@ MODULE_DESCRIPTIONS = {
     'placement_optimizer': 'Markowitz par horizon sous les plafonds des enveloppes',
     'wealth_simulation': 'Projection du patrimoine net des versements',
     'placement_plan': 'Chaîne complète au format du rapport',
+    'household_cash_flow': 'Projets du foyer et courbe de capital disponible',
     'reporting': 'Generate comprehensive reports and visualizations'
 }
