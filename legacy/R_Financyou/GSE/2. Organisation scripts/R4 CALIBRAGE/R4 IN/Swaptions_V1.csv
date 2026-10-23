@@ -1,0 +1,6 @@
+Variables;Swaption data 1;Swaption data 2;Swaption data 3;Swaption data 4;Swaption data 5;Swaption data 6;Swaption data 7;Swaption data 8
+t;9;9;10;10;12;12;15;15
+T;2;5;5;10;5;10;5;10
+n;0.5;0.5;0.5;0.5;0.5;0.5;0.5;0.5
+K;0.0177;0.0191;0.0199;0.0202;0.0207;0.0204;0.0205;0.02
+sigma;0.6789;0.6648;0.6673;0.6555;0.6561;0.6423;0.6397;0.6213

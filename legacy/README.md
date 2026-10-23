@@ -38,6 +38,15 @@ CSV and text files including:
 - `Rdt_immo_*.txt` - Real estate return data
 - And other data files
 
+## R_Financyou/ : l'archive complète (2026-10-23)
+
+`R_Financyou/` contient tout le code R d'origine, dans son arborescence
+d'origine : GSE, GSE+, GSE++, le moteur MOCA (dont `MOCA/FCT/Reoptimus_striping.R`,
+le découpage en tranches) et l'application Shiny. Les scripts de `R_scripts/`
+en sont une copie partielle. Voir `R_Financyou/README.md` pour ce qui a été
+exclu et pourquoi, et `docs/portage-r/inventaire-code-r.md` pour l'inventaire
+et l'ordre de portage.
+
 ## Notes
 
 These files represent earlier work on:
