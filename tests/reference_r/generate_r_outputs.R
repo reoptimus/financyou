@@ -45,9 +45,24 @@ M <- data.frame(Nom = "neutre", Debut = 1, Versement = 0, Mensualite = 0, Duree 
 base <- Exp_fin(M, horiz, 18000, 25000)
 cumul <- base - cumsum(colSums(rows))
 
+# --- Reoptimus_striping.R : tranches (application) -------------------------
+load_r(file.path(L, "ShinyR/BetaV1/Financyou/Data_Log/FCT_A/Reoptimus_striping.R"))
+curves <- list(
+  c(10000, 16000, 22000, 28000, 34000, 40000, 46000, 52000, 58000, 64000, 70000),
+  c(10000, 16000, 22000, 28000, 14000, 20000, 26000, 32000, 38000, 44000, 50000),
+  c(10000, 30000, 12000, 20000),
+  c(20000, 26000, 32000, 8000, 14000, 20000, 26000),
+  c(20000, 40000, 40000, 5000, 5000, 5000)
+)
+strip_out <- lapply(curves, function(a) {
+  r <- tryCatch(stripping(5000, a), error = function(e) conditionMessage(e))
+  if (is.character(r)) list(input = a, error = r) else list(input = a, output = unname(r))
+})
+
 out <- list(
   r_version = R.version.string,
   exp_proj_hist = list(horiz = horiz, cases = proj_out),
-  exp_fin = list(horiz = horiz, sal_net = 18000, epar = 25000, output = as.numeric(cumul))
+  exp_fin = list(horiz = horiz, sal_net = 18000, epar = 25000, output = as.numeric(cumul)),
+  stripping = list(pas_e = 5000, cases = strip_out)
 )
 write_json(out, "tests/reference_r/r_outputs.json", digits = NA, auto_unbox = TRUE, pretty = TRUE)

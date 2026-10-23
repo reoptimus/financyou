@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 from tests.reference_r.exp_finance import r_cumulative_capital, r_exp_proj_hist
+from tests.reference_r.striping import r_stripping
 
 R_OUTPUTS: dict[str, Any] = json.loads(
     (Path(__file__).parent / "reference_r" / "r_outputs.json").read_text(encoding="utf-8")
@@ -39,3 +40,16 @@ def test_exp_fin_cumulative_translation_matches_r() -> None:
     ours = r_cumulative_capital(rows, horiz, spec["sal_net"], spec["epar"])
     np.testing.assert_allclose(ours, spec["output"])
 
+
+@pytest.mark.parametrize(
+    "case", R_OUTPUTS["stripping"]["cases"], ids=lambda c: str(c["input"][:4])
+)
+def test_stripping_translation_matches_r(case: dict[str, Any]) -> None:
+    pas_e = R_OUTPUTS["stripping"]["pas_e"]
+    curve = np.asarray(case["input"], dtype=float)
+    if "error" in case:
+        # R : « subscript out of bounds » ; la traduction lève l'erreur d'indice équivalente.
+        with pytest.raises(IndexError):
+            r_stripping(pas_e, curve)
+        return
+    np.testing.assert_allclose(r_stripping(pas_e, curve), np.asarray(case["output"]), rtol=1e-12)
