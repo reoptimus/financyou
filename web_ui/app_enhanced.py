@@ -19,7 +19,7 @@ from investment_calculator.placement_catalog import (
     list_placement_catalogs,
     load_placement_catalog,
 )
-from web_ui.pipeline import build_profile_config, run_projection
+from web_ui.pipeline import build_profile_config, build_projects, run_projection
 
 st.set_page_config(
     page_title="FinancYou",
@@ -32,13 +32,17 @@ PAGES = {
     "🏠 Accueil": "Home",
     "👤 Profil et versements": "Profile",
     "💼 Épargne existante": "Holdings",
+    "🎯 Projets": "Projects",
     "📊 Projection": "Projection",
 }
 
 
 def init_session_state():
     """Initialiser l'état de session."""
-    defaults = {'form': None, 'holdings': [], 'results': None, 'page': 'Home'}
+    defaults = {
+        'form': None, 'holdings': [], 'projects': [], 'available_savings': None,
+        'results': None, 'page': 'Home',
+    }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
@@ -87,7 +91,9 @@ def page_home():
     st.markdown(
         "1. **Profil et versements** : âge, horizon, revenus, épargne mensuelle.\n"
         "2. **Épargne existante** : ce que vous détenez déjà, laissé en place.\n"
-        "3. **Projection** : répartition des nouveaux versements et patrimoine projeté."
+        "3. **Projets** (facultatif) : les dépenses prévues, pour placer chaque euro "
+        "jusqu'au projet qui l'utilisera.\n"
+        "4. **Projection** : répartition des nouveaux versements et patrimoine projeté."
     )
     if st.button("📝 Commencer", type="primary"):
         st.session_state.page = "Profile"
@@ -234,6 +240,71 @@ def page_holdings():
                 st.rerun()
 
 
+def page_projects():
+    """Saisie des projets du foyer, au format du R : début, versements, durée, revente."""
+    st.markdown("# 🎯 Projets")
+    st.markdown(
+        "Un projet est une dépense datée : un versement initial l'année de début, "
+        "puis un versement chaque année pendant la durée, et une éventuelle revente "
+        "en fin de projet, qui s'ajoute au dernier versement. L'argent d'un projet "
+        "proche est placé à court terme, l'épargne de long terme à long terme."
+    )
+    projects = st.session_state.projects
+    if projects:
+        table = pd.DataFrame(projects).rename(columns={
+            'name': 'Projet', 'start_year': 'Début (dans n ans)',
+            'initial_payment': 'Versement initial (€)', 'annual_payment': 'Versement annuel (€)',
+            'duration_years': 'Durée (ans)', 'resale': 'Revente (€)',
+        })
+        st.dataframe(table, use_container_width=True)
+        to_remove = st.selectbox(
+            "Retirer un projet", range(len(projects)),
+            format_func=lambda k: projects[k]['name'],
+        )
+        if st.button("🗑️ Retirer le projet"):
+            projects.pop(to_remove)
+            st.session_state.results = None
+            st.rerun()
+    else:
+        st.info("Aucun projet saisi : la projection place tout jusqu'à la retraite.")
+
+    available = st.number_input(
+        "Épargne déjà disponible pour financer ces projets (€)", 0.0, None,
+        st.session_state.available_savings, 1000.0,
+        help="Distincte de l'épargne existante, qui reste dans ses placements.",
+    )
+    if available != st.session_state.available_savings:
+        st.session_state.available_savings = available
+        st.session_state.results = None
+
+    with st.form("add_project"):
+        st.markdown("### Ajouter un projet")
+        name = st.text_input("Nom du projet")
+        col1, col2 = st.columns(2)
+        with col1:
+            start_year = st.number_input("Début, dans combien d'années", 0, 100, None, 1)
+            initial_payment = st.number_input("Versement initial (€)", 0.0, None, None, 1000.0)
+            annual_payment = st.number_input("Versement annuel (€)", 0.0, None, None, 500.0)
+        with col2:
+            duration_years = st.number_input("Durée des versements annuels (ans)", 0, 100, None, 1)
+            resale = st.number_input("Revente en fin de projet (€)", 0.0, None, None, 1000.0)
+        if st.form_submit_button("➕ Ajouter le projet"):
+            row = {'name': name.strip(), 'start_year': start_year,
+                   'initial_payment': initial_payment, 'annual_payment': annual_payment,
+                   'duration_years': duration_years, 'resale': resale}
+            if not row['name'] or None in row.values():
+                st.error("Renseignez le nom et tous les montants (0 si sans objet).")
+                return
+            try:
+                build_projects([row])
+            except ValueError as error:
+                st.error(str(error))
+                return
+            projects.append(row)
+            st.session_state.results = None
+            st.rerun()
+
+
 def page_projection():
     """Calcul et résultats."""
     st.markdown("# 📊 Projection")
@@ -296,6 +367,32 @@ def display_results(results):
         for gap in optimization['known_gaps']:
             st.markdown(f"- {gap}")
 
+    if 'tranche_plan' in results:
+        display_tranche_plan(results['tranche_plan'], catalog)
+
+
+def display_tranche_plan(plan, catalog):
+    """Afficher le plan par tranches : capital, euros par placement, poids par horizon."""
+    st.markdown("### Plan par tranches, avec vos projets")
+    labels = {pid: catalog.placement(pid)['label'] for pid in catalog.placement_ids}
+    amounts = plan['amounts'].rename(columns=labels)
+    long_form = amounts.reset_index().melt(
+        id_vars='year', var_name='Placement', value_name='Montant (€)'
+    )
+    fig = px.area(long_form, x='year', y='Montant (€)', color='Placement',
+                  labels={'year': 'Année'})
+    st.plotly_chart(fig, use_container_width=True)
+    if plan['unplaced'].any():
+        st.caption(
+            f"{plan['unplaced'].max():,.0f} € n'arrivent qu'à l'horizon et ne sont pas placés."
+        )
+    st.markdown("Répartition optimale selon la durée de placement (années)")
+    weights = plan['weights_by_horizon'].rename(index=labels)
+    st.dataframe(weights.style.format('{:.1%}'), use_container_width=True)
+    with st.expander("Limites connues du plan par tranches"):
+        for gap in plan['known_gaps']:
+            st.markdown(f"- {gap}")
+
 
 def run_analysis(form):
     """Lancer le calcul pour la saisie enregistrée ; afficher l'erreur s'il échoue."""
@@ -309,6 +406,8 @@ def run_analysis(form):
             risk_aversion=st.session_state.risk_aversion,
             risk_free_placement=None if reference == 'Aucun' else reference,
             couple=form['couple'],
+            projects=build_projects(st.session_state.projects),
+            available_savings=st.session_state.available_savings,
         )
     except (ValueError, NotImplementedError) as error:
         st.error(f"Calcul impossible : {error}")
@@ -324,6 +423,8 @@ def main():
         page_profile()
     elif page == 'Holdings':
         page_holdings()
+    elif page == 'Projects':
+        page_projects()
     elif page == 'Projection':
         page_projection()
     else:
