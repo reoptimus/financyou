@@ -110,6 +110,18 @@ ir_qf <- c(0, 5000, 11600, 11601, 20000, 29579, 35000, 60000, 84577, 90000,
            150000, 181917, 200000, 300000, 15000, 42000, 7000, 100000, 25000, 500000)
 ir_out <- as.numeric(fct_flux_IR(ir_qf))  # lit la globale horiz = 20
 
+# --- fct_crd_flux.R : crédits en cours ---
+load_r(file.path(L, "ShinyR/BetaV1/Financyou/Data_Log/FCT_Global/fct_crd_flux.R"))
+crd_cases <- list(
+  list(horiz = 20, annuite = 12000, taux = 0.015, an_rest = 15),
+  list(horiz = 10, annuite = 9000, taux = 0.04, an_rest = 18),
+  list(horiz = 12, annuite = 6000, taux = 0, an_rest = 5)
+)
+crd_out <- lapply(crd_cases, function(cs) {
+  res <- Flux_crd(cs$horiz, cs$annuite, cs$taux, cs$an_rest)
+  c(cs, list(principal = as.numeric(res[[1]]), interest = as.numeric(res[[2]])))
+})
+
 out <- list(
   r_version = R.version.string,
   exp_proj_hist = list(horiz = horiz, cases = proj_out),
@@ -123,6 +135,7 @@ out <- list(
   michaud = list(
     returns = michaud_returns[, 1, , ], cases = michaud_out
   ),
-  imp_ir = list(qf = ir_qf, output = ir_out)
+  imp_ir = list(qf = ir_qf, output = ir_out),
+  crd_flux = crd_out
 )
 write_json(out, "tests/reference_r/r_outputs.json", digits = NA, auto_unbox = TRUE, pretty = TRUE)
