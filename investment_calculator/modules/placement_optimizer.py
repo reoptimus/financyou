@@ -13,8 +13,28 @@ capacité est une part des versements totaux, ``plafond / versements``.
 
 Équivalent R : ``legacy/R_scripts/gen_alpha_optim.R``, qui produit ``soltot``,
 les poids par placement et par horizon, en maximisant l'utilité
-moyenne-variance pour une aversion au risque donnée. Le rééchantillonnage de
-Michaud n'est pas encore porté (``Script_Bootstrap_V5_quick.R`` manque au dépôt).
+moyenne-variance pour une aversion au risque donnée.
+
+Le rééchantillonnage de Michaud (:func:`optimize_horizon_resampled`) porte
+``legacy/R_Financyou/MOCA/FCT/Script_Bootstrap_V5_quick.R``. Les scénarios sont
+découpés en paquets, l'optimum est calculé sur chaque paquet, puis on fait la
+moyenne des poids. Les allocations obtenues varient moins d'un jeu de
+scénarios à l'autre et sont plus diversifiées. La traduction fidèle est dans
+``tests/reference_r/bootstrap_michaud.py``. Sur un même découpage, le portage
+donne les poids du R. Il s'en écarte sur trois points :
+
+1. **Solveur exact.** Le R résout le lagrangien en forme fermée, puis force à
+   zéro un poids négatif sans jamais le relâcher : c'est une heuristique. Ici,
+   chaque paquet est résolu sous toutes les contraintes du profil (plafonds
+   d'enveloppe, actions, obligations), que le R ignorait.
+2. **Horizon.** Le R ne lit que la première date du GSE (« pour accélérer »).
+   Ici, chaque paquet utilise GSE++ à l'horizon demandé.
+3. **Tous les scénarios.** Le R écarte le reste de la division des scénarios
+   par le nombre de paquets. Ici, les paquets se partagent tous les scénarios,
+   à une unité près.
+
+La moyenne de poids qui respectent chacun les contraintes linéaires respecte
+encore ces contraintes : le résultat reste admissible.
 """
 
 from __future__ import annotations
@@ -45,6 +65,7 @@ __all__ = [
     "efficient_frontier",
     "optimize_by_horizon",
     "optimize_horizon",
+    "optimize_horizon_resampled",
     "placement_constraints",
 ]
 
@@ -166,6 +187,7 @@ def _solve(
         method="SLSQP",
         bounds=constraints.bounds,
         constraints=constraints.slsqp_constraints() + (extra or []),
+        options={"ftol": 1e-12, "maxiter": 500},
     )
     weights = np.asarray(result.x)
     if not result.success or not constraints.is_feasible(weights, tol=1e-6):
@@ -262,6 +284,79 @@ def _required_param(value: float | None, name: str, objective: str) -> float:
     return float(value)
 
 
+def optimize_horizon_resampled(
+    net: NetReturns,
+    horizon: int,
+    constraints: WeightConstraints,
+    *,
+    n_batches: int,
+    objective: str = "mean_variance",
+    risk_aversion: float | None = None,
+    target_return: float | None = None,
+    risk_free_rate: float | None = None,
+) -> HorizonAllocation:
+    """
+    Allocation à l'horizon H rééchantillonnée à la Michaud : moyenne des optima
+    calculés sur ``n_batches`` paquets de scénarios consécutifs.
+
+    Le rendement et la volatilité rendus sont ceux des poids moyens, sur tous
+    les scénarios. Les paramètres de l'objectif sont ceux de :func:`optimize_horizon`.
+
+    Raises:
+        ValueError: moins d'un paquet, ou paquets de moins de deux scénarios
+            (la covariance d'un paquet n'est alors pas définie).
+        OptimizationError: le solveur n'aboutit pas sur un paquet ; le message
+            nomme le paquet.
+    """
+    n_scenarios = len(net.scenario_ids)
+    if n_batches < 1:
+        raise ValueError(f"n_batches = {n_batches} : il faut au moins un paquet.")
+    if n_scenarios // n_batches < 2:
+        raise ValueError(
+            f"{n_scenarios} scénarios pour {n_batches} paquets : chaque paquet doit en "
+            f"compter au moins deux. Réduisez n_batches à {max(n_scenarios // 2, 1)} au plus."
+        )
+    if horizon not in net.horizons:
+        raise ValueError(f"Horizon {horizon} non calculé. Horizons disponibles : {net.horizons}.")
+    h = net.horizons.index(horizon)
+    batches = np.array_split(np.arange(n_scenarios), n_batches)
+    weights = []
+    for number, rows in enumerate(batches, start=1):
+        batch = NetReturns(
+            multiples=net.multiples[rows][:, [h], :],
+            scenario_ids=[net.scenario_ids[i] for i in rows],
+            horizons=[horizon],
+            placement_ids=net.placement_ids,
+        )
+        try:
+            allocation = optimize_horizon(
+                batch, horizon, constraints, objective=objective,
+                risk_aversion=risk_aversion, target_return=target_return,
+                risk_free_rate=risk_free_rate,
+            )
+        except OptimizationError as error:
+            raise OptimizationError(
+                f"Paquet {number} sur {n_batches} ({len(rows)} scénarios) : {error}"
+            ) from error
+        weights.append(allocation.weights.to_numpy())
+    mean_weights = np.mean(weights, axis=0)
+    mean_s, cov_df = net_return_moments(net, horizon)
+    mu, cov = mean_s.to_numpy(), cov_df.to_numpy()
+    resampled = HorizonAllocation(
+        horizon=horizon,
+        objective=objective,
+        weights=pd.Series(mean_weights, index=net.placement_ids),
+        expected_return=float(mean_weights @ mu),
+        volatility=float(np.sqrt(max(float(mean_weights @ cov @ mean_weights), 0.0))),
+    )
+    logger.info(
+        "Allocation %s (H=%d) rééchantillonnée sur %d paquets : rendement net %.4f, "
+        "volatilité %.4f", objective, horizon, n_batches, resampled.expected_return,
+        resampled.volatility,
+    )
+    return resampled
+
+
 def optimize_by_horizon(
     net: NetReturns,
     constraints: WeightConstraints,
@@ -271,18 +366,29 @@ def optimize_by_horizon(
     risk_aversion: float | None = None,
     target_return: float | None = None,
     risk_free_rate: float | None = None,
+    n_batches: int | None = None,
 ) -> pd.DataFrame:
     """
     Poids optimaux par placement (lignes) et par horizon (colonnes).
 
     C'est l'équivalent de ``soltot`` dans ``gen_alpha_optim.R``. Les paramètres
-    de l'objectif sont ceux de :func:`optimize_horizon`.
+    de l'objectif sont ceux de :func:`optimize_horizon`. Avec ``n_batches``,
+    chaque horizon est rééchantillonné à la Michaud
+    (:func:`optimize_horizon_resampled`).
     """
     selected = list(horizons) if horizons is not None else net.horizons
+    params: dict[str, float | None] = {
+        "risk_aversion": risk_aversion,
+        "target_return": target_return,
+        "risk_free_rate": risk_free_rate,
+    }
     columns = {
-        h: optimize_horizon(
-            net, h, constraints, objective=objective, risk_aversion=risk_aversion,
-            target_return=target_return, risk_free_rate=risk_free_rate,
+        h: (
+            optimize_horizon(net, h, constraints, objective=objective, **params)
+            if n_batches is None
+            else optimize_horizon_resampled(
+                net, h, constraints, n_batches=n_batches, objective=objective, **params
+            )
         ).weights
         for h in selected
     }

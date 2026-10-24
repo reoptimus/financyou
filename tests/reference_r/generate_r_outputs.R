@@ -2,7 +2,7 @@
 #
 # À relancer depuis la racine du dépôt quand on ajoute un cas :
 #   Rscript tests/reference_r/generate_r_outputs.R
-# Nécessite R (>= 4) et le paquet jsonlite. Les scripts R sont lus tels quels
+# Nécessite R (>= 4) et les paquets jsonlite et MASS. Les scripts R sont lus tels quels
 # dans legacy/, après translittération en ASCII de leurs commentaires
 # (leur encodage est mélangé et R refuse de les lire sinon).
 
@@ -80,6 +80,28 @@ assembl_d1_error <- tryCatch({
 assembl_horiz <- horiz
 horiz <- 20  # horizon des cas de projets, écrit plus bas
 
+# --- Script_Bootstrap_V5_quick.R : rééchantillonnage de Michaud (MOCA) ---
+suppressPackageStartupMessages(library(MASS))  # ginv
+load_r(file.path(L, "MOCA/FCT/Script_Bootstrap_V5_quick.R"))
+# Rendements annuels de 3 placements, 2 durées, 60 scénarios ; seule la date 1 est lue.
+set.seed(20201113)
+michaud_ns <- 60
+michaud_returns <- array(0, dim = c(michaud_ns, 1, 2, 3))
+for (d in 1:2) {
+  michaud_returns[, 1, d, 1] <- 0.06 + 0.15 * rnorm(michaud_ns) / sqrt(d)
+  michaud_returns[, 1, d, 2] <- 0.03 + 0.05 * rnorm(michaud_ns)
+  michaud_returns[, 1, d, 3] <- 0.02 + 0.02 * rnorm(michaud_ns)
+}
+michaud_cases <- list(
+  list(aversion = 8, nbboots = 4, constraints = c(0, 0, 0)),
+  list(aversion = 1, nbboots = 3, constraints = c(0, 0, 0)),
+  list(aversion = 8, nbboots = 4, constraints = c(0, 0.25, 0))
+)
+michaud_out <- lapply(michaud_cases, function(cs) {
+  sol <- Boot_Michaud(michaud_returns, 0.5, cs$nbboots, cs$aversion, cs$constraints)
+  c(cs, list(output = unname(sol)))
+})
+
 out <- list(
   r_version = R.version.string,
   exp_proj_hist = list(horiz = horiz, cases = proj_out),
@@ -89,6 +111,9 @@ out <- list(
     horiz = assembl_horiz, capital = assembl_capital, tr1 = unname(assembl_tr1),
     weights = assembl_weights, output = unname(assembl_res[[1]]),
     one_year_error = assembl_d1_error
+  ),
+  michaud = list(
+    returns = michaud_returns[, 1, , ], cases = michaud_out
   )
 )
 write_json(out, "tests/reference_r/r_outputs.json", digits = NA, auto_unbox = TRUE, pretty = TRUE)
