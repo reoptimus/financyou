@@ -59,10 +59,36 @@ strip_out <- lapply(curves, function(a) {
   if (is.character(r)) list(input = a, error = r) else list(input = a, output = unname(r))
 })
 
+# --- Assembl_investV3.R : répartition des tranches (application) ----------
+load_r(file.path(L, "ShinyR/BetaV1/Financyou/Data_Log/FCT_A/Assembl_investV3.R"))
+# Courbe des années 0 à 6, en tranches de 5 000 € écrites en dates R (année + 1).
+assembl_capital <- c(10000, 15000, 15000, 20000, 20000, 10000, 0)
+assembl_tr1 <- rbind(c(1, 6, 1), c(1, 6, 2), c(2, 5, 3), c(4, 5, 4))
+assembl_weights <- list("2" = c(0.5, 0.5, 0), "4" = c(0.1, 0.6, 0.3), "6" = c(0.2, 0.3, 0.5))
+horiz <- 7  # variable globale lue par Assembl_invest
+assembl_soltot <- array(0, dim = c(3, horiz, horiz))
+for (d in names(assembl_weights)) {
+  assembl_soltot[, as.integer(d), ] <- assembl_weights[[d]]
+}
+assembl_gsepp <- array(1, dim = c(2, horiz, horiz, 3))  # rendements fictifs, non lus ici
+assembl_res <- Assembl_invest(assembl_soltot, assembl_tr1, assembl_gsepp, assembl_capital)
+# Une tranche présente une seule année (durée R de 1) fait échouer le R.
+assembl_d1_error <- tryCatch({
+  Assembl_invest(assembl_soltot, rbind(c(3, 3, 1)), assembl_gsepp, assembl_capital)
+  "aucune erreur"
+}, error = function(e) conditionMessage(e))
+assembl_horiz <- horiz
+horiz <- 20  # horizon des cas de projets, écrit plus bas
+
 out <- list(
   r_version = R.version.string,
   exp_proj_hist = list(horiz = horiz, cases = proj_out),
   exp_fin = list(horiz = horiz, sal_net = 18000, epar = 25000, output = as.numeric(cumul)),
-  stripping = list(pas_e = 5000, cases = strip_out)
+  stripping = list(pas_e = 5000, cases = strip_out),
+  assembl_invest = list(
+    horiz = assembl_horiz, capital = assembl_capital, tr1 = unname(assembl_tr1),
+    weights = assembl_weights, output = unname(assembl_res[[1]]),
+    one_year_error = assembl_d1_error
+  )
 )
 write_json(out, "tests/reference_r/r_outputs.json", digits = NA, auto_unbox = TRUE, pretty = TRUE)

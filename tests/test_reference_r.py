@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from tests.reference_r.assembl_invest import r_assembl_invest
 from tests.reference_r.exp_finance import r_cumulative_capital, r_exp_proj_hist
 from tests.reference_r.striping import r_stripping
 
@@ -53,3 +54,16 @@ def test_stripping_translation_matches_r(case: dict[str, Any]) -> None:
             r_stripping(pas_e, curve)
         return
     np.testing.assert_allclose(r_stripping(pas_e, curve), np.asarray(case["output"]), rtol=1e-12)
+
+
+def test_assembl_invest_translation_matches_r() -> None:
+    case = R_OUTPUTS["assembl_invest"]
+    horiz = case["horiz"]
+    soltot = np.zeros((3, horiz, horiz))
+    for d, w in case["weights"].items():
+        soltot[:, int(d) - 1, :] = np.asarray(w, dtype=float)[:, None]
+    ours = r_assembl_invest(
+        soltot, np.asarray(case["tr1"], dtype=float), np.asarray(case["capital"]), horiz
+    )
+    expected = np.asarray(case["output"], dtype=float)  # "NaN" du R lu comme nan
+    np.testing.assert_allclose(ours, expected, equal_nan=True)
