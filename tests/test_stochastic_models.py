@@ -615,3 +615,57 @@ def run_tests():
 
 if __name__ == '__main__':
     run_tests()
+
+
+def _immo_hw_v2_r(a2, sigma2, f0t, r0, alea_r2_shocks, alea_rr2_shocks, dt, rental_yield, infl):
+    """Transcription ligne à ligne de la boucle d'ImmoHW_V2.R (périodes i = 1..Tf)."""
+    nb, tf = alea_rr2_shocks.shape
+    k2t_t2a = (1 - np.exp(-2 * a2 * dt)) / (2 * a2)
+    k2t_t = (1 - np.exp(-a2 * dt)) / a2
+    eta2 = (sigma2 / a2) * (dt - 2 * k2t_t + k2t_t2a) ** 0.5
+    l0_p0 = np.log(1 + rental_yield) * dt
+    infl = infl * dt
+    r0_2 = np.full(nb, r0)
+    rdt_immo = np.zeros((nb, tf))
+    rdt_immo_l = np.zeros((nb, tf))
+    for i in range(1, tf + 1):
+        kimmo = f0t[i - 1]
+        rdt_immo[:, i - 1] = kimmo * dt + (r0_2 - kimmo) * k2t_t + eta2 * alea_rr2_shocks[:, i - 1]
+        r0_2 = (r0_2 * np.exp(-a2 * dt) + kimmo * (1 - np.exp(-a2 * dt))
+                + sigma2 * k2t_t2a ** 0.5 * alea_r2_shocks[:, i - 1])
+        rdt_immo_l[:, i - 1] = l0_p0 + i * infl
+    return rdt_immo, rdt_immo_l, rdt_immo - rdt_immo_l
+
+
+def test_immobilier_conforme_a_immo_hw_v2_r():
+    # Mêmes chocs : le rendement total, le loyer et le prix suivent le R, décalés
+    # d'une colonne (la colonne 0 est t = 0, comme pour les taux et les actions).
+    rng = np.random.default_rng(7)
+    n, steps, dt = 50, 40, 0.5
+    f0t = 0.02 + 0.0005 * np.arange(steps)
+    price_shocks, rate_shocks = rng.standard_normal((2, n, steps))
+    model = RealEstateModel(a=0.5, sigma=0.037, rental_yield=0.01, inflation_adjustment=0.0,
+                            dt=dt, n_scenarios=n, T=int(steps * dt))
+    out = model.generate_returns(np.zeros((n, steps)), f0t, re_price_shocks=price_shocks,
+                                 re_rental_shocks=rate_shocks)
+    total, rent, price = _immo_hw_v2_r(0.5, 0.037, f0t, f0t[0], rate_shocks, price_shocks,
+                                       dt, 0.01, 0.0)
+    np.testing.assert_allclose(out['total_returns'][:, 1:], total[:, :-1], rtol=1e-12)
+    np.testing.assert_allclose(out['rental_returns'][:, 1:], rent[:, :-1], rtol=1e-12)
+    np.testing.assert_allclose(out['price_returns'][:, 1:], price[:, :-1], rtol=1e-12)
+    assert not out['total_returns'][:, 0].any()
+
+
+def test_le_loyer_n_est_pas_compte_deux_fois():
+    # Le loyer est une part du rendement total : changer le loyer déplace le
+    # partage entre prix et loyer, pas le total.
+    rng = np.random.default_rng(1)
+    shocks = rng.standard_normal((2, 20, 30))
+    totals = [
+        RealEstateModel(a=0.5, sigma=0.037, rental_yield=y, inflation_adjustment=0.02,
+                        dt=0.5, n_scenarios=20, T=15).generate_returns(
+            np.zeros((20, 30)), np.full(30, 0.03), re_price_shocks=shocks[0],
+            re_rental_shocks=shocks[1])['total_returns']
+        for y in (0.0, 0.05)
+    ]
+    np.testing.assert_array_equal(totals[0], totals[1])

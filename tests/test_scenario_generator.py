@@ -506,17 +506,12 @@ class TestStochasticScenarioGeneration:
 
     @pytest.mark.xfail(
         reason=(
-            "Bug structurel découvert à l'étape 1.B.1, distinct du bug actions : "
-            "RealEstateModel._generate_auxiliary_rates utilise la volatilité "
-            "IMMOBILIÈRE (12 %) comme si c'était une volatilité de taux court "
-            "Hull-White (typiquement 1 %). Le processus auxiliaire explose "
-            "(valeurs observées jusqu'à ±108 % sur un horizon de 30 ans), et "
-            "l'indice immobilier déflaté diverge de plusieurs ordres de "
-            "grandeur (jusqu'à 1e18 sur certains tirages). Ce n'est pas une "
-            "simple question de prime de risque manquante (contrairement aux "
-            "actions) : c'est une instabilité numérique du modèle lui-même, "
-            "qui dépasse le périmètre de l'étape 1.B.3 et mérite un suivi "
-            "dédié — voir docs/journal-1b-calibration.md."
+            "Les paramètres immobiliers de default-2026.json (volatilité 12 %, "
+            "a = 0,15) sont des paramètres de prix, alors que RealEstateModel "
+            "attend la volatilité du rendement instantané r2(t) : le calibrage R "
+            "(Param_immo2.Rda) donne 3,7 % et 0,5. Avec ces valeurs, l'écart "
+            "tombe à environ 5 % (covariance avec les taux non corrigée). "
+            "Voir docs/journal-1b-calibration.md, point 1."
         ),
         strict=False,
     )
@@ -539,6 +534,22 @@ class TestStochasticScenarioGeneration:
             f"{real_estate['max_relative_deviation']:.4%} au pire point : "
             f"l'indice immobilier n'est pas risque-neutre."
         )
+
+    def test_immobilier_stable_avec_le_calibrage_r(self, monkeypatch):
+        """Avec les paramètres du calibrage R, l'indice immobilier ne diverge plus."""
+        from investment_calculator.market_assumptions import MarketAssumptions
+
+        # legacy/R_data/Param_immo2.Rda : VolatiliteImmo = 0.037, ForceImmo = 0.5.
+        monkeypatch.setattr(MarketAssumptions, 'real_estate_volatility', property(lambda s: 0.037))
+        monkeypatch.setattr(MarketAssumptions, 'real_estate_mean_reversion',
+                            property(lambda s: 0.5))
+        results = scenario_generator.ScenarioGenerator(random_seed=42).generate({
+            'num_scenarios': 10_000, 'time_horizon': 30, 'timestep': 0.25,
+            'use_stochastic': True, 'currency': 'EUR',
+        })
+        real_estate = results['diagnostics']['martingale_test']['real_estate']
+        # Écart résiduel mesuré : 5,3 % (covariance avec les taux, voir le journal).
+        assert real_estate['max_relative_deviation'] < 0.06
 
     def test_stochastic_different_currency(self):
         """Test stochastic generation with different currencies."""

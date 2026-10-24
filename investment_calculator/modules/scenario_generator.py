@@ -472,10 +472,8 @@ class ScenarioGenerator:
             re_rental_shocks=re_rental_shocks,
             risk_premium=assumptions.real_estate_risk_premium,
         )
-        # Risque-neutre, mêmes chocs : voir la réserve dans
-        # RealEstateModel.generate_returns — n'apporte pas de propriété de
-        # martingale tant que le bug documenté n'est pas corrigé, mais garde
-        # l'interface cohérente avec les actions.
+        # Risque-neutre, mêmes chocs : sert au test de martingalité. Voir la
+        # réserve sur sigma dans RealEstateModel.generate_returns.
         re_results_rn = re_model.generate_returns(
             hw_results['Rt'],
             f0t,
