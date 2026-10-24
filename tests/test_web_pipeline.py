@@ -33,7 +33,7 @@ def test_projection_par_placement() -> None:
     assert portfolio['horizon'] == 10
     assert set(portfolio['weights']) == {
         'cto_actions', 'cto_obligations', 'pea_actions', 'av_fonds_euros',
-        'av_uc_actions', 'livret_a',
+        'av_uc_actions', 'livret_a', 'av_scpi',
     }
     assert sum(portfolio['weights'].values()) == pytest.approx(1.0)
     assert portfolio['sharpe_ratio'] is not None
