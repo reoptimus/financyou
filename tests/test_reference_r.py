@@ -67,3 +67,15 @@ def test_assembl_invest_translation_matches_r() -> None:
     )
     expected = np.asarray(case["output"], dtype=float)  # "NaN" du R lu comme nan
     np.testing.assert_allclose(ours, expected, equal_nan=True)
+
+
+def test_fct_flux_ir_translation_matches_r() -> None:
+    from investment_calculator.tax_regime import load_regime
+    from tests.reference_r.imp_ir import r_fct_flux_ir
+
+    case = R_OUTPUTS["imp_ir"]
+    brackets = load_regime("FR", 2026).document["income_tax"]["brackets"]
+    tab_ir = [(float(b["lower"]), float(b["rate"])) for b in brackets]
+    np.testing.assert_allclose(
+        r_fct_flux_ir(np.asarray(case["qf"], dtype=float), tab_ir), case["output"], atol=1e-9
+    )
