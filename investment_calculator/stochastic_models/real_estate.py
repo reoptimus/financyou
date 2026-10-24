@@ -117,15 +117,11 @@ class RealEstateModel:
                 ``BlackScholesEquity.generate_returns``. 0 (défaut) =
                 risque-neutre.
 
-                ATTENTION — contrairement aux actions, ajouter une prime de
-                risque ici ne restaure PAS une propriété de martingale à
-                risk_premium=0 : ce modèle porte un bug distinct et non
-                corrigé (le processus auxiliaire r2(t) utilise la
-                volatilité immobilière comme s'il s'agissait d'une
-                volatilité de taux court, et explose — voir
-                docs/journal-1b-calibration.md, point 1). Une projection
-                monde réel construite ici hérite de la même instabilité
-                que sa contrepartie risque-neutre.
+                ATTENTION — ``sigma`` est la volatilité du rendement
+                instantané r2(t), pas celle du prix : le calibrage R
+                (``legacy/R_data/Param_immo2.Rda``) donne sigma = 3,7 % et
+                a = 0,5. Avec une volatilité de prix (12 %) à la place,
+                l'indice diverge. Voir docs/journal-1b-calibration.md, point 1.
 
         Returns:
             Dictionary containing:
@@ -150,19 +146,18 @@ class RealEstateModel:
         if re_rental_shocks is None:
             re_rental_shocks = np.random.normal(0, 1, (n_scenarios, n_steps))
 
-        # Generate auxiliary rate process r2(t)
+        # Processus auxiliaire r2(t), rendement instantané de l'immobilier.
         r2 = self._generate_auxiliary_rates(short_rates, f0t, re_rental_shocks)
 
-        # Generate price returns
-        price_returns = self._generate_price_returns(
+        # Comme dans ImmoHW_V2.R, la diffusion Hull-White donne le rendement
+        # TOTAL (loyers compris) ; le loyer en est une part, et le prix le
+        # reste : RdtImmoP = RdtImmo - RdtImmoL. Le loyer ne s'ajoute pas au
+        # total, sinon il serait compté deux fois.
+        total_returns = self._generate_price_returns(
             short_rates, f0t, r2, re_price_shocks, risk_premium
         )
-
-        # Generate rental returns
         rental_returns = self._generate_rental_returns(n_scenarios, n_steps)
-
-        # Total returns = price + rental
-        total_returns = price_returns + rental_returns
+        price_returns = total_returns - rental_returns
 
         return {
             'total_returns': total_returns,
@@ -224,16 +219,18 @@ class RealEstateModel:
         risk_premium: float = 0.0,
     ) -> np.ndarray:
         """
-        Generate real estate price returns.
+        Rendement total de l'immobilier, loyers compris (``RdtImmo`` d'ImmoHW_V2.R).
 
-        Price dynamics:
-            dP/P = [(k(t) + risk_premium)*dt + (r2(t) - k(t))*K(dt) + η*dW(t)]
+        Rendement de la période ``t`` (de ``t*dt`` à ``(t+1)*dt``) :
+            (k(t) + risk_premium)*dt + (r2(t) - k(t))*K(dt) + η*ε(t)
+
+        Le nom est conservé pour l'interface ; la valeur est le rendement total.
+        Convention commune aux actions et aux taux : la colonne ``i`` porte le
+        rendement de la période qui se termine en ``i*dt``, et la colonne 0 vaut
+        0 (l'indice vaut 1 en t = 0).
 
         risk_premium (0 par défaut = risque-neutre) est un taux annualisé,
-        mis à l'échelle par dt comme k(t) — voir
-        ``BlackScholesEquity._calculate_total_returns`` pour la distinction
-        entre un taux annualisé (mis à l'échelle par dt) et un rendement de
-        période déjà accumulé (qui ne doit pas l'être une seconde fois).
+        mis à l'échelle par dt comme k(t).
 
         Args:
             short_rates: Short rate paths (n_scenarios × n_steps)
@@ -243,31 +240,26 @@ class RealEstateModel:
             risk_premium: prime de risque immobilière annualisée (monde réel).
 
         Returns:
-            Price returns (n_scenarios × n_steps)
+            Rendements totaux (n_scenarios × n_steps)
         """
         n_scenarios, n_steps = short_rates.shape
-        price_returns = np.zeros((n_scenarios, n_steps))
+        total_returns = np.zeros((n_scenarios, n_steps))
 
-        # Precompute coefficients
         K2T_t = (1 - np.exp(-self.a * self.dt)) / self.a
         K2T_t2a = (1 - np.exp(-2 * self.a * self.dt)) / (2 * self.a)
         eta2 = (self.sigma / self.a) * (
             self.dt - 2 * K2T_t + K2T_t2a
         ) ** 0.5
 
-        for t in range(n_steps):
-            # Drift calibration
+        for t in range(n_steps - 1):
             kimmo = f0t[t] if t < len(f0t) else f0t[-1]
-
-            # Price return formula (from R code ImmoHW_V2.R:114), avec la
-            # prime de risque monde réel ajoutée au même titre que k(t).
+            # ImmoHW_V2.R : RdtImmo[,i]<-kimmo*delta_t+(r0_2-kimmo)*K2T_t+eta2*alea_R2[,i]
             drift = (kimmo + risk_premium) * self.dt
             mean_reversion = (r2[:, t] - kimmo) * K2T_t
             diffusion = eta2 * shocks[:, t]
+            total_returns[:, t + 1] = drift + mean_reversion + diffusion
 
-            price_returns[:, t] = drift + mean_reversion + diffusion
-
-        return price_returns
+        return total_returns
 
     def _generate_rental_returns(
         self,
@@ -275,33 +267,23 @@ class RealEstateModel:
         n_steps: int
     ) -> np.ndarray:
         """
-        Generate rental income returns.
+        Part du loyer dans le rendement total (``RdtImmoL`` d'ImmoHW_V2.R).
 
-        Rental yield is typically constant as a percentage of property value,
-        with inflation adjustments over time.
-
-        Formula (from R code ImmoHW_V2.R:116):
-            rental_return[t] = log(1 + rental_yield) + t * inflation_adjustment
-
-        Args:
-            n_scenarios: Number of scenarios
-            n_steps: Number of time steps
+        Formule R : ``RdtImmoL[,i] <- L0_P0 + i*Infl``, avec
+        ``L0_P0 = log(1 + rental_yield)*dt`` et ``Infl = inflation_adjustment*dt``.
+        Le R fixe ``Infl`` à 0 (« loyers fixes et inflation loyers flat »). Avec
+        une valeur non nulle, la part du loyer croît linéairement d'une période
+        à l'autre : seul le partage entre loyer et prix en dépend, pas le
+        rendement total ni l'indice.
 
         Returns:
-            Rental returns (n_scenarios × n_steps)
+            Part du loyer (n_scenarios × n_steps), colonne 0 nulle.
         """
         rental_returns = np.zeros((n_scenarios, n_steps))
-
-        # Base rental yield (in continuous terms)
         base_rental = np.log(1 + self.rental_yield) * self.dt
-
-        # Inflation adjustment (in continuous terms)
         inflation_adj = self.inflation_adjustment * self.dt
-
-        for t in range(n_steps):
-            # Rental income with inflation indexation
+        for t in range(1, n_steps):
             rental_returns[:, t] = base_rental + t * inflation_adj
-
         return rental_returns
 
     def calculate_cap_rate(
@@ -471,6 +453,51 @@ class ResidentialRealEstate(RealEstateModel):
         )
 
         self.location = location
+
+
+def calibrate_from_annual_returns(annual_returns: np.ndarray) -> tuple[float, float]:
+    """
+    Calage de ``a`` et ``sigma`` de :class:`RealEstateModel` sur des rendements annuels.
+
+    Méthode des moments, au pas d'un an : dans le modèle, l'autocorrélation
+    d'ordre 1 des rendements annuels ne dépend que de ``a``, et leur variance
+    est proportionnelle à ``sigma²``. On résout la première pour ``a``, puis la
+    seconde pour ``sigma``. (``Script_calibrage_immo.R`` ne calculait que
+    l'écart-type des résidus d'un AR(1), sans ``a``.)
+
+    Returns:
+        ``(a, sigma)``.
+
+    Raises:
+        ValueError: série trop courte, ou autocorrélation hors de ]0, 1[, que
+            ce modèle ne peut pas reproduire.
+    """
+    from scipy.optimize import brentq
+
+    x = np.asarray(annual_returns, dtype=float)
+    if x.size < 3:
+        raise ValueError("Au moins trois rendements annuels sont nécessaires au calage.")
+    centered = x - x.mean()
+    rho = float(centered[1:] @ centered[:-1] / (centered @ centered))
+
+    def moments(a: float) -> tuple[float, float]:
+        k = (1 - np.exp(-a)) / a
+        k2 = (1 - np.exp(-2 * a)) / (2 * a)
+        eta2 = (1 - 2 * k + k2) / a**2
+        r2_variance = 1 / (2 * a)
+        gamma0 = k**2 * r2_variance + eta2
+        return gamma0, k**2 * np.exp(-a) * r2_variance / gamma0
+
+    low, high = 1e-4, 50.0
+    if not moments(high)[1] < rho < moments(low)[1]:
+        raise ValueError(
+            f"Autocorrélation des rendements annuels de {rho:.3f} : le modèle ne "
+            "reproduit qu'une autocorrélation positive et inférieure à 1. Vérifiez "
+            "que la série est bien une suite de rendements annuels."
+        )
+    a = brentq(lambda a: moments(a)[1] - rho, low, high)
+    sigma = float(np.sqrt(x.var(ddof=1) / moments(a)[0]))
+    return float(a), sigma
 
 
 def calibrate_real_estate_parameters(

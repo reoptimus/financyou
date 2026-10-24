@@ -506,17 +506,10 @@ class TestStochasticScenarioGeneration:
 
     @pytest.mark.xfail(
         reason=(
-            "Bug structurel découvert à l'étape 1.B.1, distinct du bug actions : "
-            "RealEstateModel._generate_auxiliary_rates utilise la volatilité "
-            "IMMOBILIÈRE (12 %) comme si c'était une volatilité de taux court "
-            "Hull-White (typiquement 1 %). Le processus auxiliaire explose "
-            "(valeurs observées jusqu'à ±108 % sur un horizon de 30 ans), et "
-            "l'indice immobilier déflaté diverge de plusieurs ordres de "
-            "grandeur (jusqu'à 1e18 sur certains tirages). Ce n'est pas une "
-            "simple question de prime de risque manquante (contrairement aux "
-            "actions) : c'est une instabilité numérique du modèle lui-même, "
-            "qui dépasse le périmètre de l'étape 1.B.3 et mérite un suivi "
-            "dédié — voir docs/journal-1b-calibration.md."
+            "Le drift de RealEstateModel ne corrige ni la convexité ni la "
+            "covariance avec les taux : avec le calage France (a = 0,145 ; "
+            "σ = 3,79 %), l'indice déflaté s'écarte encore d'environ 36 % de 1 "
+            "à 30 ans. Voir docs/journal-1b-calibration.md, point 1."
         ),
         strict=False,
     )
@@ -539,6 +532,17 @@ class TestStochasticScenarioGeneration:
             f"{real_estate['max_relative_deviation']:.4%} au pire point : "
             f"l'indice immobilier n'est pas risque-neutre."
         )
+
+    def test_immobilier_ne_diverge_plus(self):
+        """Avec le calage France (a = 0,145 ; σ = 3,79 %), l'indice reste borné."""
+        results = scenario_generator.ScenarioGenerator(random_seed=42).generate({
+            'num_scenarios': 10_000, 'time_horizon': 30, 'timestep': 0.25,
+            'use_stochastic': True, 'currency': 'EUR',
+        })
+        real_estate = results['diagnostics']['martingale_test']['real_estate']
+        # Écart résiduel mesuré : 36 % (drift sans correction de convexité ni
+        # de covariance avec les taux) ; avant correction du modèle : 1,9e18.
+        assert real_estate['max_relative_deviation'] < 0.4
 
     def test_stochastic_different_currency(self):
         """Test stochastic generation with different currencies."""

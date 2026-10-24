@@ -98,6 +98,23 @@ second bug, dans une fonction entièrement différente :
   une PR — en attendant une décision de priorisation. Voir le rapport
   chiffré et les graphiques pour le détail complet des calculs.
 
+### Mise à jour du 2026-10-24 — comparaison au R et correction
+
+Comparaison ligne à ligne avec `legacy/R_scripts/ImmoHW_V2.R` (et `ImmoHW_PMR_V2.R`) :
+
+- **Loyer compté deux fois (résidu ×3,3, bug B).** Dans le R, la diffusion Hull-White donne le rendement **total** (`RdtImmo`). Le loyer en est une part (`RdtImmoL`), et le prix est le reste (`RdtImmoP <- RdtImmo - RdtImmoL`). Le Python ajoutait le loyer au total. **Corrigé** : le total suit le R, et le loyer ne fait plus que partager ce total entre loyer et prix. Le terme `i*Infl` du loyer ne touche donc plus l'indice ; le R fixe d'ailleurs `Infl` à 0.
+- **Décalage d'une colonne.** **Corrigé** : la colonne 0 vaut 0, comme pour les taux et les actions, et l'indice vaut 1 en t = 0.
+- **« Bug A » : ce n'est pas un bug du code, c'est un calibrage.** Le R diffuse lui aussi r2(t) avec `sigma2`. Mais `sigma2` y est la volatilité du rendement instantané, calibrée à **3,7 %** avec **a = 0,5** (`legacy/R_data/Param_immo2.Rda` : VolatiliteImmo 0,037, ForceImmo 0,5, MoyenneImmo 0,05, Immot 0,03). `default-2026.json` fournit 12 % et 0,15, qui sont des paramètres de prix. La même clé `volatility` sert aussi au mode simple, comme volatilité de prix.
+- **Mesures** (10 000 scénarios, 30 ans, pas de 0,25 an, graine 42). Écart maximal de `D(t)*Index(t)` à 1 :
+  - paramètres actuels (12 %, 0,15) : ×229 ;
+  - calibrage R (3,7 %, 0,5) : **5,3 %**, avec une valeur finale de 0,947.
+- **Résidu de 5,3 %.** L'indice déflaté finit **sous** 1. La convexité seule le pousserait au-dessus : c'est donc la covariance entre les chocs immobiliers et les taux qui domine. Retrancher seulement la convexité aggrave l'écart (12 %). Le R cherchait aussi un `kimmo` martingale (« optimisation de kimmo pour être martingal ») sans y parvenir dans V2.
+- **À décider (seb).** Ajouter au jeu d'hypothèses des paramètres propres au modèle stochastique (3,7 % et 0,5, issus du calibrage R), distincts de la volatilité de prix du mode simple. Ensuite, corriger la covariance pour descendre sous la tolérance de 0,5 %.
+
+### Mise à jour du 2026-10-24 (suite) — recalibrage validé
+
+seb a choisi de recalibrer, puis de retenir la série France. La fonction `calibrate_from_annual_returns` (méthode des moments) donne, sur les 61 rendements annuels INSEE France hors inflation, **a = 0,145 et σ = 3,79 %**. Ces valeurs vont dans la nouvelle clé `real_estate.dynamics.instantaneous_volatility` et dans `mean_reversion`. `volatility` (12 %) reste la volatilité de prix du seul chemin simple. Écart de martingalité à 30 ans : **36 %**, l'indice déflaté finissant à 1,36. La volatilité de long terme de l'indice (σ/a ≈ 26 %) rend nécessaire une correction exacte du drift, pour la convexité et pour la covariance avec les taux. Détail du calage : `/mnt/project-files/refonte-gse/calibrage-immobilier.md` (fichier du projet).
+
 ## 2. Indexation des colonnes de `deflators_df` (t_1..t_N) vs convention interne (colonne i = D(i·dt))
 
 - **Ouvert le** : 2026-08-27 (étape 1.B.1)
