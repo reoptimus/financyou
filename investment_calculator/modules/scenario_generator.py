@@ -466,12 +466,24 @@ class ScenarioGenerator:
         re_price_shocks = corr_gen.get_asset_shocks(corr_results['shocks'], 'real_estate')
         re_rental_shocks = corr_gen.get_asset_shocks(corr_results['shocks'], 'inflation')
 
+        # Le drift d'ImmoHW_V2.R ne corrige ni la convexité ni la covariance
+        # avec les taux ; celui-ci rend l'indice déflaté martingale, calculé
+        # exactement à partir des sensibilités des deux modèles.
+        re_drift = re_model.risk_neutral_drift(
+            f0t,
+            P0t,
+            n_steps,
+            hw_model.log_deflator_loadings(),
+            corr_gen.shock_covariances(['short_rate', 'real_estate', 'inflation']),
+        )
+
         re_results = re_model.generate_returns(
             hw_results['Rt'],
             f0t,
             re_price_shocks=re_price_shocks,
             re_rental_shocks=re_rental_shocks,
             risk_premium=assumptions.real_estate_risk_premium,
+            drift=re_drift,
         )
         # Risque-neutre, mêmes chocs : sert au test de martingalité. Voir la
         # réserve sur sigma dans RealEstateModel.generate_returns.
@@ -481,6 +493,7 @@ class ScenarioGenerator:
             re_price_shocks=re_price_shocks,
             re_rental_shocks=re_rental_shocks,
             risk_premium=0.0,
+            drift=re_drift,
         )
 
         # Step 6: Generate bond returns (simplified - use interest rates)

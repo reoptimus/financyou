@@ -237,6 +237,35 @@ class HullWhiteModel:
             'residuals': residuals
         }
 
+    def log_deflator_loadings(self) -> np.ndarray:
+        """
+        Sensibilités de log D(t) aux résidus de taux, en forme fermée.
+
+        Le modèle est linéaire dans les chocs : la partie aléatoire de
+        ``log(deflators[:, t])`` vaut ``Σ_j B[t, j] * residuals[:, j]``, où
+        ``residuals`` est la sortie ``'residuals'`` de ``generate_scenarios``
+        (colonne 0 nulle). Sert à corriger exactement le drift des actifs
+        corrélés aux taux, sans Monte-Carlo.
+
+        Returns:
+            B, matrice (n_steps × n_steps).
+        """
+        decay = np.exp(-self.a * self.dt)
+        scale = -self.K(self.dt, self.a) * np.sqrt(self.L(self.dt, self.sigma, self.a))
+        t = np.arange(self.n_steps)[:, None]
+        j = np.arange(self.n_steps)[None, :]
+        # rt[i] dépend de residuals[j] pour 1 <= j <= i, avec le poids
+        # decay**(i - j) ; Rt[i + 1] dépend de rt[i] avec le poids K(dt), et
+        # log D(t) = -Σ_{i <= t} Rt[i]. D'où Σ_{i=j+1}^{t} decay**(i-1-j).
+        lag = np.clip(t - j, 0, None)
+        if decay == 1.0:
+            weight = lag.astype(float)
+        else:
+            weight = (1 - decay ** lag) / (1 - decay)
+        loadings = scale * weight
+        loadings[:, 0] = 0.0
+        return loadings
+
     def _filter_explosive_scenarios(
         self,
         Rt: np.ndarray,
