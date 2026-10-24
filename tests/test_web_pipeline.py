@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from web_ui.pipeline import build_profile_config, run_projection
+from web_ui.pipeline import build_profile_config, build_projects, run_projection
 
 
 def _profile(age: int = 40, retirement_age: int = 50) -> dict:
@@ -89,7 +89,7 @@ def test_l_application_s_affiche_sans_saisie() -> None:
 
     app = AppTest.from_file('../web_ui/app_enhanced.py', default_timeout=30).run()
     assert not app.exception
-    for page in ('Profile', 'Holdings', 'Projection'):
+    for page in ('Profile', 'Holdings', 'Projects', 'Projection'):
         app.session_state['page'] = page
         app.run()
         assert not app.exception
@@ -126,3 +126,80 @@ def test_parcours_complet_dans_l_application() -> None:
     assert not app.exception and not app.error
     assert app.session_state['results']['optimization']['existing_holdings']
     assert any('Patrimoine net médian' in m.label for m in app.metric)
+
+
+# --- Projets du foyer et plan par tranches ---------------------------------------
+
+PROJECT_ROWS = [
+    {'name': 'voiture', 'start_year': 3, 'initial_payment': 15_000.0,
+     'annual_payment': 0.0, 'duration_years': 0, 'resale': 0.0},
+    {'name': 'études', 'start_year': 6, 'initial_payment': 2_000.0,
+     'annual_payment': 4_000.0, 'duration_years': 3, 'resale': 1_000.0},
+]
+
+
+def test_la_revente_saisie_s_ajoute_au_dernier_versement() -> None:
+    voiture, etudes = build_projects(PROJECT_ROWS)
+    assert voiture.exit_amount == 0.0
+    # Saisie positive, flux sortant négatif : 4 000 − 1 000 l'année 9.
+    assert etudes.exit_amount == -1_000.0
+    with pytest.raises(ValueError, match="Projet « bateau »"):
+        build_projects([{**PROJECT_ROWS[0], 'name': 'bateau', 'duration_years': -1}])
+
+
+def _tranche_results(available_savings: float | None = 20_000.0, rows=PROJECT_ROWS) -> dict:
+    config = build_profile_config({**FORM, 'retirement_age': 55, 'holdings': []})
+    return run_projection(config, num_scenarios=30, catalog_id='fr-2026', risk_aversion=5.0,
+                          risk_free_placement=None, projects=build_projects(rows),
+                          available_savings=available_savings)
+
+
+def test_le_plan_par_tranches_place_tout_le_capital() -> None:
+    plan = _tranche_results()['tranche_plan']
+    # 20 000 € disponibles, 3 600 € par an dès l'année 0 (premier versement du
+    # profil), moins les projets : calcul à la main.
+    outflows = {3: 15_000.0, 6: 2_000.0, 7: 4_000.0, 8: 4_000.0, 9: 3_000.0}
+    expected, capital = [], 20_000.0
+    for year in range(16):
+        capital += 3_600.0 - outflows.get(year, 0.0)
+        expected.append(capital)
+    assert plan['capital'] == pytest.approx(expected)
+    placed = plan['amounts'].sum(axis=1) + plan['unplaced']
+    assert placed.tolist() == pytest.approx(expected)
+    # La voiture est financée par une tranche retirée l'année 3.
+    assert any(t['withdrawal_year'] == 3 and t['start_year'] == 0 for t in plan['tranches'])
+    assert plan['known_gaps']
+
+
+def test_un_projet_non_finance_est_refuse() -> None:
+    with pytest.raises(ValueError, match="pas financés"):
+        _tranche_results(available_savings=0.0)
+
+
+def test_des_projets_sans_epargne_disponible_sont_refuses() -> None:
+    with pytest.raises(ValueError, match="épargne déjà disponible"):
+        _tranche_results(available_savings=None)
+
+
+def test_projets_saisis_dans_l_application() -> None:
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file('../web_ui/app_enhanced.py', default_timeout=60).run()
+    app.session_state['form'] = {**{k: v for k, v in FORM.items() if k != 'holdings'},
+                                 'retirement_age': 55}
+    app.session_state['page'] = 'Projects'
+    app.run()
+    app.text_input[0].set_value('voiture')
+    available, *fields = app.number_input
+    available.set_value(20_000.0)
+    for field, value in zip(fields, (3, 15_000.0, 0.0, 0, 0.0), strict=True):
+        field.set_value(value)
+    _click(app, 'Ajouter le projet')
+    assert app.session_state['projects'] == [PROJECT_ROWS[0]]
+    assert app.session_state['available_savings'] == 20_000.0
+    app.session_state['page'] = 'Projection'
+    app.run()
+    _click(app, 'Lancer')
+    assert not app.exception and not app.error
+    assert 'tranche_plan' in app.session_state['results']
+    assert any('Plan par tranches' in m.value for m in app.markdown)
