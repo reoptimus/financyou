@@ -1,672 +1,333 @@
 """
-FinancYou Enhanced Dashboard
+FinancYou : interface Streamlit.
 
-Comprehensive multi-page Streamlit application inspired by R Shiny interface.
-Includes: Profile, Assets, Projects, Projections, and Analysis sections.
+Elle rassemble la saisie de l'utilisateur (profil, versements, épargne
+existante) et affiche le résultat de ``web_ui.pipeline.run_projection``. Aucun
+champ n'a de valeur par défaut : ce qui n'est pas saisi n'est pas supposé.
 """
 
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 
-# Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from investment_calculator.placement_catalog import (
     list_placement_catalogs,
     load_placement_catalog,
 )
-from web_ui.pipeline import run_projection
+from web_ui.pipeline import build_profile_config, run_projection
 
-# Page configuration
 st.set_page_config(
-    page_title="FinancYou - Comprehensive Financial Planning",
+    page_title="FinancYou",
     page_icon="💰",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
+PAGES = {
+    "🏠 Accueil": "Home",
+    "👤 Profil et versements": "Profile",
+    "💼 Épargne existante": "Holdings",
+    "📊 Projection": "Projection",
+}
 
-# Initialize session state
+
 def init_session_state():
-    """Initialize all session state variables."""
-    defaults = {
-        'user_data': {},
-        'assets': [],
-        'projects': [],
-        'results': None,
-        'authenticated': True,  # Skip login for now
-        'page': 'Home'
-    }
+    """Initialiser l'état de session."""
+    defaults = {'form': None, 'holdings': [], 'results': None, 'page': 'Home'}
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
 
 
-# Sidebar navigation
 def render_sidebar():
-    """Render sidebar with navigation."""
+    """Navigation et réglages du calcul."""
     with st.sidebar:
-        st.image(
-            "https://via.placeholder.com/250x80/1f77b4/ffffff?text=FinancYou",
-            use_column_width=True,
-        )
-
-        st.markdown("---")
-        st.markdown("### 📋 Navigation")
-
-        pages = {
-            "🏠 Home": "Home",
-            "👤 Your Profile": "Profile",
-            "💼 Your Assets": "Assets",
-            "🎯 Your Projects": "Projects",
-            "📊 Projections": "Projections",
-            "📈 Analysis": "Analysis"
-        }
-
-        for label, page in pages.items():
+        st.markdown("## 💰 FinancYou")
+        for label, page in PAGES.items():
             if st.button(label, use_container_width=True, key=f"nav_{page}"):
                 st.session_state.page = page
                 st.rerun()
 
         st.markdown("---")
-        st.markdown("### ⚙️ Settings")
-
+        st.markdown("### ⚙️ Réglages")
         # Les catalogues proposés se déduisent des fichiers livrés ; chacun
         # porte le régime fiscal de son pays et de son millésime (ADR 0002).
         st.session_state.catalog_id = st.selectbox(
-            "Placement catalog",
-            list_placement_catalogs(),
-            key="catalog_select"
+            "Catalogue de placements", list_placement_catalogs(), key="catalog_select"
         )
         placement_ids = load_placement_catalog(st.session_state.catalog_id).placement_ids
-        reference_options = ["None", *placement_ids]
+        reference_options = ["Aucun", *placement_ids]
         st.session_state.risk_free_placement = st.selectbox(
-            "Sharpe ratio reference placement",
+            "Placement de référence du ratio de Sharpe",
             reference_options,
             index=reference_options.index("livret_a") if "livret_a" in placement_ids else 0,
-            key="reference_select"
+            key="reference_select",
         )
         st.session_state.risk_aversion = st.slider(
-            "Risk aversion (λ)",
-            0.5, 20.0, 5.0, 0.5,
-            key="risk_aversion_slider"
+            "Aversion au risque (λ)", 0.5, 20.0, 5.0, 0.5, key="risk_aversion_slider"
         )
-
         st.session_state.num_scenarios = st.slider(
-            "Monte Carlo Scenarios",
-            10, 500, 100, 10,
-            key="scenarios_slider"
+            "Nombre de scénarios", 10, 500, 100, 10, key="scenarios_slider"
         )
 
 
-# Page: Home
 def page_home():
-    """Home page with overview and quick actions."""
+    """Présentation et étapes."""
     st.markdown("# 💰 FinancYou")
-    st.markdown("### Comprehensive Financial Planning & Portfolio Optimization")
-
-    st.markdown("---")
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.markdown("### 🎯 Quick Start")
-        st.markdown("""
-        1. **Enter your profile** → Personal & financial info
-        2. **Add your assets** → Current investments
-        3. **Define projects** → Future goals
-        4. **Run analysis** → Get optimized recommendations
-        """)
-
-    with col2:
-        st.markdown("### 📊 Key Features")
-        st.markdown("""
-        - Multi-jurisdiction tax optimization
-        - Monte Carlo simulations
-        - Goal-based planning
-        - Risk profiling
-        - Efficient frontier analysis
-        """)
-
-    with col3:
-        st.markdown("### 🚀 Get Started")
-        if st.button("📝 Complete Your Profile", use_container_width=True):
-            st.session_state.page = "Profile"
-            st.rerun()
-
-        if st.button("📥 Load Example", use_container_width=True):
-            load_example_profile()
-            st.success("Example profile loaded!")
-
-    # Display summary if data exists
-    if st.session_state.user_data:
-        st.markdown("---")
-        st.markdown("### 📌 Your Summary")
-
-        col1, col2, col3, col4 = st.columns(4)
-
-        with col1:
-            st.metric("Age", st.session_state.user_data.get('age', 'N/A'))
-        with col2:
-            st.metric("Assets", f"{len(st.session_state.assets)}")
-        with col3:
-            st.metric("Projects", f"{len(st.session_state.projects)}")
-        with col4:
-            if st.session_state.results:
-                st.metric("Status", "✅ Analyzed")
-            else:
-                st.metric("Status", "⏳ Pending")
+    st.markdown(
+        "Projection du patrimoine après frais et impôts, sur des scénarios "
+        "économiques simulés, et répartition des versements entre les placements "
+        "du catalogue."
+    )
+    st.markdown(
+        "1. **Profil et versements** : âge, horizon, revenus, épargne mensuelle.\n"
+        "2. **Épargne existante** : ce que vous détenez déjà, laissé en place.\n"
+        "3. **Projection** : répartition des nouveaux versements et patrimoine projeté."
+    )
+    if st.button("📝 Commencer", type="primary"):
+        st.session_state.page = "Profile"
+        st.rerun()
 
 
-# Page: Profile
 def page_profile():
-    """User profile page - comprehensive personal and financial information."""
-    st.markdown("# 👤 Your Profile")
+    """Saisie du profil et des versements."""
+    st.markdown("# 👤 Profil et versements")
+    saved = st.session_state.form or {}
 
-    tabs = st.tabs([
-        "👨‍👩‍👧‍👦 Personal Info",
-        "💵 Income & Expenses",
-        "🏠 Housing",
-        "👔 Professional",
-        "🎯 Investment Preferences"
-    ])
-
-    # Tab 1: Personal Information
-    with tabs[0]:
-        st.markdown("### Personal Information")
-
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            age = st.number_input("Current Age", 18, 100,
-                                 st.session_state.user_data.get('age', 35))
-            retirement_age = st.number_input("Retirement Age", age, 100,
-                                           st.session_state.user_data.get('retirement_age', 65))
-
-        with col2:
-            life_expectancy = st.number_input("Life Expectancy", retirement_age, 120,
-                                            st.session_state.user_data.get('life_expectancy', 90))
-            num_dependents = st.number_input("Number of Dependents", 0, 10, 0)
-
-        with col3:
-            country = st.selectbox("Country", ["US", "FR", "UK", "DE", "CA"],
-                                  index=0)
-            currency = st.selectbox("Currency", ["USD", "EUR", "GBP", "CAD"],
-                                   index=0)
-
-        # Children ages
-        if num_dependents > 0:
-            st.markdown("#### Children Ages")
-            children_ages = []
-            cols = st.columns(min(num_dependents, 3))
-            for i in range(num_dependents):
-                with cols[i % 3]:
-                    age_child = st.number_input(f"Child {i+1}", 0, 25, 0, key=f"child_{i}")
-                    children_ages.append(age_child)
-
-    # Tab 2: Income & Expenses
-    with tabs[1]:
-        st.markdown("### Income & Expenses")
-
+    with st.form("profile"):
+        st.markdown("### Situation")
         col1, col2 = st.columns(2)
-
         with col1:
-            st.markdown("#### Income")
-            annual_income = st.number_input("Annual Income ($)", 0, 1000000, 75000, 1000)
-
-            num_earners = st.radio("Number of Earners", [1, 2], horizontal=True)
-
-            if num_earners == 2:
-                st.number_input("Partner's Annual Income ($)", 0, 1000000, 60000, 1000)
-
-            st.slider("Expected Annual Salary Growth (%)", 0.0, 10.0, 3.0, 0.5)
-
+            age = st.number_input("Âge actuel", 18, 100, saved.get('age'))
+            retirement_age = st.number_input(
+                "Âge de départ à la retraite (horizon de la projection)", 18, 100,
+                saved.get('retirement_age'),
+            )
+            couple = st.checkbox(
+                "Imposition en couple (abattement de l'assurance-vie doublé)",
+                saved.get('couple', False),
+            )
         with col2:
-            st.markdown("#### Expenses & Savings")
-            annual_expenses = st.number_input("Annual Expenses ($)", 0, 500000, 55000, 1000)
+            annual_income = st.number_input(
+                "Revenu annuel net (€)", 0.0, None, saved.get('annual_income'), 1000.0
+            )
+            annual_expenses = st.number_input(
+                "Dépenses annuelles (€, facultatif)", 0.0, None,
+                saved.get('annual_expenses'), 1000.0,
+            )
 
-            st.slider("Target Savings Rate (%)", 0.0, 50.0, 15.0, 1.0)
+        st.markdown("### Versements")
+        col1, col2 = st.columns(2)
+        with col1:
+            monthly_amount = st.number_input(
+                "Épargne mensuelle (€)", 0.0, None, saved.get('monthly_amount'), 50.0
+            )
+        with col2:
+            increase = saved.get('annual_increase')
+            annual_increase = st.number_input(
+                "Hausse annuelle des versements (%), 0 pour un versement constant",
+                -20.0, 20.0, None if increase is None else increase * 100, 0.5,
+            )
 
-            st.metric("Monthly Savings", f"${(annual_income - annual_expenses) / 12:,.0f}")
-
-    # Tab 3: Housing
-    with tabs[2]:
-        st.markdown("### Housing Situation")
-
-        housing_status = st.radio(
-            "Housing Status",
-            ["Owner (No Mortgage)", "Owner (With Mortgage)", "Renter"],
-            horizontal=True
+        st.markdown("### Contraintes (facultatives)")
+        col1, col2 = st.columns(2)
+        with col1:
+            cap_equity = st.checkbox(
+                "Plafonner la part en actions", saved.get('max_equity') is not None
+            )
+            max_equity = st.slider(
+                "Part maximale en actions (%)", 0, 100,
+                round(100 * (saved.get('max_equity') or 1.0)), 5,
+            )
+        with col2:
+            floor_bond = st.checkbox(
+                "Imposer une part minimale d'obligations", saved.get('min_bond') is not None
+            )
+            min_bond = st.slider(
+                "Part minimale en obligations (%)", 0, 100,
+                round(100 * (saved.get('min_bond') or 0.0)), 5,
+            )
+        st.caption(
+            "Le fonds en euros compte pour sa part d'actions et d'obligations ; "
+            "le Livret A ne compte ni comme action ni comme obligation."
         )
+        submitted = st.form_submit_button("💾 Enregistrer", type="primary")
 
-        if housing_status == "Owner (No Mortgage)":
-            property_value = st.number_input("Property Value ($)", 0, 10000000, 300000, 10000)
-
-        elif housing_status == "Owner (With Mortgage)":
-            col1, col2 = st.columns(2)
-            with col1:
-                property_value = st.number_input("Property Value ($)", 0, 10000000, 300000, 10000)
-                st.number_input("Remaining Mortgage ($)", 0, property_value, 200000, 5000)
-
-            with col2:
-                mortgage_years_total = st.number_input("Total Mortgage Term (years)", 1, 40, 30)
-                st.number_input("Years Remaining", 1, mortgage_years_total, 25)
-                st.slider("Mortgage Interest Rate (%)", 0.0, 10.0, 3.5, 0.1)
-                st.number_input("Monthly Payment ($)", 0, 10000, 1500, 50)
-
-        else:  # Renter
-            st.number_input("Monthly Rent ($)", 0, 10000, 1500, 50)
-
-    # Tab 4: Professional
-    with tabs[3]:
-        st.markdown("### Professional Situation")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            profession = st.selectbox(
-                "Profession Category",
-                ["Employee", "Self-Employed", "Executive", "Retired", "Other"]
-            )
-
-            years_to_retirement = retirement_age - age
-            st.metric("Years to Retirement", years_to_retirement)
-
-        with col2:
-            if profession != "Retired":
-                st.select_slider(
-                    "Job Security",
-                    options=["Low", "Medium", "High"],
-                    value="Medium"
-                )
-
-    # Tab 5: Investment Preferences
-    with tabs[4]:
-        st.markdown("### Investment Preferences")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            risk_tolerance = st.select_slider(
-                "Risk Tolerance",
-                options=["conservative", "moderate", "aggressive"],
-                value="moderate"
-            )
-
-            investment_goal = st.selectbox(
-                "Primary Goal",
-                [
-                    "retirement", "wealth accumulation", "income generation",
-                    "education", "major purchase",
-                ]
-            )
-
-        with col2:
-            max_equity = st.slider("Maximum Equity Allocation (%)", 0, 100, 80, 5)
-            min_bonds = st.slider("Minimum Bond Allocation (%)", 0, 100, 15, 5)
-
-        st.checkbox("ESG (Environmental/Social/Governance) Focus")
-
-    # Save button
-    st.markdown("---")
-    if st.button("💾 Save Profile", type="primary", use_container_width=True):
-        st.session_state.user_data = {
+    if submitted:
+        required = {
+            "âge actuel": age, "âge de départ à la retraite": retirement_age,
+            "revenu annuel": annual_income, "épargne mensuelle": monthly_amount,
+            "hausse annuelle des versements": annual_increase,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            st.error(f"À renseigner avant d'enregistrer : {', '.join(missing)}.")
+            return
+        st.session_state.form = {
             'age': age,
             'retirement_age': retirement_age,
-            'life_expectancy': life_expectancy,
+            'couple': couple,
             'annual_income': annual_income,
             'annual_expenses': annual_expenses,
-            'risk_tolerance': risk_tolerance,
-            'investment_goal': investment_goal,
-            'max_equity': max_equity / 100,
-            'min_bonds': min_bonds / 100,
-            'country': country,
-            'currency': currency
+            'monthly_amount': monthly_amount,
+            'annual_increase': annual_increase / 100,
+            'max_equity': max_equity / 100 if cap_equity else None,
+            'min_bond': min_bond / 100 if floor_bond else None,
         }
-        st.success("✅ Profile saved successfully!")
+        st.session_state.results = None
+        st.success("✅ Profil enregistré.")
 
 
-# Page: Assets
-def page_assets():
-    """Asset management page."""
-    st.markdown("# 💼 Your Assets")
+def page_holdings():
+    """Saisie de l'épargne existante, laissée dans ses placements."""
+    st.markdown("# 💼 Épargne existante")
+    st.markdown(
+        "Ce que vous détenez déjà reste dans son placement : il n'est pas réalloué, "
+        "s'ajoute au patrimoine projeté, donne son ancienneté à son enveloppe et "
+        "s'impute sur les plafonds de versement."
+    )
+    catalog = load_placement_catalog(st.session_state.catalog_id)
+    labels = {pid: catalog.placement(pid)['label'] for pid in catalog.placement_ids}
 
-    col1, col2 = st.columns([2, 1])
+    holdings = st.session_state.holdings
+    if holdings:
+        table = pd.DataFrame(holdings).rename(columns={
+            'placement': 'Placement', 'value': 'Valeur (€)',
+            'contributions': 'Versements (€)', 'years_held': 'Ancienneté (ans)',
+        })
+        table['Placement'] = table['Placement'].map(lambda p: labels.get(p, p))
+        st.dataframe(table, use_container_width=True)
+        to_remove = st.selectbox(
+            "Retirer un avoir", range(len(holdings)),
+            format_func=lambda k: f"{labels.get(holdings[k]['placement'])} "
+                                  f"({holdings[k]['value']:,.0f} €)",
+        )
+        if st.button("🗑️ Retirer"):
+            holdings.pop(to_remove)
+            st.session_state.results = None
+            st.rerun()
+    else:
+        st.info("Aucune épargne existante saisie.")
 
-    with col1:
-        st.markdown("### Current Portfolio")
-
-        if st.session_state.assets:
-            df = pd.DataFrame(st.session_state.assets)
-            st.dataframe(df, use_container_width=True)
-
-            # Asset allocation pie chart
-            fig = px.pie(
-                df,
-                values='value',
-                names='asset_type',
-                title='Asset Allocation'
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No assets added yet. Add your first asset using the form →")
-
-    with col2:
-        st.markdown("### Add Asset")
-
-        with st.form("add_asset"):
-            asset_type = st.selectbox(
-                "Asset Type",
-                ["Stocks", "Bonds", "Real Estate", "Cash", "Alternative"]
-            )
-
-            asset_name = st.text_input("Asset Name", "e.g., S&P 500 Index Fund")
-
-            value = st.number_input("Current Value ($)", 0, 10000000, 10000, 1000)
-
-            account_type = st.selectbox(
-                "Account Type",
-                ["Taxable", "Tax-Deferred (401k/IRA)", "Tax-Free (Roth)"]
-            )
-
-            if st.form_submit_button("➕ Add Asset", use_container_width=True):
-                st.session_state.assets.append({
-                    'asset_type': asset_type,
-                    'name': asset_name,
-                    'value': value,
-                    'account_type': account_type,
-                    'date_added': datetime.now().strftime("%Y-%m-%d")
-                })
-                st.success(f"✅ Added {asset_name}")
+    with st.form("add_holding"):
+        st.markdown("### Ajouter un avoir")
+        placement = st.selectbox(
+            "Placement", catalog.placement_ids, format_func=lambda p: labels[p]
+        )
+        value = st.number_input("Valeur actuelle (€)", 0.0, None, None, 1000.0)
+        contributions = st.number_input("Versements cumulés (€)", 0.0, None, None, 1000.0)
+        years_held = st.number_input(
+            "Ancienneté de l'enveloppe (années)", 0.0, 100.0, None, 1.0
+        )
+        if st.form_submit_button("➕ Ajouter"):
+            if None in (value, contributions, years_held):
+                st.error("Renseignez la valeur, les versements et l'ancienneté.")
+            else:
+                holdings.append({'placement': placement, 'value': value,
+                                 'contributions': contributions, 'years_held': years_held})
+                st.session_state.results = None
                 st.rerun()
 
 
-# Page: Projects
-def page_projects():
-    """Project planning page."""
-    st.markdown("# 🎯 Your Projects")
-
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
-        st.markdown("### Planned Projects")
-
-        if st.session_state.projects:
-            df = pd.DataFrame(st.session_state.projects)
-            st.dataframe(df, use_container_width=True)
-
-            # Project timeline
-            if 'year' in df.columns and 'amount' in df.columns:
-                fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    x=df['year'],
-                    y=df['amount'],
-                    name='Project Cost',
-                    text=df['name'],
-                    textposition='auto'
-                ))
-                fig.update_layout(
-                    title='Project Timeline', xaxis_title='Year', yaxis_title='Amount ($)'
-                )
-                st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No projects planned yet. Add your first project using the form →")
-
-    with col2:
-        st.markdown("### Add Project")
-
-        with st.form("add_project"):
-            project_type = st.selectbox(
-                "Project Type",
-                ["Vacation", "Home Purchase", "Education", "Car", "Wedding", "Renovation", "Other"]
-            )
-
-            project_name = st.text_input("Project Name", f"My {project_type}")
-
-            amount = st.number_input("Estimated Cost ($)", 0, 1000000, 5000, 1000)
-
-            year = st.number_input("Target Year", 2024, 2050, 2025)
-
-            priority = st.select_slider("Priority", options=["Low", "Medium", "High"])
-
-            if st.form_submit_button("➕ Add Project", use_container_width=True):
-                st.session_state.projects.append({
-                    'type': project_type,
-                    'name': project_name,
-                    'amount': amount,
-                    'year': year,
-                    'priority': priority,
-                    'date_added': datetime.now().strftime("%Y-%m-%d")
-                })
-                st.success(f"✅ Added project: {project_name}")
-                st.rerun()
-
-
-# Page: Projections
-def page_projections():
-    """Projections and analysis page."""
-    st.markdown("# 📊 Projections")
-
-    if not st.session_state.user_data:
-        st.warning("⚠️ Please complete your profile first!")
-        if st.button("Go to Profile"):
+def page_projection():
+    """Calcul et résultats."""
+    st.markdown("# 📊 Projection")
+    form = st.session_state.form
+    if form is None:
+        st.warning("⚠️ Enregistrez d'abord votre profil.")
+        if st.button("Aller au profil"):
             st.session_state.page = "Profile"
             st.rerun()
         return
 
-    col1, col2, col3 = st.columns(3)
-
-    with col2:
-        if st.button("🚀 Run Analysis", type="primary", use_container_width=True):
-            with st.spinner("Running comprehensive analysis..."):
-                results = run_comprehensive_analysis()
-                st.session_state.results = results
-                st.rerun()
+    if st.button("🚀 Lancer la projection", type="primary"):
+        with st.spinner("Calcul en cours..."):
+            st.session_state.results = run_analysis(form)
 
     if st.session_state.results:
-        display_projection_results(st.session_state.results)
-    else:
-        st.info(
-            "Click 'Run Analysis' to generate projections based on your profile, "
-            "assets, and projects."
-        )
+        display_results(st.session_state.results)
 
 
-def display_projection_results(results):
-    """Display projection results."""
-    tabs = st.tabs(["📈 Reference", "🎯 With Projects", "📊 Comparison", "📋 Details"])
+def display_results(results):
+    """Afficher l'allocation, le patrimoine projeté et la frontière efficiente."""
+    optimization = results['optimization']
+    portfolio = optimization['optimal_portfolio']
+    statistics = optimization['simulation_results']['statistics']
 
-    with tabs[0]:
-        st.markdown("### Reference Projections (Without Projects)")
-
-        col1, col2, col3, col4 = st.columns(4)
-
-        portfolio = results['optimization']['optimal_portfolio']
-
-        with col1:
-            if 'expected_return' in portfolio:
-                st.metric("Expected Return", f"{portfolio['expected_return']:.2%}")
-
-        with col2:
-            if 'expected_volatility' in portfolio:
-                st.metric("Portfolio Risk", f"{portfolio['expected_volatility']:.2%}")
-
-        with col3:
-            if portfolio.get('sharpe_ratio') is not None:
-                st.metric("Sharpe Ratio", f"{portfolio['sharpe_ratio']:.2f}")
-
-        with col4:
-            st.metric("Time Horizon", f"{portfolio['horizon']} years")
-
-        st.caption(
-            f"Net of fees and taxes, annualized over {portfolio['horizon']} years "
-            f"(catalog {portfolio['placement_catalog']})."
-        )
-
-    with tabs[1]:
-        st.markdown("### Projections Including Your Projects")
-        st.info(
-            "Project-adjusted projections will be displayed here after "
-            "incorporating project costs and timing."
-        )
-
-    with tabs[2]:
-        st.markdown("### Comparison: With vs. Without Projects")
-        st.info("Side-by-side comparison of scenarios.")
-
-    with tabs[3]:
-        st.markdown("### Detailed Analysis")
-
-        if st.checkbox("Show Optimal Portfolio Weights"):
-            weights = results['optimization']['optimal_portfolio']['weights']
-            df = pd.DataFrame({
-                'Placement': list(weights.keys()),
-                'Weight': list(weights.values())
-            })
-            st.dataframe(df.style.format({'Weight': '{:.2%}'}))
-
-
-# Page: Analysis
-def page_analysis():
-    """Advanced analysis page."""
-    st.markdown("# 📈 Advanced Analysis")
-
-    if not st.session_state.results:
-        st.warning("⚠️ Please run projections first!")
-        return
-
-    st.markdown("### Analysis Tools")
-
-    analysis_type = st.selectbox(
-        "Select Analysis",
-        [
-            "Efficient Frontier",
-            "Risk Analysis",
-            "Sensitivity Analysis",
-            "Goal Achievement Probability",
-            "Tax Impact Analysis"
-        ]
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Rendement annualisé attendu", f"{portfolio['expected_return']:.2%}")
+    col2.metric("Volatilité", f"{portfolio['expected_volatility']:.2%}")
+    if portfolio['sharpe_ratio'] is not None:
+        col3.metric("Ratio de Sharpe", f"{portfolio['sharpe_ratio']:.2f}")
+    col4.metric(
+        f"Patrimoine net médian à {portfolio['horizon']} ans",
+        f"{statistics['median_terminal_wealth']:,.0f} €",
+    )
+    st.caption(
+        f"Rendements nets de frais et d'impôts, annualisés sur {portfolio['horizon']} ans "
+        f"(catalogue {portfolio['placement_catalog']}). Le patrimoine inclut l'épargne "
+        "existante et est net de l'impôt de sortie."
     )
 
-    if analysis_type == "Efficient Frontier":
-        if 'efficient_frontier' in st.session_state.results['optimization']:
-            frontier = st.session_state.results['optimization']['efficient_frontier']
-            if len(frontier) > 0:
-                fig = px.scatter(
-                    frontier,
-                    x='volatility',
-                    y='return',
-                    title='Efficient Frontier (net of fees and taxes)',
-                    labels={'volatility': 'Risk (Volatility)', 'return': 'Expected Return'}
-                )
-                st.plotly_chart(fig, use_container_width=True)
+    st.markdown("### Répartition des nouveaux versements")
+    catalog = load_placement_catalog(portfolio['placement_catalog'])
+    weights = pd.DataFrame({
+        'Placement': [catalog.placement(p)['label'] for p in portfolio['weights']],
+        'Part': list(portfolio['weights'].values()),
+    })
+    st.dataframe(weights.style.format({'Part': '{:.1%}'}), use_container_width=True)
+    st.caption(optimization['constraints_explanation'])
+
+    frontier = optimization['efficient_frontier']
+    if len(frontier) > 0:
+        st.markdown("### Frontière efficiente")
+        fig = px.scatter(
+            frontier, x='volatility', y='return',
+            labels={'volatility': 'Volatilité', 'return': 'Rendement attendu'},
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with st.expander("Limites connues du catalogue"):
+        for gap in optimization['known_gaps']:
+            st.markdown(f"- {gap}")
 
 
-def run_comprehensive_analysis():
-    """Run the complete analysis pipeline."""
+def run_analysis(form):
+    """Lancer le calcul pour la saisie enregistrée ; afficher l'erreur s'il échoue."""
+    profile_config = build_profile_config({**form, 'holdings': st.session_state.holdings})
+    reference = st.session_state.get('risk_free_placement', 'Aucun')
     try:
-        # Build configuration from session state
-        user_data = st.session_state.user_data
-
-        profile_config = {
-            'user_profile': {
-                'personal_info': {
-                    'age': user_data.get('age', 35),
-                    'retirement_age': user_data.get('retirement_age', 65),
-                    'life_expectancy': user_data.get('life_expectancy', 90),
-                    'country': user_data.get('country', 'US'),
-                    'currency': user_data.get('currency', 'USD')
-                },
-                'financial_situation': {
-                    'current_savings': (
-                        sum(a['value'] for a in st.session_state.assets)
-                        if st.session_state.assets else 50000
-                    ),
-                    'annual_income': user_data.get('annual_income', 75000),
-                    'annual_expenses': user_data.get('annual_expenses', 55000),
-                    'debt': {'mortgage': 0, 'student_loans': 0, 'other': 0}
-                },
-                'investment_preferences': {
-                    'risk_tolerance': user_data.get('risk_tolerance', 'moderate'),
-                    'investment_goal': user_data.get('investment_goal', 'retirement'),
-                    'time_horizon': user_data.get('retirement_age', 65) - user_data.get('age', 35),
-                    'esg_preferences': False,
-                    'liquidity_needs': 0.1
-                },
-                'constraints': {
-                    'max_equity_allocation': user_data.get('max_equity', 0.8),
-                    'min_bond_allocation': user_data.get('min_bonds', 0.15),
-                    'exclude_sectors': [],
-                    'rebalancing_frequency': 'annual'
-                }
-            },
-            'contribution_schedule': [{
-                'start_year': 0,
-                'end_year': user_data.get('retirement_age', 65) - user_data.get('age', 35),
-                'monthly_amount': 1000,
-                'annual_increase': 0.03,
-                'account_type': 'tax_deferred'
-            }],
-            'withdrawal_schedule': []
-        }
-
-        reference = st.session_state.get('risk_free_placement', 'None')
         return run_projection(
             profile_config,
-            num_scenarios=st.session_state.get('num_scenarios', 100),
-            catalog_id=st.session_state.get('catalog_id', 'fr-2026'),
-            risk_aversion=st.session_state.get('risk_aversion', 5.0),
-            risk_free_placement=None if reference == 'None' else reference,
+            num_scenarios=st.session_state.num_scenarios,
+            catalog_id=st.session_state.catalog_id,
+            risk_aversion=st.session_state.risk_aversion,
+            risk_free_placement=None if reference == 'Aucun' else reference,
+            couple=form['couple'],
         )
-
-    except Exception as e:
-        st.error(f"Error during analysis: {str(e)}")
+    except (ValueError, NotImplementedError) as error:
+        st.error(f"Calcul impossible : {error}")
         return None
 
 
-def load_example_profile():
-    """Load an example profile."""
-    st.session_state.user_data = {
-        'age': 35,
-        'retirement_age': 65,
-        'life_expectancy': 90,
-        'annual_income': 75000,
-        'annual_expenses': 55000,
-        'risk_tolerance': 'moderate',
-        'investment_goal': 'retirement',
-        'max_equity': 0.8,
-        'min_bonds': 0.15,
-        'country': 'US',
-        'currency': 'USD'
-    }
-
-
 def main():
-    """Main application function."""
+    """Point d'entrée de l'application."""
     init_session_state()
     render_sidebar()
-
-    # Route to appropriate page
     page = st.session_state.get('page', 'Home')
-
-    if page == 'Home':
-        page_home()
-    elif page == 'Profile':
+    if page == 'Profile':
         page_profile()
-    elif page == 'Assets':
-        page_assets()
-    elif page == 'Projects':
-        page_projects()
-    elif page == 'Projections':
-        page_projections()
-    elif page == 'Analysis':
-        page_analysis()
+    elif page == 'Holdings':
+        page_holdings()
+    elif page == 'Projection':
+        page_projection()
+    else:
+        page_home()
 
 
 if __name__ == "__main__":
