@@ -9,7 +9,7 @@ prises, et les points à reprendre plus tard, au fil de l'étape 1.B.
 ## 1. RealEstateModel explose (deux bugs distincts — voir mise à jour du 2026-08-28 ci-dessous)
 
 - **Ouvert le** : 2026-08-27 (étape 1.B.1, en étendant le test de martingalité)
-- **Statut** : ouvert — hors périmètre de l'étape 1.B.3 telle que cadrée
+- **Statut** : réglé le 2026-10-24 (rendement total conforme au R, calage France validé, drift risque-neutre exact) — voir les mises à jour ci-dessous
 - **Contexte** : en étendant le test de martingalité à l'immobilier,
   `D(t)*Index_immo(t)` diverge de plusieurs ordres de grandeur (jusqu'à 1e18
   sur un tirage à 10 000 scénarios, 30 ans, pas de 0,25 an), alors que
@@ -114,6 +114,16 @@ Comparaison ligne à ligne avec `legacy/R_scripts/ImmoHW_V2.R` (et `ImmoHW_PMR_V
 ### Mise à jour du 2026-10-24 (suite) — recalibrage validé
 
 seb a choisi de recalibrer, puis de retenir la série France. La fonction `calibrate_from_annual_returns` (méthode des moments) donne, sur les 61 rendements annuels INSEE France hors inflation, **a = 0,145 et σ = 3,79 %**. Ces valeurs vont dans la nouvelle clé `real_estate.dynamics.instantaneous_volatility` et dans `mean_reversion`. `volatility` (12 %) reste la volatilité de prix du seul chemin simple. Écart de martingalité à 30 ans : **36 %**, l'indice déflaté finissant à 1,36. La volatilité de long terme de l'indice (σ/a ≈ 26 %) rend nécessaire une correction exacte du drift, pour la convexité et pour la covariance avec les taux. Détail du calage : `/mnt/project-files/refonte-gse/calibrage-immobilier.md` (fichier du projet).
+
+### Mise à jour du 2026-10-24 (fin) — drift risque-neutre exact
+
+`RealEstateModel.risk_neutral_drift` remplace le drift `k(t)*dt` d'ImmoHW_V2.R. Le modèle de taux et le modèle immobilier sont linéaires dans des chocs gaussiens : log(D(t) * Indice(t)) est gaussien, et E[D(t) * Indice(t)] = 1 impose E[log Indice(t)] = -log P(0, t) - V(t)/2 - C(t). V (variance de log Indice) et C (covariance avec log D) sont calculées en forme fermée à partir des sensibilités des deux modèles (`HullWhiteModel.log_deflator_loadings`, `RealEstateModel.log_index_loadings`) et de la covariance des chocs (`CorrelatedRandomGenerator.shock_covariances`). À 30 ans, V ≈ 1,31 et C ≈ -0,11 : la covariance avec les taux pèse environ un sixième de la convexité.
+
+Mesures, écart maximal de `D(t)*Index(t)` à 1 (30 ans, pas de 0,25 an) :
+- 10 000 scénarios, graine 42 : **0,93 %** (36 % avant) ; 16 graines : 0,25 % à 3,4 %, pour une erreur type Monte-Carlo de 1,6 % à 30 ans ;
+- 100 000 scénarios : **0,24 %**, soit 0,5 erreur type : aucun biais détectable.
+
+La tolérance de 0,5 % à 10 000 scénarios est hors d'atteinte pour l'immobilier, quel que soit le drift, à cause de la variance de l'indice. Le test de martingalité vérifie 2 % sur la graine 42 ; l'exactitude du drift est vérifiée sans bruit par `test_drift_immobilier_exact`. **Point 1 clos.**
 
 ## 2. Indexation des colonnes de `deflators_df` (t_1..t_N) vs convention interne (colonne i = D(i·dt))
 

@@ -103,6 +103,7 @@ class RealEstateModel:
         re_price_shocks: np.ndarray | None = None,
         re_rental_shocks: np.ndarray | None = None,
         risk_premium: float = 0.0,
+        drift: np.ndarray | None = None,
     ) -> dict[str, np.ndarray]:
         """
         Generate real estate return scenarios.
@@ -122,6 +123,10 @@ class RealEstateModel:
                 (``legacy/R_data/Param_immo2.Rda``) donne sigma = 3,7 % et
                 a = 0,5. Avec une volatilité de prix (12 %) à la place,
                 l'indice diverge. Voir docs/journal-1b-calibration.md, point 1.
+            drift: drift de chaque période, (n_steps - 1,), en remplacement
+                de ``k(t)*dt``. ``None`` (défaut) garde le drift d'ImmoHW_V2.R ;
+                ``risk_neutral_drift`` donne celui qui rend l'indice déflaté
+                martingale.
 
         Returns:
             Dictionary containing:
@@ -154,7 +159,7 @@ class RealEstateModel:
         # reste : RdtImmoP = RdtImmo - RdtImmoL. Le loyer ne s'ajoute pas au
         # total, sinon il serait compté deux fois.
         total_returns = self._generate_price_returns(
-            short_rates, f0t, r2, re_price_shocks, risk_premium
+            short_rates, f0t, r2, re_price_shocks, risk_premium, drift
         )
         rental_returns = self._generate_rental_returns(n_scenarios, n_steps)
         price_returns = total_returns - rental_returns
@@ -217,6 +222,7 @@ class RealEstateModel:
         r2: np.ndarray,
         shocks: np.ndarray,
         risk_premium: float = 0.0,
+        drift: np.ndarray | None = None,
     ) -> np.ndarray:
         """
         Rendement total de l'immobilier, loyers compris (``RdtImmo`` d'ImmoHW_V2.R).
@@ -238,6 +244,8 @@ class RealEstateModel:
             r2: Auxiliary rates (n_scenarios × n_steps)
             shocks: Random shocks (n_scenarios × n_steps)
             risk_premium: prime de risque immobilière annualisée (monde réel).
+            drift: drift de chaque période remplaçant ``k(t)*dt`` (voir
+                ``generate_returns``).
 
         Returns:
             Rendements totaux (n_scenarios × n_steps)
@@ -251,13 +259,22 @@ class RealEstateModel:
             self.dt - 2 * K2T_t + K2T_t2a
         ) ** 0.5
 
+        if drift is not None and len(drift) != n_steps - 1:
+            raise ValueError(
+                f"Le drift doit compter une valeur par période ({n_steps - 1}), "
+                f"il en compte {len(drift)} : le calculer avec risk_neutral_drift "
+                "sur le même nombre de pas."
+            )
+
         for t in range(n_steps - 1):
             kimmo = f0t[t] if t < len(f0t) else f0t[-1]
             # ImmoHW_V2.R : RdtImmo[,i]<-kimmo*delta_t+(r0_2-kimmo)*K2T_t+eta2*alea_R2[,i]
-            drift = (kimmo + risk_premium) * self.dt
+            period_drift = kimmo * self.dt if drift is None else drift[t]
             mean_reversion = (r2[:, t] - kimmo) * K2T_t
             diffusion = eta2 * shocks[:, t]
-            total_returns[:, t + 1] = drift + mean_reversion + diffusion
+            total_returns[:, t + 1] = (
+                period_drift + risk_premium * self.dt + mean_reversion + diffusion
+            )
 
         return total_returns
 
@@ -285,6 +302,90 @@ class RealEstateModel:
         for t in range(1, n_steps):
             rental_returns[:, t] = base_rental + t * inflation_adj
         return rental_returns
+
+    def log_index_loadings(self, n_steps: int) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Sensibilités du log de l'indice total aux chocs, en forme fermée.
+
+        La partie aléatoire de ``Σ_{s <= t} total_returns[:, s]`` vaut
+        ``Σ_j A_price[t, j] * re_price_shocks[:, j]
+        + Σ_j A_aux[t, j] * re_rental_shocks[:, j]``.
+
+        Returns:
+            (A_price, A_aux), deux matrices (n_steps × n_steps).
+        """
+        K2T_t = (1 - np.exp(-self.a * self.dt)) / self.a
+        K2T_t2a = (1 - np.exp(-2 * self.a * self.dt)) / (2 * self.a)
+        eta2 = (self.sigma / self.a) * (self.dt - 2 * K2T_t + K2T_t2a) ** 0.5
+        decay = np.exp(-self.a * self.dt)
+
+        t = np.arange(n_steps)[:, None]
+        j = np.arange(n_steps)[None, :]
+        # Le choc de prix de la colonne j entre dans le rendement j + 1.
+        price = np.where(j <= t - 1, eta2, 0.0)
+        # Le choc de r2 de la colonne j entre dans r2[j + 1], qui pèse
+        # K2T_t * decay**(u - 1 - j) dans le rendement u + 1, pour u > j.
+        lag = np.clip(t - 1 - j, 0, None)
+        aux = K2T_t * self.sigma * K2T_t2a**0.5 * (1 - decay**lag) / (1 - decay)
+        return price, aux
+
+    def risk_neutral_drift(
+        self,
+        f0t: np.ndarray,
+        P0t: np.ndarray,
+        n_steps: int,
+        rate_loadings: np.ndarray,
+        shock_covariances: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Drift de chaque période qui rend ``D(t) * Indice(t)`` martingale.
+
+        Le drift d'ImmoHW_V2.R (``k(t)*dt``) ne corrige ni la convexité ni la
+        covariance avec les taux. Tout le modèle étant linéaire dans des chocs
+        gaussiens, log(D(t) * Indice(t)) est gaussien, et E[D(t) * Indice(t)] = 1
+        impose, avec E[D(t)] = P(0, t) :
+
+            E[log Indice(t)] = -log P(0, t) - Var(log Indice(t)) / 2
+                               - Cov(log Indice(t), log D(t))
+
+        Les variances et covariances sont calculées exactement à partir des
+        sensibilités des deux modèles, pas estimées sur les scénarios.
+
+        Args:
+            f0t: courbe des taux forward, celle passée à ``generate_returns``.
+            P0t: prix zéro-coupon, ``P0t[i] = P(0, i*dt)``.
+            n_steps: nombre de pas.
+            rate_loadings: ``HullWhiteModel.log_deflator_loadings()``.
+            shock_covariances: (n_steps × 3 × 3), covariance par colonne du
+                résidu de taux, du choc de prix et du choc de r2, dans cet ordre.
+
+        Returns:
+            Drift de chaque période, (n_steps - 1,), à passer à ``generate_returns``.
+        """
+        if len(P0t) < n_steps:
+            raise ValueError(
+                f"La courbe zéro-coupon couvre {len(P0t)} pas, il en faut {n_steps} : "
+                "allonger la courbe ou réduire l'horizon."
+            )
+        price, aux = self.log_index_loadings(n_steps)
+        index_loadings = np.stack([np.zeros_like(price), price, aux], axis=-1)
+        rate = np.stack(
+            [rate_loadings, np.zeros_like(price), np.zeros_like(price)], axis=-1
+        )
+        variance = np.einsum('tjk,jkl,tjl->t', index_loadings, shock_covariances, index_loadings)
+        covariance = np.einsum('tjk,jkl,tjl->t', index_loadings, shock_covariances, rate)
+        target_mean = -np.log(np.asarray(P0t[:n_steps], dtype=float)) - variance / 2 - covariance
+
+        # Espérance de r2 : même récurrence que _generate_auxiliary_rates, sans choc.
+        kimmo = np.array([f0t[t] if t < len(f0t) else f0t[-1] for t in range(n_steps)])
+        decay = np.exp(-self.a * self.dt)
+        mean_r2 = np.empty(n_steps)
+        mean_r2[0] = f0t[0] if len(f0t) > 0 else 0.0
+        for t in range(n_steps - 1):
+            mean_r2[t + 1] = mean_r2[t] * decay + kimmo[t] * (1 - decay)
+        K2T_t = (1 - decay) / self.a
+
+        return np.diff(target_mean) - (mean_r2[:-1] - kimmo[:-1]) * K2T_t
 
     def calculate_cap_rate(
         self,

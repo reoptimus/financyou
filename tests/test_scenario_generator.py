@@ -504,17 +504,19 @@ class TestStochasticScenarioGeneration:
             f"au pire point : l'indice actions n'est pas risque-neutre."
         )
 
-    @pytest.mark.xfail(
-        reason=(
-            "Le drift de RealEstateModel ne corrige ni la convexité ni la "
-            "covariance avec les taux : avec le calage France (a = 0,145 ; "
-            "σ = 3,79 %), l'indice déflaté s'écarte encore d'environ 36 % de 1 "
-            "à 30 ans. Voir docs/journal-1b-calibration.md, point 1."
-        ),
-        strict=False,
-    )
     def test_martingale_immobilier_est_risque_neutre(self):
-        """L'indice immobilier déflaté doit rester égal à 1 en espérance (martingale)."""
+        """
+        L'indice immobilier déflaté reste égal à 1 en espérance (martingale).
+
+        Avant la correction du drift, il s'écartait de 36 % à 30 ans. L'erreur
+        type Monte-Carlo de E[D(t)*Indice(t)] vaut 1,6 % à 30 ans pour 10 000
+        scénarios (variance de log Indice ≈ 1,3 avec le calage France) : un
+        seuil de 0,5 % n'est pas atteignable à ce nombre de scénarios, quel que
+        soit le drift. Sur 16 graines, l'écart va de 0,25 % à 3,4 %, et il est
+        de 0,93 % sur la graine 42 ; sur 100 000 scénarios, il tombe à 0,24 %,
+        soit 0,5 erreur type. L'exactitude du drift lui-même est vérifiée sans
+        bruit par ``test_drift_immobilier_exact``.
+        """
         gen = scenario_generator.ScenarioGenerator(random_seed=42)
         config = {
             'num_scenarios': 10_000,
@@ -527,22 +529,11 @@ class TestStochasticScenarioGeneration:
         results = gen.generate(config)
         real_estate = results['diagnostics']['martingale_test']['real_estate']
 
-        assert real_estate['max_relative_deviation'] < 0.005, (
+        assert real_estate['max_relative_deviation'] < 0.02, (
             f"D(t)*Index_immo(t) s'écarte de 1 de "
             f"{real_estate['max_relative_deviation']:.4%} au pire point : "
             f"l'indice immobilier n'est pas risque-neutre."
         )
-
-    def test_immobilier_ne_diverge_plus(self):
-        """Avec le calage France (a = 0,145 ; σ = 3,79 %), l'indice reste borné."""
-        results = scenario_generator.ScenarioGenerator(random_seed=42).generate({
-            'num_scenarios': 10_000, 'time_horizon': 30, 'timestep': 0.25,
-            'use_stochastic': True, 'currency': 'EUR',
-        })
-        real_estate = results['diagnostics']['martingale_test']['real_estate']
-        # Écart résiduel mesuré : 36 % (drift sans correction de convexité ni
-        # de covariance avec les taux) ; avant correction du modèle : 1,9e18.
-        assert real_estate['max_relative_deviation'] < 0.4
 
     def test_stochastic_different_currency(self):
         """Test stochastic generation with different currencies."""
@@ -927,3 +918,72 @@ class TestYieldCurveGeneration:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+def test_drift_immobilier_exact():
+    """
+    Les moments analytiques du drift immobilier sont ceux des scénarios.
+
+    Le drift risque-neutre impose E[log Indice(t)] = -log P(0, t) - V(t)/2 - C(t),
+    avec V la variance de log Indice et C sa covariance avec log D, calculées
+    en forme fermée. Les chocs étant antithétiques, la moyenne empirique de
+    log Indice est exactement la moyenne analytique ; V et C sont comparées
+    à leurs estimateurs empiriques.
+    """
+    from investment_calculator.market_assumptions import load_market_assumptions
+    from investment_calculator.stochastic_models import (
+        CorrelatedRandomGenerator,
+        HullWhiteModel,
+        RealEstateModel,
+    )
+
+    np.random.seed(7)
+    n_scenarios, horizon, dt = 20_000, 30, 0.25
+    n_steps = int(horizon / dt)
+    generator = scenario_generator.ScenarioGenerator(random_seed=7)
+    _, _, f0t, P0t = generator._load_yield_curve(None, 'EUR', dt, n_steps)
+    params = generator.default_params
+    assumptions = load_market_assumptions()
+
+    rates = HullWhiteModel(
+        a=params['mean_reversion_speed'], sigma=params['hw_volatility'],
+        f0t=f0t, P0t=P0t, dt=dt, n_scenarios=n_scenarios, T=horizon,
+    )
+    rate_results = rates.generate_scenarios()
+    correlation = CorrelatedRandomGenerator(n_scenarios=n_scenarios, n_steps=n_steps)
+    shocks = correlation.generate(rate_residuals=rate_results['residuals'])['shocks']
+    real_estate = RealEstateModel(
+        a=assumptions.real_estate_mean_reversion,
+        sigma=assumptions.real_estate_instantaneous_volatility,
+        rental_yield=params['re_rental_yield'], dt=dt,
+        n_scenarios=n_scenarios, T=horizon,
+    )
+    covariances = correlation.shock_covariances(['short_rate', 'real_estate', 'inflation'])
+    drift = real_estate.risk_neutral_drift(
+        f0t, P0t, n_steps, rates.log_deflator_loadings(), covariances
+    )
+    returns = real_estate.generate_returns(
+        rate_results['Rt'], f0t,
+        re_price_shocks=correlation.get_asset_shocks(shocks, 'real_estate'),
+        re_rental_shocks=correlation.get_asset_shocks(shocks, 'inflation'),
+        drift=drift,
+    )['total_returns']
+
+    log_index = np.cumsum(returns, axis=1)
+    log_deflator = np.log(rate_results['deflators'])
+    price, aux = real_estate.log_index_loadings(n_steps)
+    index_loadings = np.stack([np.zeros_like(price), price, aux], axis=-1)
+    rate_loadings = np.stack(
+        [rates.log_deflator_loadings(), np.zeros_like(price), np.zeros_like(price)], axis=-1
+    )
+    variance = np.einsum('tjk,jkl,tjl->t', index_loadings, covariances, index_loadings)
+    covariance = np.einsum('tjk,jkl,tjl->t', index_loadings, covariances, rate_loadings)
+    expected_mean = -np.log(P0t[:n_steps]) - variance / 2 - covariance
+
+    np.testing.assert_allclose(log_index.mean(axis=0), expected_mean, atol=1e-9)
+    last = n_steps - 1
+    assert log_index[:, last].var() == pytest.approx(variance[last], rel=0.03)
+    empirical_covariance = np.cov(log_index[:, last], log_deflator[:, last])[0, 1]
+    assert empirical_covariance == pytest.approx(covariance[last], rel=0.05)
+    # La covariance avec les taux n'est pas négligeable devant la convexité.
+    assert abs(covariance[last]) > 0.1 * variance[last] / 2

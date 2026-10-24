@@ -321,6 +321,29 @@ class CorrelatedRandomGenerator:
         asset_idx = self.asset_names.index(asset_name)
         return shocks_cube[asset_idx, :, :]
 
+    def shock_covariances(self, asset_names: list[str]) -> np.ndarray:
+        """
+        Covariance théorique, colonne par colonne, des chocs de ``generate``.
+
+        Suppose que ``generate`` a reçu les résidus Hull-White : ils remplacent
+        le premier facteur indépendant, et leur colonne 0 est nulle (aucun choc
+        de taux avant le premier pas). La colonne 0 a donc sa propre covariance.
+
+        Args:
+            asset_names: classes d'actifs retenues, dans l'ordre voulu.
+
+        Returns:
+            (n_steps × k × k), k = len(asset_names).
+        """
+        indices = [self.asset_names.index(name) for name in asset_names]
+        loadings = self.cholesky_matrix[indices, :]
+        first_column = np.ones(self.n_assets)
+        first_column[0] = 0.0
+        covariances = np.empty((self.n_steps, len(indices), len(indices)))
+        covariances[:] = loadings @ loadings.T
+        covariances[0] = loadings @ np.diag(first_column) @ loadings.T
+        return covariances
+
     def verify_correlation(self, shocks_cube: np.ndarray) -> pd.DataFrame:
         """
         Verify that generated shocks have the desired correlation structure.
