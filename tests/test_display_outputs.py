@@ -95,9 +95,21 @@ def test_key_findings_are_computed_from_results(pipeline_outputs):
     assert any(f"{goal['probability_of_achieving']:.0%}" in f for f in findings)
 
 
-def test_fake_tax_waterfall_is_refused(pipeline_outputs):
-    with pytest.raises(ValueError, match='inventées'):
+def test_la_cascade_du_patrimoine_est_tracee(pipeline_outputs):
+    """La cascade vient de la projection : ses étapes mènent au patrimoine net."""
+    waterfall = pipeline_outputs['optimizer']['wealth_waterfall']
+    total = sum(amount for _, amount in waterfall.as_steps())
+    assert total == pytest.approx(waterfall.net_wealth)
+    report = reporting.ReportGenerator().generate({
+        'optimization_results': pipeline_outputs['optimizer'],
+        'report_config': {'format': 'json', 'charts': ['tax_impact_waterfall']},
+    })
+    assert 'tax_impact_waterfall' in report['figures']
+
+
+def test_la_cascade_sans_decomposition_est_refusee():
+    with pytest.raises(ValueError, match='wealth_waterfall'):
         reporting.ReportGenerator().generate({
-            'optimization_results': pipeline_outputs['optimizer'],
+            'optimization_results': {},
             'report_config': {'format': 'json', 'charts': ['tax_impact_waterfall']},
         })

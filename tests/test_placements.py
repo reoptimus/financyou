@@ -62,6 +62,13 @@ def test_frais_annuels_preleves_sur_l_encours() -> None:
     np.testing.assert_allclose(gse_plus["av_uc_actions"].to_numpy(), expected)
 
 
+
+def test_sans_les_frais_pour_mesurer_leur_cout() -> None:
+    scenarios = _scenarios(stock_return=[0.10, -0.20])
+    catalog = _catalog(av_uc_actions={"fees": {"entry_rate": 0.0, "annual_rate": 0.0088}})
+    raw = build_gross_placements(scenarios, catalog, ["av_uc_actions"], with_fees=False)
+    np.testing.assert_allclose(raw["av_uc_actions"].to_numpy(), scenarios["stock_return"])
+
 UNKNOWN_FEES = {"fees": {"entry_rate": None, "annual_rate": None}}
 
 

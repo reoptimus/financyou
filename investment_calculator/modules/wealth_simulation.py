@@ -42,7 +42,10 @@ from investment_calculator.wrapper_tax import liquidation_tax
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Holding", "WealthSimulation", "contribution_flows", "simulate_wealth"]
+__all__ = [
+    "Holding", "WealthSimulation", "WealthWaterfall", "contribution_flows", "simulate_wealth",
+    "wealth_waterfall",
+]
 
 
 @dataclass(frozen=True)
@@ -162,6 +165,9 @@ def simulate_wealth(
     flows: np.ndarray,
     horizon: int,
     holdings: tuple[Holding, ...] = (),
+    *,
+    entry_fees: bool = True,
+    annual_income_tax: bool = True,
 ) -> WealthSimulation:
     """
     Projeter le patrimoine net d'une allocation entre placements.
@@ -179,6 +185,9 @@ def simulate_wealth(
         holdings: épargne existante, laissée dans ses placements. L'ancienneté
             d'une enveloppe est la plus grande entre ``profile.wrapper_seniority``
             et celle de ses avoirs.
+        entry_fees, annual_income_tax: ``False`` retire les frais d'entrée, ou
+            l'impôt annuel du compte-titres. Sert uniquement à décomposer le
+            patrimoine (:func:`wealth_waterfall`), jamais à une projection.
 
     Raises:
         ValueError: poids qui ne somment pas à 1, placement absent de GSE+,
@@ -205,7 +214,9 @@ def simulate_wealth(
         raise ValueError("Aucun versement avant l'horizon : il n'y a rien à projeter.")
 
     regime = catalog.regime
-    entry_fees = entry_fee_rates(catalog, list(weights.index))
+    fee_rates = entry_fee_rates(catalog, list(weights.index))
+    if not entry_fees:
+        fee_rates = dict.fromkeys(fee_rates, 0.0)
     paths = np.zeros((n_scenarios, horizon + 1))
     books: dict[str, _WrapperBook] = {}
     seniority = {w: float(y) for w, y in profile.wrapper_seniority.items()}
@@ -217,7 +228,8 @@ def simulate_wealth(
         spec = regime.wrapper(wrapper)
         returns = ordered[pid].to_numpy(dtype=float).reshape(n_scenarios, n_periods)[:, :horizon]
         income_yield, income_rate = None, 0.0
-        if spec.get("tax_treatment") == "taxable" and not spec.get("growth_taxed_annually"):
+        if (annual_income_tax and spec.get("tax_treatment") == "taxable"
+                and not spec.get("growth_taxed_annually")):
             rule = regime.select_withdrawal_rule(wrapper, holding_years=0.0)
             income_rate = regime.resolve_income_tax_rate(
                 rule, taxable_amount=1.0
@@ -251,7 +263,7 @@ def simulate_wealth(
 
     for pid, weight in weights.items():
         if weight > 0:
-            project(str(pid), flows * float(weight), entry_fees[str(pid)], 0.0, 0.0)
+            project(str(pid), flows * float(weight), fee_rates[str(pid)], 0.0, 0.0)
     no_flow = np.zeros(horizon + 1)
     for holding in holdings:
         # Ni frais d'entrée ni réallocation : l'avoir garde sa valeur et son prix de revient.
@@ -283,3 +295,90 @@ def simulate_wealth(
         horizon, n_scenarios, float(np.median(net_terminal)),
     )
     return WealthSimulation(scenario_ids, paths, net_terminal, contributions, income_tax, exit_tax)
+
+
+@dataclass(frozen=True)
+class WealthWaterfall:
+    """
+    Du capital de départ au patrimoine net : moyennes sur les scénarios, en euros.
+
+    Les étapes s'enchaînent et s'additionnent exactement :
+    ``starting_capital + market_gains - fees - income_tax - exit_tax == net_wealth``.
+    Chaque coût est mesuré par différence entre deux projections des mêmes
+    scénarios, l'une avec ce coût et l'autre sans. Il compte donc aussi ce que
+    l'argent prélevé aurait rapporté jusqu'à l'horizon.
+    """
+
+    existing_savings: float  # valeur actuelle de l'épargne existante
+    contributions: float  # nouveaux versements
+    market_gains: float  # gains des marchés, sans frais ni impôt
+    fees: float  # frais d'entrée et frais annuels du catalogue
+    income_tax: float  # impôt annuel du compte-titres sur les revenus distribués
+    exit_tax: float  # impôt de sortie à l'horizon
+    net_wealth: float
+
+    @property
+    def starting_capital(self) -> float:
+        """Épargne existante et nouveaux versements."""
+        return self.existing_savings + self.contributions
+
+    def as_steps(self) -> list[tuple[str, float]]:
+        """Étapes de la cascade, coûts en négatif, pour un graphique."""
+        return [
+            ("Épargne existante", self.existing_savings),
+            ("Versements", self.contributions),
+            ("Gains des marchés", self.market_gains),
+            ("Frais", -self.fees),
+            ("Impôt annuel", -self.income_tax),
+            ("Impôt de sortie", -self.exit_tax),
+        ]
+
+
+def wealth_waterfall(
+    gross: pd.DataFrame,
+    gross_without_fees: pd.DataFrame,
+    catalog: PlacementCatalog,
+    profile: TaxProfile,
+    weights: pd.Series,
+    flows: np.ndarray,
+    horizon: int,
+    holdings: tuple[Holding, ...] = (),
+) -> WealthWaterfall:
+    """
+    Décomposer le patrimoine net projeté : gains, frais, impôt annuel, impôt de sortie.
+
+    Trois projections des mêmes scénarios, du plus brut au plus net :
+
+    1. sans frais ni impôt annuel (``gross_without_fees``, sans frais d'entrée) ;
+    2. avec les frais, sans impôt annuel ;
+    3. la projection réelle, dont on lit la valeur avant et après l'impôt de sortie.
+
+    Les frais sont l'écart entre 1 et 2, l'impôt annuel l'écart entre 2 et 3,
+    l'impôt de sortie l'écart entre la valeur de 3 et son net. L'ordre compte :
+    les frais sont retranchés avant l'impôt, comme dans la projection.
+
+    Args:
+        gross: GSE+ (:func:`~investment_calculator.modules.placements.build_gross_placements`).
+        gross_without_fees: le même GSE+, construit avec ``with_fees=False``.
+        catalog, profile, weights, flows, horizon, holdings: comme :func:`simulate_wealth`.
+    """
+    args = (catalog, profile, weights, flows, horizon, holdings)
+    raw = simulate_wealth(gross_without_fees, *args, entry_fees=False, annual_income_tax=False)
+    with_fees = simulate_wealth(gross, *args, annual_income_tax=False)
+    actual = simulate_wealth(gross, *args)
+
+    raw_value = float(raw.value_paths[:, -1].mean())
+    fee_value = float(with_fees.value_paths[:, -1].mean())
+    pre_exit = float(actual.value_paths[:, -1].mean())
+    net = float(actual.net_terminal.mean())
+    existing = float(sum(h.value for h in holdings))
+    contributions = float(np.asarray(flows, dtype=float)[: horizon + 1].sum())
+    return WealthWaterfall(
+        existing_savings=existing,
+        contributions=contributions,
+        market_gains=raw_value - existing - contributions,
+        fees=raw_value - fee_value,
+        income_tax=fee_value - pre_exit,
+        exit_tax=pre_exit - net,
+        net_wealth=net,
+    )

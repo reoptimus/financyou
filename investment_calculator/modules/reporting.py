@@ -6,7 +6,6 @@ This module generates comprehensive charts, graphs, and reports from all module 
 INPUT STRUCTURE:
 {
     'scenarios': dict,              # From Module 1
-    'tax_results': dict,            # From Module 2
     'user_profile': dict,           # From Module 3
     'optimization_results': dict,   # From Module 4
 
@@ -105,7 +104,6 @@ class ReportGenerator:
         >>> reporter = reporting.ReportGenerator()
         >>> config = {
         ...     'scenarios': scenario_results,
-        ...     'tax_results': tax_results,
         ...     'user_profile': profile,
         ...     'optimization_results': optimization_results,
         ...     'report_config': {'report_type': 'detailed', 'format': 'html'}
@@ -190,7 +188,6 @@ class ReportGenerator:
         """
         validated = {
             'scenarios': config.get('scenarios', {}),
-            'tax_results': config.get('tax_results', {}),
             'user_profile': config.get('user_profile', {}),
             'optimization_results': config.get('optimization_results', {})
         }
@@ -275,11 +272,8 @@ class ReportGenerator:
             )
 
         if 'tax_impact_waterfall' in chart_types:
-            # La cascade fiscale était une liste littérale de nombres inventés.
-            # Elle reviendra quand le moteur fiscal produira la décomposition.
-            raise ValueError(
-                "Le graphique 'tax_impact_waterfall' n'est plus disponible : il "
-                "affichait des valeurs inventées. Retirez-le de report_config['charts']."
+            figures['tax_impact_waterfall'] = self._create_tax_waterfall(
+                config['optimization_results'], colors
             )
 
         return figures
@@ -446,6 +440,46 @@ class ReportGenerator:
             'data': pd.DataFrame({'asset': assets, 'weight': values})
         }
 
+    def _create_tax_waterfall(self, optimization_results: dict, colors: dict) -> dict:
+        """
+        Cascade du patrimoine : du capital de départ au patrimoine net.
+
+        Les montants viennent de ``optimization_results['wealth_waterfall']``
+        (:func:`~investment_calculator.modules.wealth_simulation.wealth_waterfall`),
+        moyennes sur les scénarios. Rien n'est calculé ici.
+        """
+        waterfall = optimization_results.get('wealth_waterfall')
+        if waterfall is None:
+            raise ValueError(
+                "Le graphique 'tax_impact_waterfall' a besoin de "
+                "optimization_results['wealth_waterfall'] : utilisez la sortie de "
+                "placement_plan.plan_placements, ou retirez-le de report_config['charts']."
+            )
+        steps = waterfall.as_steps()
+        labels = [label for label, _ in steps] + ["Patrimoine net"]
+        fig, ax = plt.subplots(figsize=(10, 6))
+        level = 0.0
+        for i, (_, amount) in enumerate(steps):
+            color = colors['success'] if amount >= 0 else colors['danger']
+            ax.bar(i, amount, bottom=level, color=color, edgecolor='black')
+            level += amount
+        ax.bar(len(steps), waterfall.net_wealth, color=colors['primary'], edgecolor='black')
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(labels, rotation=20, ha='right')
+        ax.set_ylabel('Montant moyen sur les scénarios (€)', fontsize=12)
+        ax.set_title('Du capital de départ au patrimoine net', fontsize=14, fontweight='bold')
+        ax.grid(True, alpha=0.3, axis='y')
+        plt.tight_layout()
+        return {
+            'figure': fig,
+            'path': 'tax_impact_waterfall.png',
+            'description': (
+                "Moyennes sur les scénarios. Chaque coût est l'écart entre deux "
+                "projections, avec et sans lui : il compte aussi ce que l'argent "
+                "prélevé aurait rapporté."
+            ),
+        }
+
     def _create_monte_carlo_histogram(
         self,
         optimization_results: dict,
@@ -528,12 +562,12 @@ class ReportGenerator:
                 columns=['Asset', 'Weight']
             )
 
-        # Tax summary table
-        tax_results = config.get('tax_results', {})
-        if 'tax_tables' in tax_results:
-            effective_rates = tax_results['tax_tables'].get('effective_tax_rate')
-            if effective_rates is not None and not effective_rates.empty:
-                tables['tax_summary'] = effective_rates.describe()
+        waterfall = opt_results.get('wealth_waterfall')
+        if waterfall is not None:
+            tables['wealth_waterfall'] = pd.DataFrame(
+                [*waterfall.as_steps(), ("Patrimoine net", waterfall.net_wealth)],
+                columns=['Étape', 'Montant moyen (€)'],
+            )
 
         return tables
 
