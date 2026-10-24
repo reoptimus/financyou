@@ -14,6 +14,7 @@ from investment_calculator.modules.wealth_simulation import (
     Holding,
     contribution_flows,
     simulate_wealth,
+    wealth_waterfall,
 )
 from investment_calculator.placement_catalog import load_placement_catalog
 from investment_calculator.wrapper_tax import liquidation_tax
@@ -169,3 +170,40 @@ def test_epargne_existante_invalide() -> None:
             _gross(), FR_2026, PROFILE, _weights(pea_actions=1.0),
             np.array([1_000.0] + [0.0] * 10), 3, (Holding("per", 1.0, 1.0, 1.0),),
         )
+
+
+def test_la_cascade_mene_au_patrimoine_net() -> None:
+    gross = _gross()
+    without_fees = gross + 0.01
+    weights = _weights(cto_actions=0.5, pea_actions=0.3, av_fonds_euros=0.2)
+    flows = np.array([10_000.0] + [2_000.0] * 10)
+    holding = Holding("av_uc_actions", value=20_000.0, contributions=15_000.0, years_held=3)
+    waterfall = wealth_waterfall(
+        gross, without_fees, FR_2026, PROFILE, weights, flows, 8, (holding,)
+    )
+    actual = simulate_wealth(gross, FR_2026, PROFILE, weights, flows, 8, (holding,))
+
+    assert waterfall.existing_savings == 20_000.0
+    assert waterfall.contributions == 26_000.0
+    assert sum(amount for _, amount in waterfall.as_steps()) == pytest.approx(
+        waterfall.net_wealth
+    )
+    assert waterfall.net_wealth == pytest.approx(actual.net_terminal.mean())
+    assert waterfall.exit_tax == pytest.approx(
+        (actual.value_paths[:, -1] - actual.net_terminal).mean()
+    )
+    assert waterfall.fees > 0
+    assert waterfall.income_tax > 0  # le compte-titres est imposé chaque année
+
+
+def test_la_cascade_sans_cout_n_invente_rien() -> None:
+    # Le Livret A n'a ni frais ni impôt : la cascade n'a que des gains.
+    gross = _gross()
+    flows = np.array([10_000.0] + [0.0] * 10)
+    waterfall = wealth_waterfall(
+        gross, gross, FR_2026, PROFILE, _weights(livret_a=1.0), flows, 5
+    )
+    assert waterfall.fees == 0.0
+    assert waterfall.income_tax == 0.0
+    assert waterfall.exit_tax == 0.0
+    assert waterfall.market_gains == pytest.approx(10_000.0 * (1.02**5 - 1))

@@ -10,7 +10,9 @@ refonte (ADR 0002) et rend un dictionnaire au format attendu par
    égal aux versements totaux de l'utilisateur (abattement et seuils de
    l'assurance-vie) ;
 3. Markowitz sur les moments de GSE++, sous les plafonds de versement ;
-4. projection des versements réels selon les poids retenus.
+4. projection des versements réels selon les poids retenus ;
+5. cascade du patrimoine (``wealth_waterfall``) : gains, frais, impôt annuel et
+   impôt de sortie, en moyenne sur les scénarios.
 
 Définitions des indicateurs restitués :
 
@@ -44,6 +46,7 @@ from investment_calculator.modules.wealth_simulation import (
     Holding,
     contribution_flows,
     simulate_wealth,
+    wealth_waterfall,
 )
 from investment_calculator.placement_catalog import PlacementCatalog
 
@@ -172,6 +175,10 @@ def plan_placements(
     weights = weights / weights.sum()
 
     simulation = simulate_wealth(gross, catalog, profile, weights, flows, horizon, holdings)
+    waterfall = wealth_waterfall(
+        gross, build_gross_placements(scenarios, catalog, with_fees=False),
+        catalog, profile, weights, flows, horizon, holdings,
+    )
     sharpe = (
         (allocation.expected_return - risk_free_rate) / allocation.volatility
         if risk_free_rate is not None and allocation.volatility > 0
@@ -205,6 +212,7 @@ def plan_placements(
             ),
             "statistics": simulation.statistics(),
         },
+        "wealth_waterfall": waterfall,
         "constraints_explanation": constraints.explanation,
         "known_gaps": catalog.known_gaps,
     }

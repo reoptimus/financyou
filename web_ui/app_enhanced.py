@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -353,6 +354,22 @@ def display_results(results):
     })
     st.dataframe(weights.style.format({'Part': '{:.1%}'}), use_container_width=True)
     st.caption(optimization['constraints_explanation'])
+
+    waterfall = optimization.get('wealth_waterfall')
+    if waterfall is not None:
+        st.markdown("### Du capital de départ au patrimoine net")
+        steps = waterfall.as_steps()
+        fig = go.Figure(go.Waterfall(
+            x=[label for label, _ in steps] + ["Patrimoine net"],
+            y=[amount for _, amount in steps] + [waterfall.net_wealth],
+            measure=["relative"] * len(steps) + ["total"],
+        ))
+        fig.update_layout(yaxis_title="€, moyenne sur les scénarios", showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            "Chaque coût est l'écart entre deux projections, avec et sans lui : il "
+            "compte aussi ce que l'argent prélevé aurait rapporté jusqu'à l'horizon."
+        )
 
     frontier = optimization['efficient_frontier']
     if len(frontier) > 0:

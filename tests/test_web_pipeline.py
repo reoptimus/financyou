@@ -126,6 +126,7 @@ def test_parcours_complet_dans_l_application() -> None:
     assert not app.exception and not app.error
     assert app.session_state['results']['optimization']['existing_holdings']
     assert any('Patrimoine net médian' in m.label for m in app.metric)
+    assert any('Du capital de départ' in m.value for m in app.markdown)
 
 
 # --- Projets du foyer et plan par tranches ---------------------------------------

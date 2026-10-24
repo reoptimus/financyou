@@ -275,6 +275,7 @@ def build_gross_placements(
     scenarios: pd.DataFrame,
     catalog: PlacementCatalog,
     placement_ids: list[str] | None = None,
+    with_fees: bool = True,
 ) -> pd.DataFrame:
     """
     Construire GSE+ : le rendement annuel de chaque placement, avant impôt.
@@ -285,6 +286,10 @@ def build_gross_placements(
             le catalogue.
         catalog: catalogue des placements.
         placement_ids: placements à construire ; tous ceux du catalogue par défaut.
+        with_fees: ``False`` retire les frais annuels du catalogue
+            (``fees.annual_rate``). Sert uniquement à mesurer ce que coûtent les
+            frais (:func:`~investment_calculator.modules.wealth_simulation.wealth_waterfall`) ;
+            la marge de l'assureur sur le fonds en euros reste comptée.
 
     Returns:
         Un tableau indexé par (``scenario_id``, ``time_period``), une colonne par
@@ -313,6 +318,8 @@ def build_gross_placements(
                 f"scénarios (colonnes : {list(scenarios.columns)})."
             )
         annual_fee = _required(placement["fees"]["annual_rate"], pid, "fees.annual_rate")
+        if not with_fees:
+            annual_fee = 0.0
         columns[pid] = _support_returns(placement, scenarios, annual_fee)
 
     index = pd.MultiIndex.from_frame(scenarios[list(INDEX_COLUMNS)])
