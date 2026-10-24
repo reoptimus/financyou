@@ -164,7 +164,7 @@ def household_budget(
     shares = shares_by_year(
         regime, adults=len(earners), dependent_years=dependent_years, horizon=horizon
     )
-    tax = income_tax_by_year(regime, taxable, shares)
+    tax = income_tax_by_year(regime, taxable.tolist(), shares)
     schedule = loans_total(loans, horizon)
     payments = (schedule["interest"] + schedule["principal"]).to_numpy()
     rent_paid = np.full(horizon + 1, float(rent))
