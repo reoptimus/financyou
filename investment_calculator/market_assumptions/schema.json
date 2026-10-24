@@ -85,14 +85,19 @@
         },
         "dynamics": {
           "type": "object",
-          "required": ["volatility", "mean_reversion", "rental_yield", "inflation_adjustment"],
+          "required": ["volatility", "instantaneous_volatility", "mean_reversion", "rental_yield", "inflation_adjustment"],
           "additionalProperties": false,
-          "description": "Paramètres du modèle stochastique immobilier (RealEstateModel). Extraction fidèle des littéraux de scenario_generator.py, jamais confrontée à une source de marché. Voir docs/journal-1b-calibration.md, point 1 : le modèle reste numériquement instable à 30 ans indépendamment de ces valeurs.",
+          "description": "Paramètres immobiliers des deux chemins de génération. Voir docs/journal-1b-calibration.md, point 1.",
           "properties": {
             "volatility": {
               "type": "number",
               "exclusiveMinimum": 0,
-              "description": "Volatilité annualisée du prix immobilier."
+              "description": "Volatilité annualisée du prix immobilier, utilisée par le seul chemin simple (_generate_simple)."
+            },
+            "instantaneous_volatility": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Volatilité σ du rendement instantané r2(t) de RealEstateModel (chemin stochastique). Ce n'est pas une volatilité de prix : celle de l'indice à long terme vaut environ σ/a."
             },
             "mean_reversion": {
               "type": "number",

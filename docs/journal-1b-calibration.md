@@ -111,6 +111,10 @@ Comparaison ligne à ligne avec `legacy/R_scripts/ImmoHW_V2.R` (et `ImmoHW_PMR_V
 - **Résidu de 5,3 %.** L'indice déflaté finit **sous** 1. La convexité seule le pousserait au-dessus : c'est donc la covariance entre les chocs immobiliers et les taux qui domine. Retrancher seulement la convexité aggrave l'écart (12 %). Le R cherchait aussi un `kimmo` martingale (« optimisation de kimmo pour être martingal ») sans y parvenir dans V2.
 - **À décider (seb).** Ajouter au jeu d'hypothèses des paramètres propres au modèle stochastique (3,7 % et 0,5, issus du calibrage R), distincts de la volatilité de prix du mode simple. Ensuite, corriger la covariance pour descendre sous la tolérance de 0,5 %.
 
+### Mise à jour du 2026-10-24 (suite) — recalibrage validé
+
+seb a choisi de recalibrer, puis de retenir la série France. La fonction `calibrate_from_annual_returns` (méthode des moments) donne, sur les 61 rendements annuels INSEE France hors inflation, **a = 0,145 et σ = 3,79 %**. Ces valeurs vont dans la nouvelle clé `real_estate.dynamics.instantaneous_volatility` et dans `mean_reversion`. `volatility` (12 %) reste la volatilité de prix du seul chemin simple. Écart de martingalité à 30 ans : **36 %**, l'indice déflaté finissant à 1,36. La volatilité de long terme de l'indice (σ/a ≈ 26 %) rend nécessaire une correction exacte du drift, pour la convexité et pour la covariance avec les taux. Détail du calage : `/mnt/project-files/refonte-gse/calibrage-immobilier.md` (fichier du projet).
+
 ## 2. Indexation des colonnes de `deflators_df` (t_1..t_N) vs convention interne (colonne i = D(i·dt))
 
 - **Ouvert le** : 2026-08-27 (étape 1.B.1)

@@ -151,8 +151,13 @@ class MarketAssumptions:
 
     @property
     def real_estate_volatility(self) -> float:
-        """Volatilité annualisée du prix immobilier."""
+        """Volatilité annualisée du prix immobilier (chemin simple seulement)."""
         return float(self.document["real_estate"]["dynamics"]["volatility"])
+
+    @property
+    def real_estate_instantaneous_volatility(self) -> float:
+        """Volatilité σ du rendement instantané r2(t) de RealEstateModel (chemin stochastique)."""
+        return float(self.document["real_estate"]["dynamics"]["instantaneous_volatility"])
 
     @property
     def real_estate_mean_reversion(self) -> float:

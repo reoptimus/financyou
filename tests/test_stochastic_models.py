@@ -15,6 +15,7 @@ import unittest
 import warnings
 
 import numpy as np
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -669,3 +670,38 @@ def test_le_loyer_n_est_pas_compte_deux_fois():
         for y in (0.0, 0.05)
     ]
     np.testing.assert_array_equal(totals[0], totals[1])
+
+
+def test_calage_immobilier_sur_la_serie_insee_france():
+    from pathlib import Path
+
+    from investment_calculator.stochastic_models.real_estate import calibrate_from_annual_returns
+
+    series = np.loadtxt(Path(__file__).parent.parent / "legacy" / "csv_files"
+                        / "Rdt_immo_France_horsinfla_INSEE_20172510.txt")
+    a, sigma = calibrate_from_annual_returns(series)
+    assert (round(a, 3), round(sigma, 4)) == (0.145, 0.0379)
+    # Le script R ne retenait que l'écart-type des résidus d'un AR(1) : 3,78 %,
+    # le 3,7 % de Param_immo2.Rda.
+    slope, intercept = np.polyfit(series[:-1], series[1:], 1)
+    residuals = series[1:] - (slope * series[:-1] + intercept)
+    assert round(residuals.std(ddof=1), 4) == 0.0378
+    # Le modèle simulé au pas d'un an retrouve l'autocorrélation et l'écart-type.
+    rng = np.random.default_rng(0)
+    n, steps = 2_000, 200
+    model = RealEstateModel(a=a, sigma=sigma, rental_yield=0.0, dt=1.0, n_scenarios=n, T=steps)
+    shocks = rng.standard_normal((2, n, steps))
+    returns = model.generate_returns(np.zeros((n, steps)), np.zeros(steps),
+                                     re_price_shocks=shocks[0],
+                                     re_rental_shocks=shocks[1])['total_returns'][:, 50:]
+    centered = returns - returns.mean()
+    rho = (centered[:, 1:] * centered[:, :-1]).sum() / (centered**2).sum()
+    assert abs(rho - 0.787) < 0.02
+    assert abs(returns.std() - series.std(ddof=1)) < 0.004
+
+
+def test_calage_immobilier_refuse_une_serie_impossible():
+    from investment_calculator.stochastic_models.real_estate import calibrate_from_annual_returns
+
+    with pytest.raises(ValueError, match="autocorrélation"):
+        calibrate_from_annual_returns(np.array([0.1, -0.1, 0.1, -0.1, 0.1, -0.1]))

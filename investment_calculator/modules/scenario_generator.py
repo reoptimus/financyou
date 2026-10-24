@@ -147,6 +147,7 @@ class ScenarioGenerator:
             'hw_volatility': assumptions.hull_white_volatility,
             'equity_dividend_yield': assumptions.dividend_yield,
             're_mean_reversion': assumptions.real_estate_mean_reversion,
+            're_instantaneous_volatility': assumptions.real_estate_instantaneous_volatility,
             're_rental_yield': assumptions.real_estate_rental_yield,
             're_inflation_adj': assumptions.real_estate_inflation_adjustment,
         }
@@ -454,7 +455,7 @@ class ScenarioGenerator:
         # Step 5: Generate real estate scenarios
         re_model = RealEstateModel(
             a=params['re_mean_reversion'],
-            sigma=params['real_estate_volatility'],
+            sigma=params['re_instantaneous_volatility'],
             rental_yield=params['re_rental_yield'],
             inflation_adjustment=params['re_inflation_adj'],
             dt=dt,
