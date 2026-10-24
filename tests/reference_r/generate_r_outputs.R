@@ -102,6 +102,14 @@ michaud_out <- lapply(michaud_cases, function(cs) {
   c(cs, list(output = unname(sol)))
 })
 
+# --- fct_imp_IR.R : impôt par part, sur le barème du régime fr-2026 ---
+load_r(file.path(L, "ShinyR/BetaV1/Financyou/Data_Log/FCT_Global/fct_imp_IR.R"))
+ir_brackets <- fromJSON("investment_calculator/tax_regimes/fr-2026.json")$income_tax$brackets
+tab_IR <- data.frame(Revenu.IR = ir_brackets$lower, Taux.IR = ir_brackets$rate)
+ir_qf <- c(0, 5000, 11600, 11601, 20000, 29579, 35000, 60000, 84577, 90000,
+           150000, 181917, 200000, 300000, 15000, 42000, 7000, 100000, 25000, 500000)
+ir_out <- as.numeric(fct_flux_IR(ir_qf))  # lit la globale horiz = 20
+
 out <- list(
   r_version = R.version.string,
   exp_proj_hist = list(horiz = horiz, cases = proj_out),
@@ -114,6 +122,7 @@ out <- list(
   ),
   michaud = list(
     returns = michaud_returns[, 1, , ], cases = michaud_out
-  )
+  ),
+  imp_ir = list(qf = ir_qf, output = ir_out)
 )
 write_json(out, "tests/reference_r/r_outputs.json", digits = NA, auto_unbox = TRUE, pretty = TRUE)
