@@ -79,3 +79,12 @@ def test_fct_flux_ir_translation_matches_r() -> None:
     np.testing.assert_allclose(
         r_fct_flux_ir(np.asarray(case["qf"], dtype=float), tab_ir), case["output"], atol=1e-9
     )
+
+
+@pytest.mark.parametrize("case", R_OUTPUTS["crd_flux"], ids=str)
+def test_flux_crd_translation_matches_r(case: dict[str, Any]) -> None:
+    from tests.reference_r.crd_flux import r_flux_crd
+
+    principal, interest = r_flux_crd(case["horiz"], case["annuite"], case["taux"], case["an_rest"])
+    np.testing.assert_array_equal(principal, case["principal"])
+    np.testing.assert_array_equal(interest, case["interest"])

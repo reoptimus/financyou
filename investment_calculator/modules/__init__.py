@@ -9,6 +9,7 @@ This package contains the core modules of the FinancYou system:
    placement_plan - GSE+ par placement, GSE++ net de frais et d'impôts,
    Markowitz par horizon et projection du patrimoine (ADR 0002)
    household_cash_flow - projets du foyer et capital disponible par année
+   household_loans - crédits en cours et taux d'endettement du foyer
    household_tax - parts fiscales, impôt sur le revenu et tranche marginale du foyer
    capital_tranches - découpage du capital en tranches, chacune à son horizon
    tranche_allocation - chaque tranche placée selon l'allocation de sa durée
@@ -27,6 +28,7 @@ For a complete workflow example, see examples/complete_workflow_modules.py
 from investment_calculator.modules import (
     capital_tranches,
     household_cash_flow,
+    household_loans,
     household_tax,
     net_returns,
     placement_optimizer,
@@ -48,6 +50,7 @@ __all__ = [
     'wealth_simulation',
     'placement_plan',
     'household_cash_flow',
+    'household_loans',
     'household_tax',
     'capital_tranches',
     'tranche_allocation',
@@ -66,6 +69,7 @@ MODULE_DESCRIPTIONS = {
     'wealth_simulation': 'Projection du patrimoine net des versements',
     'placement_plan': 'Chaîne complète au format du rapport',
     'household_cash_flow': 'Projets du foyer et courbe de capital disponible',
+    'household_loans': 'Crédits en cours et taux d\'endettement du foyer',
     'household_tax': 'Parts fiscales et impôt sur le revenu du foyer',
     'capital_tranches': 'Découpage du capital en tranches, chacune à son horizon',
     'tranche_allocation': 'Assemblage multi-horizons des allocations par tranche',
