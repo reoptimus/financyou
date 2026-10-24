@@ -1,0 +1,4 @@
+mu;0.05
+sigma;0.3
+dvd;0.02
+Actiont;0.03
