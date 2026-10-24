@@ -159,7 +159,8 @@ def debt_ratio(
             f"Aucun revenu retenu aux années {empty} : le taux d'endettement n'y est pas "
             "défini. Vérifiez les revenus saisis."
         )
-    return (rent + payments) / retained
+    ratio: np.ndarray = (rent + payments) / retained
+    return ratio
 
 
 def borrowing_capacity(
@@ -183,4 +184,5 @@ def borrowing_capacity(
     retained = np.asarray(income, dtype=float) + rental_income_weight * np.asarray(
         rental_income, dtype=float
     )
-    return (max_ratio - ratio) * retained
+    capacity: np.ndarray = (max_ratio - ratio) * retained
+    return capacity
