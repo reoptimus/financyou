@@ -96,6 +96,12 @@ import pandas as pd
 
 # Import from existing modules
 # Import time series slicer for general-purpose slicing
+from investment_calculator.modules.household_flows import (
+    Project,
+    check_available_capital,
+    project_flows,
+    projects_from_config,
+)
 from time_series_slicer import TimeSeriesSlicer
 
 # Journalisation : logger nommé d'après le module, il hérite donc de la
@@ -173,7 +179,8 @@ class UserProfileManager:
         investment_time_series = self._create_time_series(
             validated_profile,
             contribution_schedule,
-            withdrawal_schedule
+            withdrawal_schedule,
+            projects_from_config(config.get('projects', [])),
         )
 
         # Step 3: Identify life stages
@@ -376,7 +383,8 @@ class UserProfileManager:
         self,
         profile: dict,
         contribution_schedule: list[dict],
-        withdrawal_schedule: list[dict]
+        withdrawal_schedule: list[dict],
+        projects: tuple[Project, ...] = (),
     ) -> pd.DataFrame:
         """
         Create investment time series from schedules.
@@ -385,6 +393,8 @@ class UserProfileManager:
             profile: Validated profile
             contribution_schedule: List of contribution periods
             withdrawal_schedule: List of withdrawals
+            projects: projets et dépenses prévues, comptés en retraits
+                (:mod:`investment_calculator.modules.household_flows`)
 
         Returns:
             DataFrame with investment time series
@@ -440,8 +450,16 @@ class UserProfileManager:
                     withdrawals[year] += amount
                     purposes[year] = purpose
 
+        # Projets : leurs dépenses s'ajoutent aux retraits, année par année.
+        for project, flows in zip(projects, project_flows(projects, time_horizon), strict=True):
+            withdrawals += flows
+            for year in np.flatnonzero(flows):
+                purposes[year] = project.name
+
         # Calculate net flow
         net_flow = contributions - withdrawals
+        if projects:
+            check_available_capital(net_flow)
 
         # Create DataFrame
         time_series_df = pd.DataFrame({
