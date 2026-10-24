@@ -10,6 +10,7 @@ This package contains the core modules of the FinancYou system:
    Markowitz par horizon et projection du patrimoine (ADR 0002)
    household_cash_flow - projets du foyer et capital disponible par année
    capital_tranches - découpage du capital en tranches, chacune à son horizon
+   tranche_allocation - chaque tranche placée selon l'allocation de sa durée
 4. reporting - Visualization & Reporting
 
 Each module has clear input/output structures documented in ARCHITECTURE.md
@@ -31,6 +32,7 @@ from investment_calculator.modules import (
     placements,
     reporting,
     scenario_generator,
+    tranche_allocation,
     user_profile,
     wealth_simulation,
 )
@@ -45,6 +47,7 @@ __all__ = [
     'placement_plan',
     'household_cash_flow',
     'capital_tranches',
+    'tranche_allocation',
     'reporting'
 ]
 
@@ -61,5 +64,6 @@ MODULE_DESCRIPTIONS = {
     'placement_plan': 'Chaîne complète au format du rapport',
     'household_cash_flow': 'Projets du foyer et courbe de capital disponible',
     'capital_tranches': 'Découpage du capital en tranches, chacune à son horizon',
+    'tranche_allocation': 'Assemblage multi-horizons des allocations par tranche',
     'reporting': 'Generate comprehensive reports and visualizations'
 }
