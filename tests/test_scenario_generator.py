@@ -439,12 +439,44 @@ class TestStochasticScenarioGeneration:
 
         curve_id = results['metadata']['calibration_info']['yield_curve_id']
         P0t = load_yield_curve(curve_id, dt=1.0).get_bond_prices(n_steps=11)
-        forward_year_1 = -np.log(P0t[1] / P0t[0])
+        # Rendement simple de la première année : P(0, 0) / P(0, dt) - 1.
+        forward_year_1 = P0t[0] / P0t[1] - 1
         np.testing.assert_allclose(first['interest_rate'], forward_year_1, atol=1e-12)
 
         deflators = results['deflators']
         np.testing.assert_allclose(deflators['t_1'], P0t[1] / P0t[0], rtol=1e-12)
         assert sorted(scenarios_df['time_period'].unique()) == [float(t) for t in range(1, 11)]
+
+    def test_stochastic_rendements_publies_sont_simples(self):
+        """
+        Régression : les modèles stochastiques produisent des rendements
+        logarithmiques, que l'aval compose comme des rendements simples
+        (1 + r). Publiés tels quels, ils sous-estimaient les actions d'environ
+        σ²/2 par an (1,6 point avec σ = 18 %).
+
+        Sur une période, (1 + action) / (1 + taux) vaut exp((π - σ²/2)·dt + σ·√dt·ε),
+        d'espérance exp(π·dt) exactement : la moyenne empirique doit retrouver
+        la prime de risque arithmétique π des hypothèses de marché.
+        """
+        from investment_calculator.market_assumptions import load_market_assumptions
+
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            # 2 500 : nombre de scénarios qui évite, avec la graine 42, le
+            # plantage du remplacement des taux explosifs (corrigé à part).
+            'num_scenarios': 2500,
+            'time_horizon': 10,
+            'timestep': 1.0,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+        results = gen.generate(config)
+        scenarios_df = results['scenarios']
+        ratio = (1 + scenarios_df['stock_return']) / (1 + scenarios_df['interest_rate'])
+        premium = load_market_assumptions().equity_risk_premium
+        # Erreur type ≈ 0,18 / √25 000 ≈ 0,11 % ; l'ancien biais valait 1,6 %.
+        assert ratio.mean() == pytest.approx(np.exp(premium), abs=0.005)
+        assert results['metadata']['calibration_info']['return_convention'] == 'simple'
 
     def test_stochastic_martingale_test_structure(self):
         """La sortie du test de martingalité porte un sous-résultat par composant."""

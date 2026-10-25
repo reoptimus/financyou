@@ -352,6 +352,7 @@ class ScenarioGenerator:
             'generation_timestamp': datetime.now(),
             'calibration_info': {
                 'method': 'simple',
+                'return_convention': 'simple',
                 'currency': config['currency'],
                 'calibration_date': config['calibration_date'],
                 # Les constantes par défaut de ce chemin (taux, primes de
@@ -525,10 +526,17 @@ class ScenarioGenerator:
 
         # Step 9: Assemble into DataFrame — sans la colonne t = 0 (voir n_grid)
         published = slice(1, n_grid)
-        rates_out = hw_results['Rt'][:, published]
-        equity_out = equity_results['total_returns'][:, published]
-        bonds_out = bond_returns[:, published]
-        re_out = re_results['total_returns'][:, published]
+        # Les modèles produisent des rendements logarithmiques de période
+        # (le déflateur vaut exp(-Σ Rt), l'indice actions exp(Σ rendements)).
+        # Tout l'aval (GSE+, GSE++, simulation de patrimoine) compose
+        # 1 + r, comme sur le chemin simple : on publie donc des rendements
+        # simples, exp(r) - 1. Les composer tels quels sous-estimait les
+        # actions d'environ σ²/2 par an. Le R faisait la même conversion
+        # avant GSE+ (Produits_placements.R : cube_placement<-exp(cube_placement)).
+        rates_out = np.expm1(hw_results['Rt'][:, published])
+        equity_out = np.expm1(equity_results['total_returns'][:, published])
+        bonds_out = np.expm1(bond_returns[:, published])
+        re_out = np.expm1(re_results['total_returns'][:, published])
         inflation_out = inflation_rates[:, published]
         gdp_out = gdp_growth[:, published]
 
@@ -605,6 +613,10 @@ class ScenarioGenerator:
                 # référençant l'identifiant exact de la courbe utilisée
                 # (voir investment_calculator.yield_curve).
                 'yield_curve_id': yield_curve_id,
+                # interest_rate, stock_return, bond_return et
+                # real_estate_return sont des rendements simples de période,
+                # convertis depuis les rendements logarithmiques des modèles.
+                'return_convention': 'simple',
                 'yield_curve_vintage_date': curve_vintage,
                 'forward_curve_range': (float(f0t.min()), float(f0t.max())),
                 # Les rendements projetés (scenarios_df) sont monde réel :
