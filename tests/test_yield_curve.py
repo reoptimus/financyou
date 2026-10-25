@@ -17,6 +17,7 @@ import pytest
 from investment_calculator.yield_curve import (
     SCHEMA_PATH,
     YieldCurveNotFoundError,
+    YieldCurveValidationError,
     list_yield_curves,
     load_yield_curve,
 )
@@ -47,6 +48,26 @@ def test_la_courbe_par_defaut_se_charge_et_est_coherente():
     # mais borné — voir investment_calculator.yield_curve._check_coherence.
     assert p0t.max() < 1.10
     assert p0t.min() > 0
+
+
+def test_la_courbe_eiopa_septembre_2026_se_charge():
+    """
+    Extrait France du classeur EIOPA du 30 septembre 2026 : taux zéro-coupon
+    annuels, donc P(0, 1) = 1 / (1 + taux à un an), 3,271 % dans le classeur.
+    Statut draft tant qu'une personne ne l'a pas relue.
+    """
+    curve = load_yield_curve("eiopa-fr-2026-09", dt=1.0)
+
+    assert curve.vintage_date == "2026-09-30"
+    assert curve.country_code == "FR"
+    assert curve.status == "draft"
+    with pytest.raises(YieldCurveValidationError, match="draft"):
+        load_yield_curve("eiopa-fr-2026-09", allow_draft=False)
+
+    p0t = curve.get_bond_prices(n_steps=151)
+    assert p0t[1] == pytest.approx(1 / 1.03271, rel=1e-6)
+    assert p0t[150] == pytest.approx(1.03348 ** -150, rel=1e-4)
+    assert np.all(np.diff(p0t) < 0)
 
 
 def test_un_identifiant_inconnu_leve_une_erreur_explicite():
