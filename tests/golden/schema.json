@@ -36,7 +36,7 @@
           "description": "Ce que représente le cas, en langage courant."
         },
         "kind": {
-          "enum": ["income_tax", "wealth_tax", "wrapper_withdrawal", "known_gap"],
+          "enum": ["income_tax", "wealth_tax", "real_estate_surtax", "wrapper_withdrawal", "known_gap"],
           "description": "Famille de calcul. Voir tests/golden/README.md."
         },
         "status": {
