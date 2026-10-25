@@ -34,6 +34,7 @@ PAGES = {
     "👤 Profil et versements": "Profile",
     "💼 Épargne existante": "Holdings",
     "🎯 Projets": "Projects",
+    "🏡 Budget du foyer": "Budget",
     "📊 Projection": "Projection",
 }
 
@@ -42,6 +43,7 @@ def init_session_state():
     """Initialiser l'état de session."""
     defaults = {
         'form': None, 'holdings': [], 'projects': [], 'available_savings': None,
+        'budget': None, 'loans': [],
         'results': None, 'page': 'Home',
     }
     for key, value in defaults.items():
@@ -306,6 +308,105 @@ def page_projects():
             st.rerun()
 
 
+def _percent(value):
+    return None if value is None else value / 100
+
+
+def _as_percent(value):
+    return None if value is None else value * 100
+
+
+def page_budget():
+    """Budget du foyer, facultatif : son épargne libre remplace les versements du profil."""
+    st.markdown("# 🏡 Budget du foyer")
+    form = st.session_state.form
+    if form is None:
+        st.warning("⚠️ Enregistrez d'abord votre profil : l'épargne actuelle en vient.")
+        return
+    st.markdown(
+        "Revenus, retraite, impôt, loyer et crédits, année par année. Les dépenses "
+        "courantes se déduisent de votre épargne actuelle (profil). L'épargne libre "
+        "de chaque année alimente alors le plan par tranches de vos projets."
+    )
+    loans = st.session_state.loans
+    if loans:
+        st.dataframe(pd.DataFrame(loans).rename(columns={
+            'name': 'Crédit', 'annual_payment': 'Annuité (€)', 'rate': 'Taux',
+            'years_left': 'Années restantes',
+        }), use_container_width=True)
+        if st.button("🗑️ Retirer le dernier crédit"):
+            loans.pop()
+            st.session_state.results = None
+            st.rerun()
+    with st.form("add_loan"):
+        st.markdown("### Crédit en cours")
+        name = st.text_input("Nom du crédit")
+        payment = st.number_input("Annuité (€)", 0.0, None, None, 500.0)
+        rate = st.number_input("Taux annuel (%)", 0.0, 30.0, None, 0.1)
+        years_left = st.number_input("Annuités restantes", 0, 50, None, 1)
+        if st.form_submit_button("➕ Ajouter le crédit"):
+            if not name.strip() or None in (payment, rate, years_left):
+                st.error("Renseignez le nom, l'annuité, le taux et la durée restante.")
+            else:
+                loans.append({'name': name.strip(), 'annual_payment': payment,
+                              'rate': rate / 100, 'years_left': int(years_left)})
+                st.session_state.results = None
+                st.rerun()
+
+    saved = st.session_state.budget or {}
+    adults = 2 if form['couple'] else 1
+    with st.form("budget_form"):
+        earners = []
+        for k in range(adults):
+            st.markdown(f"### Adulte {k + 1}")
+            prev = (saved.get('earners') or [{}] * adults)[k]
+            col1, col2 = st.columns(2)
+            with col1:
+                income = st.number_input("Revenu imposable annuel (€)", 0.0, None,
+                                         prev.get('taxable_income'), 1000.0, key=f"inc{k}")
+                growth = st.number_input("Évolution annuelle (%)", -20.0, 20.0,
+                                         _as_percent(prev.get('annual_growth')), 0.5,
+                                         key=f"gro{k}")
+            with col2:
+                retire = st.number_input("Retraite dans (années), vide si après l'horizon",
+                                         0, 60, prev.get('retirement_year'), 1,
+                                         key=f"ret{k}")
+                replacement = st.number_input(
+                    "Taux de remplacement (%)", 0.0, 150.0,
+                    _as_percent(prev.get('replacement_rate')), 5.0, key=f"rep{k}",
+                )
+            earners.append({'taxable_income': income, 'annual_growth': _percent(growth),
+                            'retirement_year': retire, 'replacement_rate': _percent(replacement)})
+        st.markdown("### Foyer")
+        rent = st.number_input("Loyer annuel versé (€, 0 si propriétaire)", 0.0, None,
+                               saved.get('rent'), 500.0)
+        dependents = st.text_input(
+            "Personnes à charge : nombre d'années à charge de chacune, séparées par des virgules"
+        )
+        follow = st.checkbox("Les dépenses suivent les revenus (sinon constantes)")
+        submitted = st.form_submit_button("💾 Enregistrer le budget", type="primary")
+    if submitted:
+        if rent is None or any(e['taxable_income'] is None or e['annual_growth'] is None
+                               for e in earners):
+            st.error("Renseignez le revenu et son évolution pour chaque adulte, et le loyer.")
+            return
+        try:
+            years = [int(x) for x in dependents.replace(" ", "").split(",") if x]
+        except ValueError:
+            st.error("Années à charge : saisissez des nombres entiers séparés par des virgules.")
+            return
+        st.session_state.budget = {
+            'earners': earners, 'rent': rent, 'dependent_years': years,
+            'expenses_follow_income': follow,
+        }
+        st.session_state.results = None
+        st.success("✅ Budget enregistré.")
+    if st.session_state.budget and st.button("Ne plus utiliser le budget"):
+        st.session_state.budget = None
+        st.session_state.results = None
+        st.rerun()
+
+
 def page_projection():
     """Calcul et résultats."""
     st.markdown("# 📊 Projection")
@@ -384,8 +485,26 @@ def display_results(results):
         for gap in optimization['known_gaps']:
             st.markdown(f"- {gap}")
 
+    if 'budget' in results:
+        display_budget(results['budget'])
+
     if 'tranche_plan' in results:
         display_tranche_plan(results['tranche_plan'], catalog)
+
+
+def display_budget(budget):
+    """Afficher le budget du foyer et son épargne libre."""
+    st.markdown("### Budget du foyer")
+    table = budget['table'].rename(columns={
+        'salaries': 'Revenus d\'activité', 'pensions': 'Pensions', 'income_tax': 'Impôt',
+        'rent': 'Loyer', 'loan_payments': 'Annuités', 'expenses': 'Dépenses',
+        'free_savings': 'Épargne libre',
+    })
+    st.line_chart(table['Épargne libre'])
+    st.dataframe(table.style.format('{:,.0f}'), use_container_width=True)
+    with st.expander("Limites connues du budget"):
+        for gap in budget['known_gaps']:
+            st.markdown(f"- {gap}")
 
 
 def display_tranche_plan(plan, catalog):
@@ -411,6 +530,11 @@ def display_tranche_plan(plan, catalog):
             st.markdown(f"- {gap}")
 
 
+def _budget_with_loans():
+    budget = st.session_state.budget
+    return None if budget is None else {**budget, 'loans': st.session_state.loans}
+
+
 def run_analysis(form):
     """Lancer le calcul pour la saisie enregistrée ; afficher l'erreur s'il échoue."""
     profile_config = build_profile_config({**form, 'holdings': st.session_state.holdings})
@@ -425,6 +549,7 @@ def run_analysis(form):
             couple=form['couple'],
             projects=build_projects(st.session_state.projects),
             available_savings=st.session_state.available_savings,
+            budget=_budget_with_loans(),
         )
     except (ValueError, NotImplementedError) as error:
         st.error(f"Calcul impossible : {error}")
@@ -442,6 +567,8 @@ def main():
         page_holdings()
     elif page == 'Projects':
         page_projects()
+    elif page == 'Budget':
+        page_budget()
     elif page == 'Projection':
         page_projection()
     else:
