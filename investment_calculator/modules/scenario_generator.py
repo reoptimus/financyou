@@ -412,10 +412,17 @@ class ScenarioGenerator:
         # l'arrondi flottant (int(43 * 0.1 / 0.1) vaut 42).
         T_grid = (n_grid + 0.5) * dt
 
+        # Maturité du fonds obligataire, en pas : une hypothèse de marché
+        # versionnée (bond.fund_maturity_years), pas un littéral du moteur.
+        assumptions = load_market_assumptions()
+        bond_maturity_steps = max(1, round(assumptions.bond_fund_maturity_years / dt))
+
         # Step 1: Load the yield curve — une donnée d'entrée versionnée (voir
         # investment_calculator.yield_curve), pas une formule dans le moteur.
+        # Elle doit couvrir T plus la maturité du fonds obligataire, pour
+        # valoriser en T l'obligation qu'il détient.
         yield_curve_id, curve_vintage, f0t, P0t = self._load_yield_curve(
-            config['yield_curve_id'], config['currency'], dt, n_grid
+            config['yield_curve_id'], config['currency'], dt, n_grid + bond_maturity_steps
         )
 
         # Step 2: Generate Hull-White interest rate scenarios
@@ -447,7 +454,6 @@ class ScenarioGenerator:
         # projetés à l'utilisateur ; le risque-neutre (prime nulle) n'existe
         # que pour le test de martingalité, jamais pour une projection —
         # voir docs/validation/1b-hypotheses-monde-reel.md.
-        assumptions = load_market_assumptions()
 
         # Step 4: Generate equity scenarios
         equity_model = BlackScholesEquity(
@@ -516,9 +522,12 @@ class ScenarioGenerator:
             drift=re_drift,
         )
 
-        # Step 6: Generate bond returns (simplified - use interest rates)
-        # Bond returns approximately = forward rate - duration * rate change
-        bond_returns = hw_results['Rt'].copy()  # Simplified: use forward rates
+        # Step 6: fonds obligataire à maturité constante, valorisé avec les prix
+        # zéro-coupon Hull-White : rendements simples, coupon compris. Avant,
+        # bond_return était le taux court, sans duration ni risque de taux.
+        # Le coupon n'est pas encore publié : le CTO impose toujours la part
+        # positive du rendement total comme revenu (net_returns._distributed_yield).
+        bond_returns, _ = hw_model.bond_fund_returns(hw_results['rt'], bond_maturity_steps)
 
         # Step 7: Generate inflation (from correlated shocks)
         inflation_shocks = corr_gen.get_asset_shocks(corr_results['shocks'], 'inflation')
@@ -542,7 +551,7 @@ class ScenarioGenerator:
         # avant GSE+ (Produits_placements.R : cube_placement<-exp(cube_placement)).
         rates_out = np.expm1(hw_results['Rt'][:, published])
         equity_out = np.expm1(equity_results['total_returns'][:, published])
-        bonds_out = np.expm1(bond_returns[:, published])
+        bonds_out = bond_returns[:, published]  # déjà des rendements simples
         re_out = np.expm1(re_results['total_returns'][:, published])
         inflation_out = inflation_rates[:, published]
         gdp_out = gdp_growth[:, published]

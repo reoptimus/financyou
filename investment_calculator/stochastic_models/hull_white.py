@@ -485,6 +485,83 @@ class HullWhiteModel:
 
         return residuals
 
+    def zero_coupon_prices(self, rt: np.ndarray, i: int, n_maturities: int) -> np.ndarray:
+        """
+        Prix zéro-coupon P(t_i, t_i + k·dt), k = 1 à n_maturities, en forme fermée.
+
+        ln P(t, T) = ln(P(0, T) / P(0, t)) + B·f(0, t) - L(t)/2·B² - B·r(t),
+        avec B = K(T - t). C'est la formule dont ``Rt`` est le cas k = 1 :
+        ``Rt[:, i + 1] = -ln P(t_i, t_{i+1})``, donc ces prix sont cohérents
+        avec les déflateurs (E[D(t)·P(t, T)] = P(0, T)).
+
+        Args:
+            rt: taux court r(t_i), un par scénario.
+            i: indice de t_i sur la grille (t_i = i·dt).
+            n_maturities: nombre de maturités, en pas de temps.
+
+        Returns:
+            Prix (n_scénarios × n_maturities).
+
+        Raises:
+            ValueError: la courbe initiale ne couvre pas t_i + n_maturities·dt.
+        """
+        if i + n_maturities >= len(self.P0t):
+            raise ValueError(
+                f"La courbe initiale compte {len(self.P0t)} points : il en faut "
+                f"{i + n_maturities + 1} pour valoriser {n_maturities} pas après t_{i}. "
+                f"Chargez la courbe sur un horizon plus long."
+            )
+        k = np.arange(1, n_maturities + 1)
+        B = (1 - np.exp(-self.a * k * self.dt)) / self.a if self.a != 0 else k * self.dt
+        log_ratio = np.log(self.P0t[i + 1:i + n_maturities + 1] / self.P0t[i])
+        L_t = self.L(i * self.dt, self.sigma, self.a)
+        log_prices = (
+            log_ratio + B * self.f0t[i] - 0.5 * L_t * B**2
+        )[None, :] - np.outer(rt, B)
+        prices: np.ndarray = np.exp(log_prices)
+        return prices
+
+    def bond_fund_returns(
+        self, rt: np.ndarray, maturity_steps: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Rendement d'un fonds obligataire à maturité constante, sans risque de crédit.
+
+        Chaque période, le fonds achète au pair une obligation de maturité
+        ``maturity_steps`` pas, à coupon de pair, et la revend une période plus
+        tard (portage d'``Oblig_V1.R``). Rendement simple de la période
+        ]t_{i-1}, t_i] : coupon + prix de l'obligation en t_i - 1.
+
+        Args:
+            rt: taux courts (n_scénarios × n_steps), sortie ``'rt'`` de
+                ``generate_scenarios``.
+            maturity_steps: maturité de l'obligation achetée, en pas de temps (≥ 1).
+
+        Returns:
+            ``(total_returns, coupons)``, chacun (n_scénarios × n_steps), rendements
+            simples de période, colonne 0 nulle (instant t = 0). Le coupon est la
+            part distribuée ; le reste est la variation de prix.
+        """
+        if maturity_steps < 1:
+            raise ValueError(
+                f"La maturité du fonds obligataire doit valoir au moins un pas, "
+                f"reçu {maturity_steps}. Corrigez bond.fund_maturity_years."
+            )
+        n_scenarios, n_steps = rt.shape
+        total_returns = np.zeros((n_scenarios, n_steps))
+        coupons = np.zeros((n_scenarios, n_steps))
+        m = maturity_steps
+        for i in range(1, n_steps):
+            issue = self.zero_coupon_prices(rt[:, i - 1], i - 1, m)
+            coupon = (1 - issue[:, -1]) / issue.sum(axis=1)
+            value = coupon + 1.0  # une obligation d'un pas rembourse le pair
+            if m > 1:
+                later = self.zero_coupon_prices(rt[:, i], i, m - 1)
+                value = coupon + coupon * later.sum(axis=1) + later[:, -1]
+            total_returns[:, i] = value - 1.0
+            coupons[:, i] = coupon
+        return total_returns, coupons
+
     def bond_price(self, t: float, T: float, rt: float) -> float:
         """
         Calculate zero-coupon bond price P(t, T) given short rate r(t).

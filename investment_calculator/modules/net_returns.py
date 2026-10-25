@@ -94,6 +94,12 @@ def _distributed_yield(series: str, returns: np.ndarray) -> np.ndarray:
     if series == "stock_return":
         return np.full_like(returns, load_market_assumptions().dividend_yield)
     if series == "bond_return":
+        # Approximation : toute la part positive du rendement total est traitée
+        # comme un coupon distribué, sans report des années de perte. Depuis que
+        # bond_return est un fonds à duration (chemin stochastique), cela
+        # surimpose les obligations du CTO : le coupon du fonds n'est pas encore
+        # transmis jusqu'ici, et le choix entre fonds de distribution et de
+        # capitalisation n'est pas tranché.
         clipped: np.ndarray = np.clip(returns, 0.0, None)
         return clipped
     raise NotImplementedError(
