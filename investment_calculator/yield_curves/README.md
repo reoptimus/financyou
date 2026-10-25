@@ -18,7 +18,18 @@ un fichier source (typiquement dans `legacy/`, en lecture seule — voir
 calcul (bootstrap, interpolation, lissage) est délégué à
 `investment_calculator.stochastic_models.calibration.EIOPACalibrator`.
 
-## Aujourd'hui : une seule courbe, un seul pays
+## Courbes livrées
+
+| Identifiant | Millésime | Statut | Source |
+|---|---|---|---|
+| `eiopa-fr-2018-04` | 30 avril 2018 | validated | `legacy/excel_files/EIOPA_avril_2018_FRANCE.xlsx` |
+| `eiopa-fr-2026-09` | 30 septembre 2026 | draft | `market_data/eiopa/EIOPA_RFR_20260930_spot_no_VA_FR.csv`, extrait France du classeur EIOPA |
+
+La courbe par défaut reste `eiopa-fr-2018-04` ; la courbe 2026 s'utilise en
+passant `yield_curve_id`, et deviendra un candidat au défaut une fois
+validée.
+
+## La courbe d'avril 2018
 
 `eiopa-fr-2018-04` est la seule courbe livrée : un portage du fichier EIOPA
 France d'avril 2018 qui traînait dans `legacy/`, jamais réellement chargé
