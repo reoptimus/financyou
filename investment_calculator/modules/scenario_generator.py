@@ -518,6 +518,16 @@ class ScenarioGenerator:
         )
 
         # Step 9: Assemble into DataFrame
+        # Les modèles produisent des rendements logarithmiques (taux continus
+        # de période, log-rendements de l'indice). Les consommateurs des
+        # scénarios (GSE+, mode simple) composent en (1 + r) : on publie donc
+        # des rendements simples, r = exp(log r) - 1. Les déflateurs et le
+        # test de martingalité restent calculés sur les sorties logarithmiques.
+        period_rates = np.expm1(hw_results['Rt'])
+        stock_simple = np.expm1(equity_results['total_returns'])
+        bond_simple = np.expm1(bond_returns)
+        real_estate_simple = np.expm1(re_results['total_returns'])
+
         scenario_ids = []
         time_periods = []
         interest_rates_list = []
@@ -535,10 +545,10 @@ class ScenarioGenerator:
             for step in range(1, n_dates):
                 scenario_ids.append(scenario_id)
                 time_periods.append(step * dt)
-                interest_rates_list.append(hw_results['Rt'][scenario_idx, step])
-                stock_returns_list.append(equity_results['total_returns'][scenario_idx, step])
-                bond_returns_list.append(bond_returns[scenario_idx, step])
-                real_estate_returns_list.append(re_results['total_returns'][scenario_idx, step])
+                interest_rates_list.append(period_rates[scenario_idx, step])
+                stock_returns_list.append(stock_simple[scenario_idx, step])
+                bond_returns_list.append(bond_simple[scenario_idx, step])
+                real_estate_returns_list.append(real_estate_simple[scenario_idx, step])
                 inflation_rates_list.append(inflation_rates[scenario_idx, step])
                 gdp_growth_list.append(gdp_growth[scenario_idx, step])
 

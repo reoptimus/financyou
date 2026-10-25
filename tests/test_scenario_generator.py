@@ -438,11 +438,11 @@ class TestStochasticScenarioGeneration:
         for col in ('stock_return', 'real_estate_return'):
             assert first[col].std() > 0.0, f"{col} n'a aucune dispersion en période 1"
         # Le taux de la première période est connu en t = 0 : D(1) = P(0, 1),
-        # identique dans tous les scénarios, et le taux vaut -log P(0, 1).
+        # identique dans tous les scénarios, et le taux simple vaut 1/P(0, 1) - 1.
         d1 = results['deflators']['t_1'].to_numpy()
         np.testing.assert_allclose(d1, d1[0])
         assert d1[0] != 1.0
-        np.testing.assert_allclose(first['interest_rate'], -np.log(d1[0]))
+        np.testing.assert_allclose(first['interest_rate'], 1.0 / d1[0] - 1.0)
         assert sorted(scenarios_df['time_period'].unique()) == [1.0, 2.0, 3.0, 4.0, 5.0]
 
     def test_stochastic_remplacement_d_un_nombre_impair_de_scenarios(self):
@@ -465,6 +465,32 @@ class TestStochasticScenarioGeneration:
 
         assert results['scenarios']['scenario_id'].nunique() == 100
         assert len(results['deflators']) == 100
+
+    def test_stochastic_rendements_simples(self):
+        """
+        Régression : les rendements des scénarios stochastiques étaient des
+        log-rendements, alors que GSE+ les compose en (1 + r). Un euro placé
+        en actions était ainsi sous-estimé d'environ σ²/2 par an.
+
+        Le déflateur vaut D(t) = exp(-Σ log-taux) : avec des taux simples,
+        Π (1 + r) doit donc valoir exactement 1 / D(t), scénario par scénario.
+        """
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 50,
+            'time_horizon': 10,
+            'timestep': 1.0,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+
+        results = gen.generate(config)
+        scenarios = results['scenarios'].sort_values(['scenario_id', 'time_period'])
+        rates = scenarios['interest_rate'].to_numpy().reshape(50, 10)
+        deflators = results['deflators'].sort_values('scenario_id')
+        d_t = deflators[[f"t_{k}" for k in range(1, 11)]].to_numpy()
+
+        np.testing.assert_allclose(np.cumprod(1.0 + rates, axis=1), 1.0 / d_t, rtol=1e-12)
 
     def test_stochastic_martingale_test_structure(self):
         """La sortie du test de martingalité porte un sous-résultat par composant."""
