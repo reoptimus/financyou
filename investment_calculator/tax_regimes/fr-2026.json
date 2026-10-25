@@ -68,6 +68,12 @@
       "covers": ["rental_income_regimes.real_regime"]
     },
     {
+      "label": "BOFiP BOI-RFPI-TPVIE-20 — Taxe sur les plus-values immobilières élevées : liquidation (§ 70, barème et lissage)",
+      "url": "https://bofip.impots.gouv.fr/doctrine/BOI-RFPI-TPVIE-20",
+      "consulted_on": "2026-10-24",
+      "covers": ["capital_gains.real_estate.surtax_schedule"]
+    },
+    {
       "label": "impots.gouv.fr — Principales nouveautés Revenus 2025 (hausse de la CSG sur les revenus du capital, LFSS 2026)",
       "url": "https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/nouveautes.pdf",
       "consulted_on": "2026-08-27",
@@ -85,6 +91,7 @@
     "PEA-PME et PEA jeunes non modélisés.",
     "Revenus fonciers : rental_income_regimes porte les paramètres du micro-foncier et du régime réel, mais aucune méthode du moteur ne les consomme encore — la catégorie « revenu locatif récurrent » n'est pas intégrée au calcul. Le déficit foncier et les dispositifs de défiscalisation immobilière ne sont pas modélisés au-delà des plafonds portés ici.",
     "Prélèvement forfaitaire non libératoire acompte et sa régularisation non modélisés (sans effet sur un résultat annuel, mais sur la trésorerie oui).",
+    "Correction hors règle du millésime (exception validée par SebG le 2026-10-25) : la surtaxe sur les plus-values immobilières élevées était décrite par tranches marginales (capital_gains.real_estate.surtax_brackets), ce que contredit le BOFiP (BOI-RFPI-TPVIE-20, § 70) : le taux s'applique au montant total de la plus-value, avec un lissage près de chaque seuil. Elle est désormais décrite par capital_gains.real_estate.surtax_schedule. Aucun calcul ne lisait l'ancien champ : aucune simulation archivée n'en dépend.",
     "Barème de l'IFI à vérifier pour le millésime 2026 (non revu dans cette itération)."
   ],
 
@@ -324,13 +331,13 @@
           ]
         }
       ],
-      "surtax_brackets": [
+      "surtax_schedule": [
         { "lower": 0, "upper": 50000, "rate": 0.0 },
-        { "lower": 50000, "upper": 100000, "rate": 0.02 },
-        { "lower": 100000, "upper": 150000, "rate": 0.03 },
-        { "lower": 150000, "upper": 200000, "rate": 0.04 },
-        { "lower": 200000, "upper": 250000, "rate": 0.05 },
-        { "lower": 250000, "upper": null, "rate": 0.06 }
+        { "lower": 50000, "upper": 100000, "rate": 0.02, "smoothing": { "until": 60000, "factor": 0.05 } },
+        { "lower": 100000, "upper": 150000, "rate": 0.03, "smoothing": { "until": 110000, "factor": 0.10 } },
+        { "lower": 150000, "upper": 200000, "rate": 0.04, "smoothing": { "until": 160000, "factor": 0.15 } },
+        { "lower": 200000, "upper": 250000, "rate": 0.05, "smoothing": { "until": 210000, "factor": 0.20 } },
+        { "lower": 250000, "upper": null, "rate": 0.06, "smoothing": { "until": 260000, "factor": 0.25 } }
       ]
     }
   },

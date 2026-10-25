@@ -44,12 +44,15 @@ c'est la précision « au centime » exigée par le test. `null` signifie
 « non établi », jamais « zéro » : ne mettez `0` que si le résultat correct
 est vraiment zéro.
 
-## Les quatre familles de cas (`kind`)
+## Les cinq familles de cas (`kind`)
 
 - **`income_tax`** — impôt sur le revenu d'un foyer sur un revenu imposable
   donné, hors tout retrait d'enveloppe. `inputs` : `taxable_income`, `shares`.
 - **`wealth_tax`** — impôt sur la fortune immobilière sur un patrimoine net
   taxable donné. `inputs` : `net_taxable_wealth`.
+- **`real_estate_surtax`** — surtaxe sur les plus-values immobilières élevées
+  (CGI art. 1609 nonies G), sur une plus-value imposable déjà diminuée des
+  abattements pour durée de détention. `inputs` : `taxable_gain`.
 - **`wrapper_withdrawal`** — retrait d'une enveloppe de détention (PEA,
   assurance-vie, PER, CTO, Livret A, immobilier direct). `inputs` :
   `wrapper_id`, `withdrawal_amount`, `gain_amount`, `holding_years`, `age`,

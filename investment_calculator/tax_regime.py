@@ -243,6 +243,22 @@ def _validate_semantics(document: dict[str, Any], origin: Path) -> None:
     for label, brackets in _iter_bracket_sets(document):
         problems.extend(f"{label} : {msg}" for msg in _check_brackets(brackets))
 
+    surtax_schedule = (
+        document.get("capital_gains", {}).get("real_estate", {}).get("surtax_schedule", [])
+    )
+    for index, band in enumerate(surtax_schedule):
+        smoothing = band.get("smoothing")
+        if not smoothing:
+            continue
+        lower = float(band.get("lower", 0.0))
+        upper = band.get("upper")
+        until = float(smoothing["until"])
+        if until <= lower or (upper is not None and until > float(upper)):
+            problems.append(
+                f"capital_gains.real_estate.surtax_schedule, tranche {index} : le lissage "
+                f"doit s'arrêter dans la tranche ({lower} < until ≤ {upper}), pas à {until}"
+            )
+
     # Piège du double comptage : le taux forfaitaire porte déjà sa part sociale.
     flat = document.get("flat_tax", {})
     if flat.get("enabled"):
@@ -280,8 +296,8 @@ def _iter_bracket_sets(document: dict[str, Any]) -> list[tuple[str, list[dict[st
     if wealth.get("brackets"):
         sets.append(("wealth_tax.brackets", wealth["brackets"]))
     real_estate = document.get("capital_gains", {}).get("real_estate", {})
-    if real_estate.get("surtax_brackets"):
-        sets.append(("capital_gains.real_estate.surtax_brackets", real_estate["surtax_brackets"]))
+    if real_estate.get("surtax_schedule"):
+        sets.append(("capital_gains.real_estate.surtax_schedule", real_estate["surtax_schedule"]))
     return sets
 
 
@@ -515,6 +531,42 @@ class TaxRegime:
                 ]
             total += apply_brackets(taxable_amount, brackets)
         return total
+
+    def real_estate_surtax_due(self, taxable_gain: float) -> float:
+        """
+        Surtaxe sur les plus-values immobilières élevées
+        (``capital_gains.real_estate.surtax_schedule``).
+
+        ``taxable_gain`` est la plus-value imposable à l'impôt sur le revenu,
+        après abattements pour durée de détention. Le taux de la tranche où
+        elle tombe s'applique à son montant total (ce n'est pas un barème
+        marginal), diminué du lissage d'entrée de tranche.
+
+        Lève ``NotImplementedError`` si le régime ne décrit pas cette surtaxe.
+        """
+        schedule = (
+            self.document.get("capital_gains", {}).get("real_estate", {}).get("surtax_schedule")
+        )
+        if not schedule:
+            raise NotImplementedError(
+                f"Le régime {self.id} ne décrit pas de surtaxe sur les plus-values "
+                "immobilières : ajouter capital_gains.real_estate.surtax_schedule."
+            )
+        if taxable_gain <= 0:
+            return 0.0
+        for band in schedule:
+            upper = band.get("upper")
+            if upper is not None and taxable_gain > float(upper):
+                continue
+            tax = float(band["rate"]) * taxable_gain
+            smoothing = band.get("smoothing")
+            if smoothing and taxable_gain <= float(smoothing["until"]):
+                tax -= (float(smoothing["until"]) - taxable_gain) * float(smoothing["factor"])
+            return max(tax, 0.0)
+        raise TaxRegimeError(
+            f"Le régime {self.id} : surtax_schedule doit se terminer par une tranche "
+            "ouverte (upper à null)."
+        )
 
     def wealth_tax_due(self, net_taxable_wealth: float) -> float:
         """
