@@ -109,6 +109,15 @@
       "covers": [
         "livret_a.fees"
       ]
+    },
+    {
+      "label": "La Française Real Estate Managers, Document d'informations clés de la SCPI Epargne Fonciere (ISIN FR0014005QK8), 05/12/2025 : coûts d'entrée 7,50 % du montant investi, pas de coût de sortie, frais de gestion et autres frais administratifs et d'exploitation 1,53 % de la valeur par an, coûts de transaction 0,40 % par an, hors frais du contrat d'assurance-vie. Epargne Fonciere sert de SCPI de référence : l'une des plus grandes du marché, proposée en assurance-vie.",
+      "url": "https://access.fortunyconseil.fr/api/v1/SCPI/files/documentinformationscles2026_93bb22200a6711f1b0bcf74909daa338.pdf",
+      "consulted_on": "2026-10-24",
+      "covers": [
+        "av_scpi.fees.entry_rate",
+        "av_scpi.fees.annual_rate"
+      ]
     }
   ],
   "known_gaps": [
@@ -127,7 +136,8 @@
     "Fonds en euros : le plancher porte sur le rendement avant frais de gestion (capital garanti hors frais, OPEF p. 27) ; une année blanche coûte donc les frais de gestion. Certains contrats garantissent le capital net de frais : ils ne sont pas représentés.",
     "Livret A : le GSE n'a ni €STR ni inflation hors tabac. Le taux court (interest_rate) et l'inflation du GSE en tiennent lieu. Les dérogations du gouvernement à la formule ne sont pas modélisables.",
     "PEA : le GSE n'a qu'une série actions, sans distinction entre actions européennes (seules éligibles) et mondiales.",
-    "Hors périmètre de ce premier catalogue : obligations en PEA, immobilier (en attente de la correction de RealEstateModel), PER (formule de sortie non sourcée)."
+    "Hors périmètre de ce premier catalogue : obligations en PEA, SCPI détenue en direct (fiscalité foncière à compléter dans le régime), PER (formule de sortie non sourcée).",
+    "SCPI en assurance-vie (av_scpi), ajoutée le 2026-10-24 : frais = frais moyens du contrat d'assurance-vie (0,57 % à l'entrée, 0,80 % par an, mêmes sources que les unités de compte) plus les coûts du DIC d'Epargne Fonciere (7,50 % à l'entrée, 1,53 % + 0,40 % par an), additionnés comme pour les unités de compte. Un assureur peut réduire ou supprimer les coûts d'entrée de la SCPI : la valeur retenue est celle du DIC. Le rendement est la série real_estate_return du GSE, calée sur l'immobilier résidentiel, alors que les SCPI détiennent surtout de l'immobilier d'entreprise : approximation choisie par Sébastien Gallet le 2026-10-24. Repère ASPIM/IEIF pour 2025 : taux de distribution 4,91 %, prix de part −3,45 %, performance globale +1,46 %."
   ],
   "placements": [
     {
@@ -233,6 +243,20 @@
       "fees": {
         "entry_rate": 0.0,
         "annual_rate": 0.0
+      }
+    },
+    {
+      "id": "av_scpi",
+      "label": "Assurance-vie, SCPI (unité de compte immobilière)",
+      "wrapper": "assurance_vie",
+      "asset_class": "real_estate_fund",
+      "support": {
+        "model": "gse_series",
+        "series": "real_estate_return"
+      },
+      "fees": {
+        "entry_rate": 0.0807,
+        "annual_rate": 0.0273
       }
     }
   ]
