@@ -409,6 +409,89 @@ class TestStochasticScenarioGeneration:
         for col in required_cols:
             assert col in scenarios_df.columns
 
+    def test_stochastic_premiere_periode_simulee(self):
+        """
+        Régression : la première période valait 0 dans tous les scénarios.
+
+        Les modèles indexent leurs sorties par date (colonne i = t = i*dt) ;
+        la colonne 0 est t = 0, sans rendement. Elle était reprise comme
+        période 1 : taux, actions, obligations et immobilier nuls en première
+        année, et la dernière année simulée perdue. Le déflateur de fin de
+        période 1 valait D(0) = 1.
+        """
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 50,
+            'time_horizon': 5,
+            'timestep': 1.0,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+
+        results = gen.generate(config)
+        scenarios_df = results['scenarios']
+        first = scenarios_df[scenarios_df['time_period'] == 1.0]
+
+        assert len(first) == 50
+        for col in ('interest_rate', 'stock_return', 'bond_return', 'real_estate_return'):
+            assert (first[col] != 0.0).all(), f"{col} est nul en période 1"
+        for col in ('stock_return', 'real_estate_return'):
+            assert first[col].std() > 0.0, f"{col} n'a aucune dispersion en période 1"
+        # Le taux de la première période est connu en t = 0 : D(1) = P(0, 1),
+        # identique dans tous les scénarios, et le taux simple vaut 1/P(0, 1) - 1.
+        d1 = results['deflators']['t_1'].to_numpy()
+        np.testing.assert_allclose(d1, d1[0])
+        assert d1[0] != 1.0
+        np.testing.assert_allclose(first['interest_rate'], 1.0 / d1[0] - 1.0)
+        assert sorted(scenarios_df['time_period'].unique()) == [1.0, 2.0, 3.0, 4.0, 5.0]
+
+    def test_stochastic_remplacement_d_un_nombre_impair_de_scenarios(self):
+        """
+        Régression : quand le filtre des taux explosifs retirait un nombre
+        impair de scénarios, le remplacement (variables antithétiques, donc par
+        paires) en tirait un de moins, et la génération échouait sur des
+        tableaux de tailles différentes. Avec la graine 1, la courbe
+        synthétique en USD retire un nombre impair de scénarios.
+        """
+        gen = scenario_generator.ScenarioGenerator(random_seed=1)
+        config = {
+            'num_scenarios': 100,
+            'time_horizon': 10,
+            'timestep': 1.0,
+            'use_stochastic': True,
+        }
+
+        results = gen.generate(config)
+
+        assert results['scenarios']['scenario_id'].nunique() == 100
+        assert len(results['deflators']) == 100
+
+    def test_stochastic_rendements_simples(self):
+        """
+        Régression : les rendements des scénarios stochastiques étaient des
+        log-rendements, alors que GSE+ les compose en (1 + r). Un euro placé
+        en actions était ainsi sous-estimé d'environ σ²/2 par an.
+
+        Le déflateur vaut D(t) = exp(-Σ log-taux) : avec des taux simples,
+        Π (1 + r) doit donc valoir exactement 1 / D(t), scénario par scénario.
+        """
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 50,
+            'time_horizon': 10,
+            'timestep': 1.0,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+
+        results = gen.generate(config)
+        scenarios = results['scenarios'].sort_values(['scenario_id', 'time_period'])
+        rates = scenarios['interest_rate'].to_numpy().reshape(50, 10)
+        deflators = results['deflators'].sort_values('scenario_id')
+        d_t = deflators[[f"t_{k}" for k in range(1, 11)]].to_numpy()
+
+        np.testing.assert_allclose(np.cumprod(1.0 + rates, axis=1), 1.0 / d_t, rtol=1e-12)
+
     def test_stochastic_martingale_test_structure(self):
         """La sortie du test de martingalité porte un sous-résultat par composant."""
         gen = scenario_generator.ScenarioGenerator(random_seed=42)
@@ -419,23 +502,15 @@ class TestStochasticScenarioGeneration:
             'use_stochastic': True
         }
 
-        try:
-            results = gen.generate(config)
-            diagnostics = results['diagnostics']
+        results = gen.generate(config)
+        diagnostics = results['diagnostics']
 
-            mt = diagnostics['martingale_test']
-            assert 'passes' in mt
-            for component in ('rates', 'equity', 'real_estate'):
-                assert component in mt
-                assert 'max_relative_deviation' in mt[component]
-                assert 'passes' in mt[component]
-        except ValueError as e:
-            # Known issue with stochastic model dimension mismatch in edge cases
-            # This is a real bug in the stochastic models that needs fixing
-            if "array dimensions" in str(e) or "concatenation axis" in str(e):
-                pytest.skip(f"Skipping due to known stochastic model bug: {e}")
-            else:
-                raise
+        mt = diagnostics['martingale_test']
+        assert 'passes' in mt
+        for component in ('rates', 'equity', 'real_estate'):
+            assert component in mt
+            assert 'max_relative_deviation' in mt[component]
+            assert 'passes' in mt[component]
 
     def test_martingale_rates_sous_demi_pourcent_a_30_ans(self):
         """
