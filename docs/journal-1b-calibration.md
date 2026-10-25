@@ -383,6 +383,26 @@ La tolérance de 0,5 % à 10 000 scénarios est hors d'atteinte pour l'immobilie
   n'est pour l'instant exercée par aucun test, faute d'un cas d'usage réel
   à brancher dessus.
 
+### Mise à jour du 2026-10-25 — de vraies cotations étaient dans l'archive R
+
+L'archive R complète (PR #49) contient ce que le point 7 croyait absent :
+`R4 OUT/Prix_swaptions_bloomberg.Rda` et `R4 OUT/a_sigma.Rda`. Les cotations
+sont celles de `legacy/csv_files/Swaptions_V2.csv` : 9 swaptions EUR, vol
+normale exprimée en % (0,6789 = 67,89 bp). `a_sigma.Rda` donne a = 0,0058333
+et sigma = 0,006875, calibrés par Monte-Carlo sur les trois premières
+swaptions seulement (vecteur `Ponderation` de `Calib_Taux_Swaptions_V2.R`).
+
+Ces cotations deviennent la surface `eur-bloomberg-2018` (schéma 0.2, liste
+`quotes`), en `draft`. Sur la courbe `eiopa-fr-2018-04` et avec a fixé à la
+valeur R, le pricer Jamshidian retrouve sigma = 68,4 bp contre 68,75 bp
+pour le R, soit 0,45 % d'écart. Sur les 9 cotations, sigma = 66,7 bp et
+l'écart quadratique moyen vaut 2,9 bp. Avec a libre, a s'effondre vers 0,
+comme sur la surface synthétique.
+
+**À trancher par seb avant de brancher la calibration sur le GSE** : la
+date d'observation (absente du fichier), la jambe fixe (le R la supposait
+semestrielle), et la valeur de a.
+
 ---
 
 *Dernière mise à jour : 2026-08-28, étape 1.B.4 (extraction des constantes

@@ -1,0 +1,85 @@
+{
+  "$schema": "./schema.json",
+  "schema_version": "0.2",
+  "id": "eur-bloomberg-2018",
+  "label": "Swaptions EUR, volatilité normale — 9 cotations Bloomberg de la calibration R de 2018",
+  "status": "draft",
+  "synthetic": false,
+  "validation": {
+    "validated_by": null,
+    "validated_on": null
+  },
+  "sources": [
+    {
+      "label": "Bloomberg, cotations recopiées dans legacy/csv_files/Swaptions_V2.csv (identique à legacy/R_Financyou/GSE/2. Organisation scripts/R4 CALIBRAGE/R4 IN/Swaptions_V2.csv). Le fichier donne la volatilité en % (0,6789 = 67,89 bp) : Calib_Taux_Swaptions_V2.R la divise par 100. La mention « données Bloomberg » figure dans Prix_swaptions_Normal.R et Prix_swaption_Normal_Uniroot.R.",
+      "consulted_on": "2026-10-25"
+    }
+  ],
+  "known_gaps": [
+    "Date d'observation inconnue : le fichier source ne la donne pas. Les scripts R qui l'utilisent datent d'août et septembre 2018 et l'associent à la courbe EIOPA d'avril 2018. À renseigner par seb avant validation.",
+    "Convention de la jambe fixe inconnue : le script R supposait des échanges semestriels (ligne n = 0,5) ; le standard de marché EUR est annuel 30/360. SwaptionCalibrator calcule en annuel ; l'écart sur le forward est d'environ 1 bp.",
+    "Neuf cotations seulement, échéances de 3 à 15 ans : pas de grille complète, pas d'échéance courte. Une calibration qui en dépend ne vaut que sur cette plage.",
+    "Strikes cités (quoted_strike) proches du forward ATM de la courbe EIOPA d'avril 2018, à 33 bp près au plus (15Y×10Y, dont la fin dépasse le dernier point liquide de 20 ans de la courbe EIOPA) : traités comme des swaptions à la monnaie, forward recalculé à partir de la courbe."
+  ],
+  "currency": "EUR",
+  "observation_date": null,
+  "vol_convention": "normal",
+  "fixed_leg_convention": "inconnue de la source (voir known_gaps) ; calculée en annuelle",
+  "moneyness": "atm",
+  "quotes": [
+    {
+      "expiry": "3Y",
+      "tenor": "7Y",
+      "vol_normal_bp": 56.96,
+      "quoted_strike": 0.01279
+    },
+    {
+      "expiry": "9Y",
+      "tenor": "2Y",
+      "vol_normal_bp": 67.89,
+      "quoted_strike": 0.0177
+    },
+    {
+      "expiry": "9Y",
+      "tenor": "5Y",
+      "vol_normal_bp": 66.48,
+      "quoted_strike": 0.0191
+    },
+    {
+      "expiry": "10Y",
+      "tenor": "5Y",
+      "vol_normal_bp": 66.73,
+      "quoted_strike": 0.0199
+    },
+    {
+      "expiry": "10Y",
+      "tenor": "10Y",
+      "vol_normal_bp": 65.55,
+      "quoted_strike": 0.0202
+    },
+    {
+      "expiry": "12Y",
+      "tenor": "5Y",
+      "vol_normal_bp": 65.61,
+      "quoted_strike": 0.0207
+    },
+    {
+      "expiry": "12Y",
+      "tenor": "10Y",
+      "vol_normal_bp": 64.23,
+      "quoted_strike": 0.0204
+    },
+    {
+      "expiry": "15Y",
+      "tenor": "5Y",
+      "vol_normal_bp": 63.97,
+      "quoted_strike": 0.0205
+    },
+    {
+      "expiry": "15Y",
+      "tenor": "10Y",
+      "vol_normal_bp": 62.13,
+      "quoted_strike": 0.02
+    }
+  ]
+}
