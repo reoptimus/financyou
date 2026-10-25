@@ -106,6 +106,17 @@ class MarketAssumptions:
         return float(self.document["equity"]["dividend_yield"])
 
     @property
+    def real_estate_fund_distribution_rate(self) -> float:
+        """Revenus distribués chaque année par une SCPI, en fraction de sa valeur."""
+        fund = self.document.get("real_estate_fund")
+        if fund is None:
+            raise NotImplementedError(
+                f"Les hypothèses {self.id} ne donnent pas de taux de distribution des SCPI : "
+                "ajoutez real_estate_fund.distribution_rate, avec sa source."
+            )
+        return float(fund["distribution_rate"])
+
+    @property
     def rental_income_share(self) -> float:
         """Part du rendement immobilier supposée provenir du loyer."""
         return float(self.document["real_estate"]["rental_income_share"])

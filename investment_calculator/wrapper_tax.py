@@ -185,12 +185,12 @@ class RealEstateLot:
 
     Attributes:
         cost: prix d'acquisition, frais d'acquisition réels compris (commission
-            de souscription d'une SCPI), en euros.
+            de souscription d'une SCPI), en euros, éventuellement par scénario.
         value: prix de cession, par scénario.
         holding_years: années écoulées entre l'acquisition et la cession.
     """
 
-    cost: float
+    cost: np.ndarray | float
     value: np.ndarray | float
     holding_years: float
 
@@ -244,12 +244,13 @@ def real_estate_liquidation_tax(
     income_base = np.zeros_like(total_value)
     social_tax = np.zeros_like(total_value)
     for lot, value in zip(lots, values, strict=True):
-        if lot.cost < 0 or (value < 0).any():
+        cost = np.asarray(lot.cost, dtype=float)
+        if (cost < 0).any() or (value < 0).any():
             raise ValueError(
                 f"Lot de {lot.holding_years} ans : prix d'acquisition et valeur doivent être "
-                f"positifs (reçu {lot.cost}). Vérifiez la simulation du patrimoine."
+                "positifs. Vérifiez la simulation du patrimoine."
             )
-        gain = np.clip(value - lot.cost, 0.0, None)
+        gain = np.clip(value - cost, 0.0, None)
         income_allowance = regime.real_estate_holding_allowance(
             lot.holding_years, against="income_tax"
         )

@@ -47,6 +47,21 @@
       "items": { "type": "string" }
     },
 
+    "real_estate_fund": {
+      "type": "object",
+      "required": ["distribution_rate"],
+      "additionalProperties": false,
+      "description": "Fonds immobiliers non cotés (SCPI) : ce qu'ils distribuent, à la différence de la série real_estate_return qui donne leur rendement total.",
+      "properties": {
+        "distribution_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Revenus distribués chaque année, en fraction de la valeur des parts. Ce sont des revenus fonciers pour un associé qui détient ses parts en direct."
+        }
+      }
+    },
+
     "equity": {
       "type": "object",
       "required": ["dividend_yield", "volatility"],
