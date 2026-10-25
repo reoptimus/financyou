@@ -393,11 +393,17 @@ class ScenarioGenerator:
         params = config['economic_params']
 
         n_steps = int(T / dt)
+        # Les modèles indexent leurs sorties par date : la colonne i vaut t = i*dt,
+        # et la colonne 0 (t = 0) ne porte aucun rendement (taux et rendements
+        # nuls, déflateur égal à 1). Pour obtenir n_steps périodes, on simule
+        # donc n_steps + 1 dates, et la colonne 0 est retirée à l'assemblage.
+        n_dates = n_steps + 1
+        T_model = n_dates * dt
 
         # Step 1: Load the yield curve — une donnée d'entrée versionnée (voir
         # investment_calculator.yield_curve), pas une formule dans le moteur.
         yield_curve_id, curve_vintage, f0t, P0t = self._load_yield_curve(
-            config['yield_curve_id'], config['currency'], dt, n_steps
+            config['yield_curve_id'], config['currency'], dt, n_dates
         )
 
         # Step 2: Generate Hull-White interest rate scenarios
@@ -408,7 +414,7 @@ class ScenarioGenerator:
             P0t=P0t,
             dt=dt,
             n_scenarios=n_scenarios,
-            T=T
+            T=T_model
         )
 
         hw_results = hw_model.generate_scenarios()
@@ -416,7 +422,7 @@ class ScenarioGenerator:
         # Step 3: Generate correlated shocks
         corr_gen = CorrelatedRandomGenerator(
             n_scenarios=n_scenarios,
-            n_steps=n_steps,
+            n_steps=n_dates,
             random_seed=self.random_seed
         )
 
@@ -435,7 +441,7 @@ class ScenarioGenerator:
             dividend_yield=params['equity_dividend_yield'],
             dt=dt,
             n_scenarios=n_scenarios,
-            T=T
+            T=T_model
         )
 
         equity_shocks = corr_gen.get_asset_shocks(corr_results['shocks'], 'equity')
@@ -460,7 +466,7 @@ class ScenarioGenerator:
             inflation_adjustment=params['re_inflation_adj'],
             dt=dt,
             n_scenarios=n_scenarios,
-            T=T
+            T=T_model
         )
 
         re_price_shocks = corr_gen.get_asset_shocks(corr_results['shocks'], 'real_estate')
@@ -472,7 +478,7 @@ class ScenarioGenerator:
         re_drift = re_model.risk_neutral_drift(
             f0t,
             P0t,
-            n_steps,
+            n_dates,
             hw_model.log_deflator_loadings(),
             corr_gen.shock_covariances(['short_rate', 'real_estate', 'inflation']),
         )
@@ -524,9 +530,11 @@ class ScenarioGenerator:
         for scenario_idx in range(n_scenarios):
             scenario_id = f"scenario_{scenario_idx + 1:04d}"
 
-            for step in range(n_steps):
+            # La période k couvre ](k-1)*dt, k*dt] : c'est la colonne k des
+            # modèles. La colonne 0 (t = 0) n'est pas une période.
+            for step in range(1, n_dates):
                 scenario_ids.append(scenario_id)
-                time_periods.append((step + 1) * dt)
+                time_periods.append(step * dt)
                 interest_rates_list.append(hw_results['Rt'][scenario_idx, step])
                 stock_returns_list.append(equity_results['total_returns'][scenario_idx, step])
                 bond_returns_list.append(bond_returns[scenario_idx, step])
@@ -546,8 +554,9 @@ class ScenarioGenerator:
         })
 
         # Create deflators DataFrame
+        # Colonne t_k = D(k*dt), fin de la période k ; D(0) = 1 n'est pas repris.
         deflators_df = pd.DataFrame(
-            hw_results['deflators'],
+            hw_results['deflators'][:, 1:],
             columns=[f"t_{i+1}" for i in range(n_steps)]
         )
         deflators_df.insert(0, 'scenario_id', [f"scenario_{i+1:04d}" for i in range(n_scenarios)])

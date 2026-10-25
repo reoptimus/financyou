@@ -409,6 +409,42 @@ class TestStochasticScenarioGeneration:
         for col in required_cols:
             assert col in scenarios_df.columns
 
+    def test_stochastic_premiere_periode_simulee(self):
+        """
+        Régression : la première période valait 0 dans tous les scénarios.
+
+        Les modèles indexent leurs sorties par date (colonne i = t = i*dt) ;
+        la colonne 0 est t = 0, sans rendement. Elle était reprise comme
+        période 1 : taux, actions, obligations et immobilier nuls en première
+        année, et la dernière année simulée perdue. Le déflateur de fin de
+        période 1 valait D(0) = 1.
+        """
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 50,
+            'time_horizon': 5,
+            'timestep': 1.0,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+
+        results = gen.generate(config)
+        scenarios_df = results['scenarios']
+        first = scenarios_df[scenarios_df['time_period'] == 1.0]
+
+        assert len(first) == 50
+        for col in ('interest_rate', 'stock_return', 'bond_return', 'real_estate_return'):
+            assert (first[col] != 0.0).all(), f"{col} est nul en période 1"
+        for col in ('stock_return', 'real_estate_return'):
+            assert first[col].std() > 0.0, f"{col} n'a aucune dispersion en période 1"
+        # Le taux de la première période est connu en t = 0 : D(1) = P(0, 1),
+        # identique dans tous les scénarios, et le taux vaut -log P(0, 1).
+        d1 = results['deflators']['t_1'].to_numpy()
+        np.testing.assert_allclose(d1, d1[0])
+        assert d1[0] != 1.0
+        np.testing.assert_allclose(first['interest_rate'], -np.log(d1[0]))
+        assert sorted(scenarios_df['time_period'].unique()) == [1.0, 2.0, 3.0, 4.0, 5.0]
+
     def test_stochastic_martingale_test_structure(self):
         """La sortie du test de martingalité porte un sous-résultat par composant."""
         gen = scenario_generator.ScenarioGenerator(random_seed=42)
