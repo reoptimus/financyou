@@ -125,6 +125,7 @@
     "Toutes les valeurs de frais sont des moyennes de marché : un contrat ou un courtier donné peut être très au-dessus (frais d'entrée de plusieurs pour cent en agence) ou au-dessous (0 % en ligne).",
     "Frais d'entrée du compte-titres et du PEA : le plafond légal du courtage en ligne sur PEA (0,5 %) sert de borne prudente ; aucune moyenne de courtage n'a été trouvée. Pour le compte-titres, sans plafond légal, la même valeur est reprise par défaut.",
     "Frais annuels du compte-titres et du PEA : somme des frais moyens d'un ETF actions (AMF) et de la tenue de compte moyenne (OPEF). Le support est supposé indiciel ; un fonds actif coûte en moyenne 1,37 % par an (AMF, même lettre).",
+    "Obligations en compte-titres : fonds de capitalisation (income = accumulating), choix de Sébastien Gallet le 2026-10-25. Les coupons sont réinvestis et l'impôt est payé à la sortie, sur la plus-value. Un fonds de distribution aurait ses coupons imposés chaque année.",
     "Obligations en compte-titres : faute de moyenne publiée pour les ETF obligataires, les frais d'un ETF actions sont repris, ce qui est probablement prudent.",
     "Unités de compte : frais du contrat (0,80 %, gestion libre) plus frais d'un ETF actions (0,33 %). Les supports en UC coûtent en moyenne 1,60 % par an selon l'OPEF (source secondaire), car la plupart sont des fonds actifs.",
     "Fonds en euros : pass_through = 0,85, minimum légal de redistribution des bénéfices financiers, appliqué au rendement de l'actif général modélisé. Le code R d'origine retenait 0,9.",
@@ -161,7 +162,8 @@
       "asset_class": "bond",
       "support": {
         "model": "gse_series",
-        "series": "bond_return"
+        "series": "bond_return",
+        "income": "accumulating"
       },
       "fees": {
         "entry_rate": 0.005,
