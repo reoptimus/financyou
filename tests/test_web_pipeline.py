@@ -5,6 +5,7 @@ allocation fiscale figée.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from web_ui.pipeline import build_profile_config, build_projects, run_projection
@@ -89,7 +90,7 @@ def test_l_application_s_affiche_sans_saisie() -> None:
 
     app = AppTest.from_file('../web_ui/app_enhanced.py', default_timeout=30).run()
     assert not app.exception
-    for page in ('Profile', 'Holdings', 'Projects', 'Projection'):
+    for page in ('Profile', 'Holdings', 'Projects', 'Budget', 'Projection'):
         app.session_state['page'] = page
         app.run()
         assert not app.exception
@@ -204,3 +205,84 @@ def test_projets_saisis_dans_l_application() -> None:
     assert not app.exception and not app.error
     assert 'tranche_plan' in app.session_state['results']
     assert any('Plan par tranches' in m.value for m in app.markdown)
+
+
+# --- Budget du foyer ------------------------------------------------------------
+
+BUDGET = {
+    'earners': [
+        {'taxable_income': 40_000.0, 'annual_growth': 0.01, 'retirement_year': 12,
+         'replacement_rate': 0.6},
+        {'taxable_income': 25_000.0, 'annual_growth': 0.0, 'retirement_year': None,
+         'replacement_rate': None},
+    ],
+    'rent': 0.0, 'dependent_years': [5],
+    'loans': [{'name': 'résidence', 'annual_payment': 9_000.0, 'rate': 0.015, 'years_left': 10}],
+    'expenses_follow_income': False,
+}
+
+
+def _budget_results(projects=(), available_savings=None) -> dict:
+    config = build_profile_config({**FORM, 'retirement_age': 55, 'holdings': []})
+    return run_projection(config, num_scenarios=20, catalog_id='fr-2026', risk_aversion=5.0,
+                          risk_free_placement=None, couple=True, budget=BUDGET,
+                          projects=projects, available_savings=available_savings)
+
+
+def test_le_budget_part_de_l_epargne_du_profil() -> None:
+    table = _budget_results()['budget']['table']
+    assert len(table) == 16
+    # L'épargne de l'année 0 est celle du profil : 300 € par mois.
+    assert table['free_savings'].iloc[0] == pytest.approx(3_600.0)
+    # Fin du crédit à l'année 10 : l'épargne libre monte de l'annuité.
+    assert table['loan_payments'].iloc[9] == pytest.approx(9_000.0)
+    assert table['loan_payments'].iloc[10] == 0.0
+    d = table.iloc[10] - table.iloc[9]
+    jump = d['salaries'] + d['pensions'] - d['income_tax'] + 9_000.0
+    assert d['free_savings'] == pytest.approx(jump)
+
+
+def test_l_epargne_libre_alimente_le_plan_par_tranches() -> None:
+    results = _budget_results(build_projects(PROJECT_ROWS[:1]), available_savings=20_000.0)
+    savings = results['budget']['table']['free_savings'].to_numpy()
+    capital = np.asarray(results['tranche_plan']['capital'])
+    expected = 20_000.0 + np.cumsum(savings)
+    expected[3:] -= 15_000.0
+    np.testing.assert_allclose(capital, expected)
+
+
+def test_un_budget_incoherent_est_refuse() -> None:
+    config = build_profile_config({**FORM, 'monthly_amount': 10_000.0, 'holdings': []})
+    with pytest.raises(ValueError, match="dépenses seraient négatives"):
+        run_projection(config, num_scenarios=10, catalog_id='fr-2026', risk_aversion=5.0,
+                       risk_free_placement=None, couple=True, budget=BUDGET)
+
+
+def test_budget_saisi_dans_l_application() -> None:
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file('../web_ui/app_enhanced.py', default_timeout=60).run()
+    app.session_state['form'] = {**{k: v for k, v in FORM.items() if k != 'holdings'},
+                                 'retirement_age': 55}
+    app.session_state['page'] = 'Budget'
+    app.run()
+    assert not app.exception
+    app.text_input[0].set_value('résidence')
+    loan_fields = app.number_input[:3]
+    for field, value in zip(loan_fields, (9_000.0, 1.5, 10), strict=True):
+        field.set_value(value)
+    _click(app, 'Ajouter le crédit')
+    assert app.session_state['loans'] == BUDGET['loans']
+    budget_fields = app.number_input[3:]
+    values = (40_000.0, 1.0, 12, 60.0, 25_000.0, 0.0, None, None, 0.0)
+    for field, value in zip(budget_fields, values, strict=True):
+        field.set_value(value)
+    app.text_input[1].set_value('5')
+    _click(app, 'Enregistrer le budget')
+    assert not app.error
+    assert app.session_state['budget']['earners'][0]['replacement_rate'] == pytest.approx(0.6)
+    app.session_state['page'] = 'Projection'
+    app.run()
+    _click(app, 'Lancer')
+    assert not app.exception and not app.error
+    assert any('Budget du foyer' in m.value for m in app.markdown)
