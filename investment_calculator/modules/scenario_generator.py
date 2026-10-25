@@ -12,6 +12,7 @@ INPUT STRUCTURE:
     'calibration_date': str,        # Date for EIOPA curve calibration (YYYY-MM-DD)
     'currency': str,                # Currency for calibration (e.g., 'EUR', 'USD')
     'correlation_matrix': dict,     # Cross-asset correlations (optional)
+    'filter_explosive_rates': bool, # Stochastique : retirer les taux hors bornes (défaut True)
     'economic_params': {
         'mean_reversion_speed': float,    # Hull-White parameter
         'volatility': float,              # Interest rate volatility
@@ -225,6 +226,10 @@ class ScenarioGenerator:
             'currency': config.get('currency', 'USD'),
             'yield_curve_id': config.get('yield_curve_id'),
             'correlation_matrix': config.get('correlation_matrix', {}),
+            # Chemin stochastique : retirer et régénérer les chemins de taux
+            # hors bornes (comportement historique), ou les garder. Voir
+            # HullWhiteModel.generate_scenarios(filter_explosive=...).
+            'filter_explosive_rates': bool(config.get('filter_explosive_rates', True)),
             'economic_params': {}
         }
 
@@ -424,7 +429,9 @@ class ScenarioGenerator:
             T=T_grid
         )
 
-        hw_results = hw_model.generate_scenarios()
+        hw_results = hw_model.generate_scenarios(
+            filter_explosive=config['filter_explosive_rates']
+        )
 
         # Step 3: Generate correlated shocks
         corr_gen = CorrelatedRandomGenerator(
@@ -619,6 +626,11 @@ class ScenarioGenerator:
                 'return_convention': 'simple',
                 'yield_curve_vintage_date': curve_vintage,
                 'forward_curve_range': (float(f0t.min()), float(f0t.max())),
+                # Chemins de taux sortis des bornes au tirage : retirés et
+                # régénérés si le filtre est actif (ce qui tronque la
+                # distribution), gardés sinon.
+                'filter_explosive_rates': config['filter_explosive_rates'],
+                'rate_paths_out_of_bounds': hw_results['n_out_of_bounds'],
                 # Les rendements projetés (scenarios_df) sont monde réel :
                 # taux sans risque + cette prime. Voir
                 # docs/validation/1b-hypotheses-monde-reel.md.

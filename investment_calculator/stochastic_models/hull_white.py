@@ -19,9 +19,12 @@ References:
   The Review of Financial Studies, 3(4), 573-592.
 """
 
+import logging
 import warnings
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 class HullWhiteModel:
@@ -140,7 +143,8 @@ class HullWhiteModel:
         lim_high: float = 0.1,
         lim_low: float = -0.05,
         max_retries: int = 50,
-        use_antithetic: bool = True
+        use_antithetic: bool = True,
+        filter_explosive: bool = True,
     ) -> dict[str, np.ndarray]:
         """
         Generate interest rate scenarios using Hull-White model.
@@ -154,6 +158,11 @@ class HullWhiteModel:
             lim_low: Lower limit for continuous rates (to filter explosive scenarios)
             max_retries: Maximum percentage of scenarios to retry if filtered (0-50)
             use_antithetic: Whether to use antithetic variates for variance reduction
+            filter_explosive: retirer et régénérer les chemins qui sortent de
+                [lim_low, lim_high]. Ce tri tronque la distribution des taux et
+                casse les paires antithétiques ; ``False`` garde tous les chemins
+                (le modèle est gaussien, un taux négatif n'est pas aberrant) et
+                se contente de compter ceux qui sortent des bornes.
 
         Returns:
             Dictionary containing:
@@ -161,6 +170,8 @@ class HullWhiteModel:
                 - 'Rt': Instantaneous forward rates (n_scenarios × n_steps)
                 - 'deflators': Deflator paths (n_scenarios × n_steps)
                 - 'residuals': Extracted residuals for correlation (n_scenarios × n_steps)
+                - 'n_out_of_bounds': nombre de chemins tirés qui sortent des
+                  bornes (retirés si ``filter_explosive``, gardés sinon)
         """
         # Ensure even number of scenarios for antithetic variates
         n_sim = self.n_scenarios // 2 * 2 if use_antithetic else self.n_scenarios
@@ -219,10 +230,19 @@ class HullWhiteModel:
             Tp += self.dt
             tp += self.dt
 
-        # Filter explosive scenarios
-        Rt, rt = self._filter_explosive_scenarios(
-            Rt, rt, lim_high, lim_low, max_retries, use_antithetic
+        n_out_of_bounds = int(
+            np.sum(self._out_of_bounds(Rt, np.log(1 + lim_high), np.log(1 + lim_low)))
         )
+        if filter_explosive:
+            Rt, rt = self._filter_explosive_scenarios(
+                Rt, rt, lim_high, lim_low, max_retries, use_antithetic
+            )
+        elif n_out_of_bounds:
+            logger.info(
+                "%d chemin(s) de taux sur %d sortent de [%.1f %% ; %.1f %%], gardés "
+                "(filtre des taux explosifs désactivé)",
+                n_out_of_bounds, len(Rt), 100 * lim_low, 100 * lim_high,
+            )
 
         # Calculate deflators
         deflators = self._calculate_deflators(Rt)
@@ -234,7 +254,8 @@ class HullWhiteModel:
             'rt': rt,
             'Rt': Rt,
             'deflators': deflators,
-            'residuals': residuals
+            'residuals': residuals,
+            'n_out_of_bounds': n_out_of_bounds,
         }
 
     def log_deflator_loadings(self) -> np.ndarray:
@@ -266,6 +287,12 @@ class HullWhiteModel:
         loadings[:, 0] = 0.0
         return loadings
 
+    @staticmethod
+    def _out_of_bounds(Rt: np.ndarray, high: float, low: float) -> np.ndarray:
+        """Chemins dont un taux de période sort de [low, high] (taux continus)."""
+        mask: np.ndarray = np.any(Rt > high, axis=1) | np.any(Rt < low, axis=1)
+        return mask
+
     def _filter_explosive_scenarios(
         self,
         Rt: np.ndarray,
@@ -294,9 +321,7 @@ class HullWhiteModel:
         lim_low_cont = np.log(1 + lim_low)
 
         # Find scenarios exceeding limits
-        high_mask = np.any(Rt > lim_high_cont, axis=1)
-        low_mask = np.any(Rt < lim_low_cont, axis=1)
-        bad_scenarios = high_mask | low_mask
+        bad_scenarios = self._out_of_bounds(Rt, lim_high_cont, lim_low_cont)
 
         n_bad = np.sum(bad_scenarios)
         pct_removed = n_bad / len(Rt) * 100
@@ -314,7 +339,15 @@ class HullWhiteModel:
         # Regenerate removed scenarios if below 50% threshold
         n_needed = self.n_scenarios - len(Rt)
 
-        if n_needed > 0 and pct_removed < max_retries:
+        if n_needed > 0 and pct_removed >= max_retries:
+            raise RuntimeError(
+                f"{pct_removed:.1f} % des chemins de taux sortent des bornes, au-delà du "
+                f"seuil de régénération ({max_retries} %) : la dynamique Hull-White "
+                f"(a={self.a}, sigma={self.sigma}) est incompatible avec ces bornes. "
+                f"Élargissez lim_high/lim_low ou passez filter_explosive=False."
+            )
+
+        if n_needed > 0:
             # Recursively generate replacement scenarios
             Rt_new, rt_new = self._generate_replacement_scenarios(
                 n_needed, lim_high_cont, lim_low_cont, use_antithetic
@@ -338,7 +371,10 @@ class HullWhiteModel:
         max_attempts: int = 10
     ) -> tuple[np.ndarray, np.ndarray]:
         """Generate replacement scenarios for filtered explosive paths."""
-        n_sim = n_needed // 2 * 2 if use_antithetic else n_needed
+        # Arrondi au pair SUPÉRIEUR : les antithétiques vont par paires, et
+        # arrondir vers le bas ne régénérait aucun chemin pour un seul manquant
+        # (le R arrondit lui aussi vers le haut, ceiling, dans HullWhite_V2.R).
+        n_sim = (n_needed + 1) // 2 * 2 if use_antithetic else n_needed
 
         for _attempt in range(max_attempts):
             rt_new = np.zeros((n_sim, self.n_steps))
@@ -390,12 +426,12 @@ class HullWhiteModel:
             if np.sum(good_scenarios) >= n_needed:
                 return Rt_new[good_scenarios][:n_needed], rt_new[good_scenarios][:n_needed]
 
-        # If max attempts reached, return what we have
-        warnings.warn(
-            f"Could not generate {n_needed} non-explosive scenarios after {max_attempts} attempts",
-            stacklevel=2,
+        raise RuntimeError(
+            f"Impossible de régénérer {n_needed} chemin(s) de taux dans les bornes en "
+            f"{max_attempts} tentatives : la dynamique Hull-White (a={self.a}, "
+            f"sigma={self.sigma}) sort trop souvent de [lim_low, lim_high]. Élargissez "
+            f"les bornes ou passez filter_explosive=False."
         )
-        return Rt_new[:n_needed], rt_new[:n_needed]
 
     def _calculate_deflators(self, Rt: np.ndarray) -> np.ndarray:
         """

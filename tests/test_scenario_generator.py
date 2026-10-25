@@ -462,9 +462,7 @@ class TestStochasticScenarioGeneration:
 
         gen = scenario_generator.ScenarioGenerator(random_seed=42)
         config = {
-            # 2 500 : nombre de scénarios qui évite, avec la graine 42, le
-            # plantage du remplacement des taux explosifs (corrigé à part).
-            'num_scenarios': 2500,
+            'num_scenarios': 2000,
             'time_horizon': 10,
             'timestep': 1.0,
             'use_stochastic': True,
@@ -474,9 +472,55 @@ class TestStochasticScenarioGeneration:
         scenarios_df = results['scenarios']
         ratio = (1 + scenarios_df['stock_return']) / (1 + scenarios_df['interest_rate'])
         premium = load_market_assumptions().equity_risk_premium
-        # Erreur type ≈ 0,18 / √25 000 ≈ 0,11 % ; l'ancien biais valait 1,6 %.
+        # Erreur type ≈ 0,18 / √20 000 ≈ 0,13 % ; l'ancien biais valait 1,6 %.
         assert ratio.mean() == pytest.approx(np.exp(premium), abs=0.005)
         assert results['metadata']['calibration_info']['return_convention'] == 'simple'
+
+    def test_stochastic_remplacement_d_un_nombre_impair_de_chemins(self):
+        """
+        Régression : avec les antithétiques, le nombre de chemins de taux à
+        régénérer était arrondi au pair INFÉRIEUR. Pour un seul chemin
+        manquant, aucun n'était régénéré et la génération plantait plus loin
+        (ValueError de dimensions, 999 contre 998). Cas reproduit avec la
+        graine 42 : 1 000 scénarios sur 10 ans, un chemin hors bornes.
+        """
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 1000,
+            'time_horizon': 10,
+            'timestep': 1.0,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+        results = gen.generate(config)
+
+        assert results['scenarios']['scenario_id'].nunique() == 1000
+        info = results['metadata']['calibration_info']
+        assert info['filter_explosive_rates'] is True
+        assert info['rate_paths_out_of_bounds'] % 2 == 1
+
+    def test_stochastic_sans_filtre_des_taux_explosifs(self):
+        """Sans filtre, tous les chemins tirés sont gardés et ceux hors bornes sont comptés."""
+        config = {
+            'num_scenarios': 1000,
+            'time_horizon': 30,
+            'timestep': 1.0,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+        filtered = scenario_generator.ScenarioGenerator(random_seed=42).generate(config)
+        kept = scenario_generator.ScenarioGenerator(random_seed=42).generate(
+            {**config, 'filter_explosive_rates': False}
+        )
+
+        info = kept['metadata']['calibration_info']
+        assert info['filter_explosive_rates'] is False
+        assert info['rate_paths_out_of_bounds'] > 0
+        assert kept['scenarios']['scenario_id'].nunique() == 1000
+        # Mêmes tirages, sans tri : la moyenne des taux est plus haute, car le
+        # filtre retire surtout des chemins de taux élevés.
+        kept_mean = kept['scenarios']['interest_rate'].mean()
+        assert kept_mean > filtered['scenarios']['interest_rate'].mean()
 
     def test_stochastic_martingale_test_structure(self):
         """La sortie du test de martingalité porte un sous-résultat par composant."""
