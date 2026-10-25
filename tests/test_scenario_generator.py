@@ -445,6 +445,27 @@ class TestStochasticScenarioGeneration:
         np.testing.assert_allclose(first['interest_rate'], -np.log(d1[0]))
         assert sorted(scenarios_df['time_period'].unique()) == [1.0, 2.0, 3.0, 4.0, 5.0]
 
+    def test_stochastic_remplacement_d_un_nombre_impair_de_scenarios(self):
+        """
+        Régression : quand le filtre des taux explosifs retirait un nombre
+        impair de scénarios, le remplacement (variables antithétiques, donc par
+        paires) en tirait un de moins, et la génération échouait sur des
+        tableaux de tailles différentes. Avec la graine 1, la courbe
+        synthétique en USD retire un nombre impair de scénarios.
+        """
+        gen = scenario_generator.ScenarioGenerator(random_seed=1)
+        config = {
+            'num_scenarios': 100,
+            'time_horizon': 10,
+            'timestep': 1.0,
+            'use_stochastic': True,
+        }
+
+        results = gen.generate(config)
+
+        assert results['scenarios']['scenario_id'].nunique() == 100
+        assert len(results['deflators']) == 100
+
     def test_stochastic_martingale_test_structure(self):
         """La sortie du test de martingalité porte un sous-résultat par composant."""
         gen = scenario_generator.ScenarioGenerator(random_seed=42)
@@ -455,23 +476,15 @@ class TestStochasticScenarioGeneration:
             'use_stochastic': True
         }
 
-        try:
-            results = gen.generate(config)
-            diagnostics = results['diagnostics']
+        results = gen.generate(config)
+        diagnostics = results['diagnostics']
 
-            mt = diagnostics['martingale_test']
-            assert 'passes' in mt
-            for component in ('rates', 'equity', 'real_estate'):
-                assert component in mt
-                assert 'max_relative_deviation' in mt[component]
-                assert 'passes' in mt[component]
-        except ValueError as e:
-            # Known issue with stochastic model dimension mismatch in edge cases
-            # This is a real bug in the stochastic models that needs fixing
-            if "array dimensions" in str(e) or "concatenation axis" in str(e):
-                pytest.skip(f"Skipping due to known stochastic model bug: {e}")
-            else:
-                raise
+        mt = diagnostics['martingale_test']
+        assert 'passes' in mt
+        for component in ('rates', 'equity', 'real_estate'):
+            assert component in mt
+            assert 'max_relative_deviation' in mt[component]
+            assert 'passes' in mt[component]
 
     def test_martingale_rates_sous_demi_pourcent_a_30_ans(self):
         """

@@ -338,7 +338,9 @@ class HullWhiteModel:
         max_attempts: int = 10
     ) -> tuple[np.ndarray, np.ndarray]:
         """Generate replacement scenarios for filtered explosive paths."""
-        n_sim = n_needed // 2 * 2 if use_antithetic else n_needed
+        # Arrondi au pair supérieur : arrondi vers le bas, un nombre impair de
+        # scénarios à remplacer n'était jamais atteint, et il en manquait un.
+        n_sim = (n_needed + 1) // 2 * 2 if use_antithetic else n_needed
 
         for _attempt in range(max_attempts):
             rt_new = np.zeros((n_sim, self.n_steps))
