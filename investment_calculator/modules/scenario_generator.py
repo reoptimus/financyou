@@ -394,10 +394,22 @@ class ScenarioGenerator:
 
         n_steps = int(T / dt)
 
+        # Les modèles stochastiques remplissent une grille dont la colonne 0
+        # est l'instant t = 0 : taux et rendements nuls, déflateur égal à 1
+        # (voir _test_martingale). On simule donc n_steps + 1 points, de 0 à
+        # T, et seules les colonnes 1 à n_steps, les périodes ]0, dt] à
+        # ]T - dt, T], sont publiées. Publier la colonne 0 comme première
+        # période décalait toute la série d'un pas et omettait la dernière.
+        n_grid = n_steps + 1
+        # Les modèles recalculent leur nombre de pas par int(T / dt) : un
+        # demi-pas de marge garantit qu'ils retrouvent n_grid malgré
+        # l'arrondi flottant (int(43 * 0.1 / 0.1) vaut 42).
+        T_grid = (n_grid + 0.5) * dt
+
         # Step 1: Load the yield curve — une donnée d'entrée versionnée (voir
         # investment_calculator.yield_curve), pas une formule dans le moteur.
         yield_curve_id, curve_vintage, f0t, P0t = self._load_yield_curve(
-            config['yield_curve_id'], config['currency'], dt, n_steps
+            config['yield_curve_id'], config['currency'], dt, n_grid
         )
 
         # Step 2: Generate Hull-White interest rate scenarios
@@ -408,7 +420,7 @@ class ScenarioGenerator:
             P0t=P0t,
             dt=dt,
             n_scenarios=n_scenarios,
-            T=T
+            T=T_grid
         )
 
         hw_results = hw_model.generate_scenarios()
@@ -416,7 +428,7 @@ class ScenarioGenerator:
         # Step 3: Generate correlated shocks
         corr_gen = CorrelatedRandomGenerator(
             n_scenarios=n_scenarios,
-            n_steps=n_steps,
+            n_steps=n_grid,
             random_seed=self.random_seed
         )
 
@@ -435,7 +447,7 @@ class ScenarioGenerator:
             dividend_yield=params['equity_dividend_yield'],
             dt=dt,
             n_scenarios=n_scenarios,
-            T=T
+            T=T_grid
         )
 
         equity_shocks = corr_gen.get_asset_shocks(corr_results['shocks'], 'equity')
@@ -460,7 +472,7 @@ class ScenarioGenerator:
             inflation_adjustment=params['re_inflation_adj'],
             dt=dt,
             n_scenarios=n_scenarios,
-            T=T
+            T=T_grid
         )
 
         re_price_shocks = corr_gen.get_asset_shocks(corr_results['shocks'], 'real_estate')
@@ -472,7 +484,7 @@ class ScenarioGenerator:
         re_drift = re_model.risk_neutral_drift(
             f0t,
             P0t,
-            n_steps,
+            n_grid,
             hw_model.log_deflator_loadings(),
             corr_gen.shock_covariances(['short_rate', 'real_estate', 'inflation']),
         )
@@ -511,7 +523,15 @@ class ScenarioGenerator:
             0.6 * equity_shocks + 0.4 * (hw_results['residuals'] / params['hw_volatility'])
         )
 
-        # Step 9: Assemble into DataFrame
+        # Step 9: Assemble into DataFrame — sans la colonne t = 0 (voir n_grid)
+        published = slice(1, n_grid)
+        rates_out = hw_results['Rt'][:, published]
+        equity_out = equity_results['total_returns'][:, published]
+        bonds_out = bond_returns[:, published]
+        re_out = re_results['total_returns'][:, published]
+        inflation_out = inflation_rates[:, published]
+        gdp_out = gdp_growth[:, published]
+
         scenario_ids = []
         time_periods = []
         interest_rates_list = []
@@ -527,12 +547,12 @@ class ScenarioGenerator:
             for step in range(n_steps):
                 scenario_ids.append(scenario_id)
                 time_periods.append((step + 1) * dt)
-                interest_rates_list.append(hw_results['Rt'][scenario_idx, step])
-                stock_returns_list.append(equity_results['total_returns'][scenario_idx, step])
-                bond_returns_list.append(bond_returns[scenario_idx, step])
-                real_estate_returns_list.append(re_results['total_returns'][scenario_idx, step])
-                inflation_rates_list.append(inflation_rates[scenario_idx, step])
-                gdp_growth_list.append(gdp_growth[scenario_idx, step])
+                interest_rates_list.append(rates_out[scenario_idx, step])
+                stock_returns_list.append(equity_out[scenario_idx, step])
+                bond_returns_list.append(bonds_out[scenario_idx, step])
+                real_estate_returns_list.append(re_out[scenario_idx, step])
+                inflation_rates_list.append(inflation_out[scenario_idx, step])
+                gdp_growth_list.append(gdp_out[scenario_idx, step])
 
         scenarios_df = pd.DataFrame({
             'scenario_id': scenario_ids,
@@ -546,8 +566,9 @@ class ScenarioGenerator:
         })
 
         # Create deflators DataFrame
+        # t_k = D(k·dt) : la colonne t = 0 (D(0) = 1) n'est pas publiée.
         deflators_df = pd.DataFrame(
-            hw_results['deflators'],
+            hw_results['deflators'][:, published],
             columns=[f"t_{i+1}" for i in range(n_steps)]
         )
         deflators_df.insert(0, 'scenario_id', [f"scenario_{i+1:04d}" for i in range(n_scenarios)])

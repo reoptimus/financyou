@@ -409,6 +409,43 @@ class TestStochasticScenarioGeneration:
         for col in required_cols:
             assert col in scenarios_df.columns
 
+    def test_stochastic_premiere_periode_est_une_vraie_periode(self):
+        """
+        Régression : la colonne 0 des modèles stochastiques est l'instant
+        t = 0 (taux et rendements nuls, déflateur égal à 1). Elle était
+        publiée comme période 1 : toutes les séries valaient 0 la première
+        année, la série était décalée d'un pas et la dernière année manquait.
+
+        La période 1 doit désormais être ]0, dt] : rendement actions
+        aléatoire, taux égal au forward de la courbe sur la première année
+        (déterministe en Hull-White, rt(0) = f(0, 0)), déflateur t_1 = D(dt).
+        """
+        from investment_calculator.yield_curve import load_yield_curve
+
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 200,
+            'time_horizon': 10,
+            'timestep': 1.0,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+        results = gen.generate(config)
+        scenarios_df = results['scenarios']
+        first = scenarios_df[scenarios_df['time_period'] == 1.0]
+
+        assert first['stock_return'].std() > 0.05
+        assert first['real_estate_return'].std() > 0.0
+
+        curve_id = results['metadata']['calibration_info']['yield_curve_id']
+        P0t = load_yield_curve(curve_id, dt=1.0).get_bond_prices(n_steps=11)
+        forward_year_1 = -np.log(P0t[1] / P0t[0])
+        np.testing.assert_allclose(first['interest_rate'], forward_year_1, atol=1e-12)
+
+        deflators = results['deflators']
+        np.testing.assert_allclose(deflators['t_1'], P0t[1] / P0t[0], rtol=1e-12)
+        assert sorted(scenarios_df['time_period'].unique()) == [float(t) for t in range(1, 11)]
+
     def test_stochastic_martingale_test_structure(self):
         """La sortie du test de martingalité porte un sous-résultat par composant."""
         gen = scenario_generator.ScenarioGenerator(random_seed=42)
