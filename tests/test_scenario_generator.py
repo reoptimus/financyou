@@ -445,6 +445,28 @@ class TestStochasticScenarioGeneration:
         np.testing.assert_allclose(first['interest_rate'], 1.0 / d1[0] - 1.0)
         assert sorted(scenarios_df['time_period'].unique()) == [1.0, 2.0, 3.0, 4.0, 5.0]
 
+    def test_stochastic_pas_mensuel(self):
+        """
+        Régression : un pas mensuel sur deux ans plantait (« all input arrays
+        must have the same shape »).
+
+        Les modèles recalculent leur nombre de dates par int(T / dt) ; avec
+        dt = 1/12, int(25 * dt / dt) vaut 24 et une date était perdue.
+        """
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 20,
+            'time_horizon': 2,
+            'timestep': 1 / 12,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+
+        results = gen.generate(config)
+
+        assert len(results['scenarios']) == 20 * 24
+        assert results['deflators'].shape == (20, 1 + 24)
+
     def test_stochastic_remplacement_d_un_nombre_impair_de_scenarios(self):
         """
         Régression : quand le filtre des taux explosifs retirait un nombre
