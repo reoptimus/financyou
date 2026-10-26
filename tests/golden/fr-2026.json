@@ -268,7 +268,7 @@
         }
       ],
       "confidence": "high",
-      "notes": "IR = 30 000 × 19 % = 5 700 € ; PS = 30 000 × 17,2 % = 5 160 €. La plus-value de 30 000 € est fournie déjà nette des abattements pour durée de détention (capital_gains.real_estate.holding_allowances) : ce cas ne teste pas le calcul de l'abattement lui-même, qui n'est mis en œuvre par aucune méthode de TaxRegime à ce stade — le champ existe mais n'est pas consommé (known_gap implicite, à expliciter)."
+      "notes": "IR = 30 000 × 19 % = 5 700 € ; PS = 30 000 × 17,2 % = 5 160 €. La plus-value de 30 000 € est fournie déjà nette des abattements pour durée de détention (capital_gains.real_estate.holding_allowances) : ce cas ne teste pas le calcul de l'abattement lui-même, couvert par TaxRegime.real_estate_holding_allowance et ses tests (tests/test_wrapper_tax.py)."
     },
     {
       "id": "ir_plafonnement_quotient_familial_general",

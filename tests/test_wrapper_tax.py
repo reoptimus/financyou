@@ -10,7 +10,11 @@ import numpy as np
 import pytest
 
 from investment_calculator.tax_regime import load_regime
-from investment_calculator.wrapper_tax import liquidation_tax
+from investment_calculator.wrapper_tax import (
+    RealEstateLot,
+    liquidation_tax,
+    real_estate_liquidation_tax,
+)
 
 
 @pytest.fixture(scope='module')
@@ -115,3 +119,73 @@ def test_net_value_never_exceeds_final_value_and_tax_grows_with_gain(regime):
         assert (res.net_value <= values + 1e-9).all()
         assert (np.diff(res.total_tax) >= -1e-9).all()
         assert (np.diff(res.net_value) >= -1e-9).all()
+
+
+# --------------------------------------------------------------------------- #
+# Plus-values immobilières : lots, abattements, surtaxe
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("years, income, social", [
+    (5, 0.0, 0.0),
+    (6, 0.06, 0.0165),
+    (21, 0.96, 0.264),
+    (22, 1.0, 0.28),
+    (23, 1.0, 0.37),
+    (30, 1.0, 1.0),
+    (6.9, 0.06, 0.0165),
+])
+def test_abattement_pour_duree_de_detention_suit_le_bofip(regime, years, income, social):
+    """BOI-RFPI-PVI-20-20, § 60 et § 70 : seules les années révolues comptent."""
+    assert regime.real_estate_holding_allowance(years, against='income_tax') == pytest.approx(
+        income
+    )
+    assert regime.real_estate_holding_allowance(
+        years, against='social_contributions'
+    ) == pytest.approx(social)
+
+
+def test_cession_immobiliere_chaque_lot_a_son_abattement(regime):
+    rule = _rule(regime, 'immobilier_direct', holding_years=0)
+    ir_rate, ps_rate = rule['income_tax_rate'], regime.resolve_social_rate(rule)
+    lots = [RealEstateLot(10_000, 20_000.0, 25), RealEstateLot(10_000, 20_000.0, 3)]
+    res = real_estate_liquidation_tax(regime, 'immobilier_direct', lots)
+    social_25 = 1.0 - regime.real_estate_holding_allowance(25, against='social_contributions')
+    # Le lot de 25 ans est exonéré d'impôt sur le revenu ; celui de 3 ans n'a aucun abattement.
+    assert res.income_tax[0] == pytest.approx(10_000 * ir_rate)
+    assert res.social_tax[0] == pytest.approx(10_000 * ps_rate * (1 + social_25))
+    assert res.gain[0] == 20_000
+    assert res.net_value[0] == pytest.approx(40_000 - res.total_tax[0])
+
+
+def test_cession_immobiliere_moins_value_d_un_lot_non_imputee(regime):
+    lots = [RealEstateLot(10_000, 15_000.0, 2), RealEstateLot(10_000, 5_000.0, 2)]
+    res = real_estate_liquidation_tax(regime, 'immobilier_direct', lots)
+    assert res.gain[0] == 5_000
+
+
+def test_cession_immobiliere_surtaxe_seuil_par_conjoint(regime):
+    """BOI-RFPI-TPVIE-20, § 40 : le seuil de 50 000 € s'apprécie par conjoint."""
+    rule = _rule(regime, 'immobilier_direct', holding_years=0)
+    lots = [RealEstateLot(0, 100_000.0, 1)]
+    seul = real_estate_liquidation_tax(regime, 'immobilier_direct', lots)
+    couple = real_estate_liquidation_tax(regime, 'immobilier_direct', lots, couple=True)
+    assert seul.income_tax[0] == pytest.approx(
+        100_000 * rule['income_tax_rate'] + regime.real_estate_surtax_due(100_000)
+    )
+    assert couple.income_tax[0] == pytest.approx(100_000 * rule['income_tax_rate']), (
+        "Pour un couple, chaque conjoint a 50 000 € de plus-value : pas de surtaxe."
+    )
+
+
+def test_cession_immobiliere_par_scenario(regime):
+    res = real_estate_liquidation_tax(
+        regime, 'immobilier_direct', [RealEstateLot(100_000, np.array([200_000.0, 90_000.0]), 10)]
+    )
+    assert res.gain.tolist() == [100_000, 0]
+    assert res.total_tax[1] == 0.0
+    assert res.net_value[1] == 90_000
+
+
+def test_cession_immobiliere_sans_lot_refusee(regime):
+    with pytest.raises(ValueError, match="Aucun lot"):
+        real_estate_liquidation_tax(regime, 'immobilier_direct', [])

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -531,6 +532,45 @@ class TaxRegime:
                 ]
             total += apply_brackets(taxable_amount, brackets)
         return total
+
+    def real_estate_holding_allowance(self, holding_years: float, *, against: str) -> float:
+        """
+        Abattement pour durée de détention d'une plus-value immobilière, en
+        fraction de la plus-value (de 0 à 1).
+
+        ``against`` vaut ``"income_tax"`` ou ``"social_contributions"`` : les
+        deux abattements suivent des calendriers distincts
+        (``capital_gains.real_estate.holding_allowances``). Seules les années
+        de détention révolues comptent : 6 ans et 11 mois valent 6 ans.
+
+        Lève ``NotImplementedError`` si le régime ne décrit pas cet abattement.
+        """
+        if holding_years < 0:
+            raise ValueError(
+                f"La durée de détention doit être positive (reçu {holding_years}) : "
+                "passez le nombre d'années écoulées depuis l'acquisition."
+            )
+        allowances = (
+            self.document.get("capital_gains", {}).get("real_estate", {}).get("holding_allowances")
+            or []
+        )
+        matching = [a for a in allowances if a["against"] == against]
+        if not matching:
+            raise NotImplementedError(
+                f"Le régime {self.id} ne décrit pas d'abattement pour durée de détention "
+                f"contre {against!r} : ajouter capital_gains.real_estate.holding_allowances."
+            )
+        allowance = matching[0]
+        years = math.floor(holding_years)
+        exemption = allowance.get("full_exemption_after_years")
+        if exemption is not None and years >= int(exemption):
+            return 1.0
+        total = 0.0
+        for step in allowance["schedule"]:
+            counted = min(years, int(step["to_year"])) - int(step["from_year"]) + 1
+            if counted > 0:
+                total += counted * float(step["rate_per_year"])
+        return min(total, 1.0)
 
     def real_estate_surtax_due(self, taxable_gain: float) -> float:
         """
