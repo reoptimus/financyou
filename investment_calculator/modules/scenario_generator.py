@@ -357,7 +357,6 @@ class ScenarioGenerator:
             'generation_timestamp': datetime.now(),
             'calibration_info': {
                 'method': 'simple',
-                'return_convention': 'simple',
                 'currency': config['currency'],
                 'calibration_date': config['calibration_date'],
                 # Les constantes par défaut de ce chemin (taux, primes de
@@ -399,23 +398,20 @@ class ScenarioGenerator:
         params = config['economic_params']
 
         n_steps = int(T / dt)
-
-        # Les modèles stochastiques remplissent une grille dont la colonne 0
-        # est l'instant t = 0 : taux et rendements nuls, déflateur égal à 1
-        # (voir _test_martingale). On simule donc n_steps + 1 points, de 0 à
-        # T, et seules les colonnes 1 à n_steps, les périodes ]0, dt] à
-        # ]T - dt, T], sont publiées. Publier la colonne 0 comme première
-        # période décalait toute la série d'un pas et omettait la dernière.
-        n_grid = n_steps + 1
-        # Les modèles recalculent leur nombre de pas par int(T / dt) : un
-        # demi-pas de marge garantit qu'ils retrouvent n_grid malgré
-        # l'arrondi flottant (int(43 * 0.1 / 0.1) vaut 42).
-        T_grid = (n_grid + 0.5) * dt
+        # Les modèles indexent leurs sorties par date : la colonne i vaut t = i*dt,
+        # et la colonne 0 (t = 0) ne porte aucun rendement (taux et rendements
+        # nuls, déflateur égal à 1). Pour obtenir n_steps périodes, on simule
+        # donc n_steps + 1 dates, et la colonne 0 est retirée à l'assemblage.
+        n_dates = n_steps + 1
+        # Les modèles recalculent leur nombre de dates par int(T / dt) : un
+        # demi-pas de marge garantit qu'ils retrouvent n_dates malgré
+        # l'arrondi flottant (avec dt = 1/12, int(25 * dt / dt) vaut 24).
+        T_model = (n_dates + 0.5) * dt
 
         # Step 1: Load the yield curve — une donnée d'entrée versionnée (voir
         # investment_calculator.yield_curve), pas une formule dans le moteur.
         yield_curve_id, curve_vintage, f0t, P0t = self._load_yield_curve(
-            config['yield_curve_id'], config['currency'], dt, n_grid
+            config['yield_curve_id'], config['currency'], dt, n_dates
         )
 
         # Step 2: Generate Hull-White interest rate scenarios
@@ -426,7 +422,7 @@ class ScenarioGenerator:
             P0t=P0t,
             dt=dt,
             n_scenarios=n_scenarios,
-            T=T_grid
+            T=T_model
         )
 
         hw_results = hw_model.generate_scenarios(
@@ -436,7 +432,7 @@ class ScenarioGenerator:
         # Step 3: Generate correlated shocks
         corr_gen = CorrelatedRandomGenerator(
             n_scenarios=n_scenarios,
-            n_steps=n_grid,
+            n_steps=n_dates,
             random_seed=self.random_seed
         )
 
@@ -455,7 +451,7 @@ class ScenarioGenerator:
             dividend_yield=params['equity_dividend_yield'],
             dt=dt,
             n_scenarios=n_scenarios,
-            T=T_grid
+            T=T_model
         )
 
         equity_shocks = corr_gen.get_asset_shocks(corr_results['shocks'], 'equity')
@@ -480,7 +476,7 @@ class ScenarioGenerator:
             inflation_adjustment=params['re_inflation_adj'],
             dt=dt,
             n_scenarios=n_scenarios,
-            T=T_grid
+            T=T_model
         )
 
         re_price_shocks = corr_gen.get_asset_shocks(corr_results['shocks'], 'real_estate')
@@ -492,7 +488,7 @@ class ScenarioGenerator:
         re_drift = re_model.risk_neutral_drift(
             f0t,
             P0t,
-            n_grid,
+            n_dates,
             hw_model.log_deflator_loadings(),
             corr_gen.shock_covariances(['short_rate', 'real_estate', 'inflation']),
         )
@@ -531,21 +527,16 @@ class ScenarioGenerator:
             0.6 * equity_shocks + 0.4 * (hw_results['residuals'] / params['hw_volatility'])
         )
 
-        # Step 9: Assemble into DataFrame — sans la colonne t = 0 (voir n_grid)
-        published = slice(1, n_grid)
-        # Les modèles produisent des rendements logarithmiques de période
-        # (le déflateur vaut exp(-Σ Rt), l'indice actions exp(Σ rendements)).
-        # Tout l'aval (GSE+, GSE++, simulation de patrimoine) compose
-        # 1 + r, comme sur le chemin simple : on publie donc des rendements
-        # simples, exp(r) - 1. Les composer tels quels sous-estimait les
-        # actions d'environ σ²/2 par an. Le R faisait la même conversion
-        # avant GSE+ (Produits_placements.R : cube_placement<-exp(cube_placement)).
-        rates_out = np.expm1(hw_results['Rt'][:, published])
-        equity_out = np.expm1(equity_results['total_returns'][:, published])
-        bonds_out = np.expm1(bond_returns[:, published])
-        re_out = np.expm1(re_results['total_returns'][:, published])
-        inflation_out = inflation_rates[:, published]
-        gdp_out = gdp_growth[:, published]
+        # Step 9: Assemble into DataFrame
+        # Les modèles produisent des rendements logarithmiques (taux continus
+        # de période, log-rendements de l'indice). Les consommateurs des
+        # scénarios (GSE+, mode simple) composent en (1 + r) : on publie donc
+        # des rendements simples, r = exp(log r) - 1. Les déflateurs et le
+        # test de martingalité restent calculés sur les sorties logarithmiques.
+        period_rates = np.expm1(hw_results['Rt'])
+        stock_simple = np.expm1(equity_results['total_returns'])
+        bond_simple = np.expm1(bond_returns)
+        real_estate_simple = np.expm1(re_results['total_returns'])
 
         scenario_ids = []
         time_periods = []
@@ -559,15 +550,17 @@ class ScenarioGenerator:
         for scenario_idx in range(n_scenarios):
             scenario_id = f"scenario_{scenario_idx + 1:04d}"
 
-            for step in range(n_steps):
+            # La période k couvre ](k-1)*dt, k*dt] : c'est la colonne k des
+            # modèles. La colonne 0 (t = 0) n'est pas une période.
+            for step in range(1, n_dates):
                 scenario_ids.append(scenario_id)
-                time_periods.append((step + 1) * dt)
-                interest_rates_list.append(rates_out[scenario_idx, step])
-                stock_returns_list.append(equity_out[scenario_idx, step])
-                bond_returns_list.append(bonds_out[scenario_idx, step])
-                real_estate_returns_list.append(re_out[scenario_idx, step])
-                inflation_rates_list.append(inflation_out[scenario_idx, step])
-                gdp_growth_list.append(gdp_out[scenario_idx, step])
+                time_periods.append(step * dt)
+                interest_rates_list.append(period_rates[scenario_idx, step])
+                stock_returns_list.append(stock_simple[scenario_idx, step])
+                bond_returns_list.append(bond_simple[scenario_idx, step])
+                real_estate_returns_list.append(real_estate_simple[scenario_idx, step])
+                inflation_rates_list.append(inflation_rates[scenario_idx, step])
+                gdp_growth_list.append(gdp_growth[scenario_idx, step])
 
         scenarios_df = pd.DataFrame({
             'scenario_id': scenario_ids,
@@ -581,9 +574,9 @@ class ScenarioGenerator:
         })
 
         # Create deflators DataFrame
-        # t_k = D(k·dt) : la colonne t = 0 (D(0) = 1) n'est pas publiée.
+        # Colonne t_k = D(k*dt), fin de la période k ; D(0) = 1 n'est pas repris.
         deflators_df = pd.DataFrame(
-            hw_results['deflators'][:, published],
+            hw_results['deflators'][:, 1:],
             columns=[f"t_{i+1}" for i in range(n_steps)]
         )
         deflators_df.insert(0, 'scenario_id', [f"scenario_{i+1:04d}" for i in range(n_scenarios)])
@@ -620,10 +613,6 @@ class ScenarioGenerator:
                 # référençant l'identifiant exact de la courbe utilisée
                 # (voir investment_calculator.yield_curve).
                 'yield_curve_id': yield_curve_id,
-                # interest_rate, stock_return, bond_return et
-                # real_estate_return sont des rendements simples de période,
-                # convertis depuis les rendements logarithmiques des modèles.
-                'return_convention': 'simple',
                 'yield_curve_vintage_date': curve_vintage,
                 'forward_curve_range': (float(f0t.min()), float(f0t.max())),
                 # Chemins de taux sortis des bornes au tirage : retirés et

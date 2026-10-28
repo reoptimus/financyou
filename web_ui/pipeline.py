@@ -14,11 +14,15 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from investment_calculator.modules import scenario_generator, user_profile
 from investment_calculator.modules.capital_tranches import split_into_tranches
+from investment_calculator.modules.household_budget import KNOWN_GAPS as BUDGET_GAPS
+from investment_calculator.modules.household_budget import Earner, household_budget
 from investment_calculator.modules.household_cash_flow import Project, capital_curve
+from investment_calculator.modules.household_loans import Loan
 from investment_calculator.modules.net_returns import TaxProfile, build_net_returns
 from investment_calculator.modules.placement_optimizer import (
     optimize_by_horizon,
@@ -69,6 +73,41 @@ def build_projects(rows: Sequence[Mapping[str, Any]]) -> list[Project]:
     return projects
 
 
+def build_budget(
+    budget: Mapping[str, Any], *, catalog: PlacementCatalog, horizon: int,
+    annual_savings_now: float,
+) -> pd.DataFrame:
+    """
+    Budget du foyer à partir de la saisie de la page Budget.
+
+    ``budget`` porte ``earners`` (``taxable_income``, ``annual_growth``,
+    ``retirement_year``, ``replacement_rate``), ``rent``, ``loans`` (``name``,
+    ``annual_payment``, ``rate``, ``years_left``), ``dependent_years`` et
+    ``expenses_follow_income``. ``annual_savings_now`` est l'épargne actuelle
+    du profil, sur un an : elle fixe les dépenses courantes.
+
+    Raises:
+        ValueError: saisie refusée par :mod:`household_budget` ; le message dit
+            quoi corriger.
+    """
+    earners = [
+        Earner(float(e['taxable_income']), float(e['annual_growth']),
+               None if e.get('retirement_year') is None else int(e['retirement_year']),
+               None if e.get('replacement_rate') is None else float(e['replacement_rate']))
+        for e in budget['earners']
+    ]
+    loans = [
+        Loan(str(c['name']), float(c['annual_payment']), float(c['rate']), int(c['years_left']))
+        for c in budget.get('loans', [])
+    ]
+    return household_budget(
+        catalog.regime, earners, horizon=horizon, current_savings=annual_savings_now,
+        rent=float(budget['rent']), loans=loans,
+        dependent_years=[int(n) for n in budget.get('dependent_years', [])],
+        expenses_follow_income=bool(budget['expenses_follow_income']),
+    )
+
+
 def plan_tranches(
     scenarios: pd.DataFrame,
     catalog: PlacementCatalog,
@@ -83,6 +122,7 @@ def plan_tranches(
     min_bond: float | None = None,
     holdings: tuple[Holding, ...] = (),
     n_batches: int | None = None,
+    annual_savings: Sequence[float] | None = None,
 ) -> dict[str, Any]:
     """
     Plan de placement par tranches : chaque euro est placé jusqu'à son projet.
@@ -92,11 +132,22 @@ def plan_tranches(
     projets. L'épargne existante saisie à part reste dans ses placements : elle
     ne compte ici que pour l'ancienneté des enveloppes et les plafonds.
 
+    Avec ``annual_savings`` (années 0 à ``horizon``, l'épargne libre du budget
+    du foyer), l'épargne de chaque année remplace les versements du profil.
+
     Raises:
         ValueError: projets non financés (capital négatif), ou entrées refusées
             par les modules appelés.
     """
-    flows = contribution_flows(time_series, horizon)
+    if annual_savings is None:
+        flows = contribution_flows(time_series, horizon)
+    else:
+        flows = np.asarray(annual_savings, dtype=float)
+        if flows.shape != (horizon + 1,):
+            raise ValueError(
+                f"{flows.size} montants d'épargne pour un horizon de {horizon} ans : il en "
+                f"faut un par année, de 0 à {horizon}."
+            )
     curve = capital_curve(
         projects, horizon, float(available_savings) + float(flows[0]), flows[1:].tolist()
     )
@@ -197,6 +248,7 @@ def run_projection(
     couple: bool = False,
     projects: Sequence[Project] = (),
     available_savings: float | None = None,
+    budget: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Projeter le profil sur les placements du catalogue choisi.
@@ -207,6 +259,10 @@ def run_projection(
 
     Avec des ``projects``, ``available_savings`` est requis : c'est l'épargne
     déjà disponible pour les financer, saisie par l'utilisateur.
+
+    Avec un ``budget`` (voir :func:`build_budget`), le budget du foyer est
+    calculé, et son épargne libre remplace les versements du profil dans le
+    plan par tranches.
 
     Returns:
         ``scenarios``, ``profile``, ``catalog`` (identifiant) et ``optimization``
@@ -246,6 +302,13 @@ def run_projection(
         'catalog': catalog.id,
         'optimization': optimization,
     }
+    savings: list[float] | None = None
+    if budget is not None:
+        flows = contribution_flows(profile_results['investment_time_series'], horizon)
+        table = build_budget(budget, catalog=catalog, horizon=horizon,
+                             annual_savings_now=float(flows[0]))
+        results['budget'] = {'table': table, 'known_gaps': BUDGET_GAPS}
+        savings = table['free_savings'].tolist()
     if projects:
         if available_savings is None:
             raise ValueError(
@@ -261,5 +324,6 @@ def run_projection(
             max_equity=constraints['max_equity_allocation'],
             min_bond=constraints['min_bond_allocation'],
             holdings=profile_holdings(profile_results['validated_profile']),
+            annual_savings=savings,
         )
     return results
