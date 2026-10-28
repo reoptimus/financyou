@@ -272,6 +272,37 @@ def test_la_cehr_double_ses_seuils_pour_un_couple():
     assert fr.surtax_due(200_000, married=False) == 0.0, "Sous 250 000 €, la CEHR n'est pas due."
 
 
+def test_la_surtaxe_immobiliere_n_est_pas_un_bareme_marginal():
+    """
+    Surtaxe sur les plus-values immobilières élevées (BOI-RFPI-TPVIE-20, § 70) :
+    le taux s'applique au montant total, et le lissage rend la taxe continue
+    au passage de chaque seuil.
+    """
+    fr = load_regime("FR", 2026, allow_draft=True)
+    marginal = apply_brackets(100_000, [
+        {"lower": band.get("lower", 0), "upper": band["upper"], "rate": band["rate"]}
+        for band in fr.document["capital_gains"]["real_estate"]["surtax_schedule"]
+    ])
+    assert fr.real_estate_surtax_due(100_000) == pytest.approx(2 * marginal), (
+        "À 100 000 €, la surtaxe vaut 2 % du total, soit le double d'une lecture marginale."
+    )
+    # Au seuil d'entrée (50 000 €), le texte lui-même fait passer la taxe de 0
+    # à environ 500 € ; aux seuils suivants, le lissage la rend continue.
+    for band in fr.document["capital_gains"]["real_estate"]["surtax_schedule"][2:]:
+        seuil = float(band["lower"])
+        assert fr.real_estate_surtax_due(seuil + 1) - fr.real_estate_surtax_due(seuil) < 1.0, (
+            f"La surtaxe saute au seuil de {seuil:.0f} € : le lissage est mal décrit."
+        )
+
+
+def test_la_surtaxe_immobiliere_absente_se_declare():
+    fr = load_regime("FR", 2026, allow_draft=True)
+    document = json.loads(json.dumps(fr.document))
+    del document["capital_gains"]["real_estate"]["surtax_schedule"]
+    with pytest.raises(NotImplementedError, match="surtax_schedule"):
+        TaxRegime(document=document, source=fr.source).real_estate_surtax_due(100_000)
+
+
 def test_l_impot_sur_la_fortune_respecte_son_seuil():
     fr = load_regime("FR", 2026, allow_draft=True)
     assert fr.wealth_tax_due(1_000_000) == 0.0

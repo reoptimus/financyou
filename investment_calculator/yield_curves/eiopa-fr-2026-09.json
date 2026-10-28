@@ -1,0 +1,29 @@
+{
+  "$schema": "./schema.json",
+  "schema_version": "0.1",
+  "id": "eiopa-fr-2026-09",
+  "label": "Courbe des taux sans risque EIOPA, France, 30 septembre 2026 (taux zéro-coupon annuels, sans ajustement de volatilité)",
+  "country": { "code": "FR", "name": "France" },
+  "currency": "EUR",
+  "vintage_date": "2026-09-30",
+  "status": "draft",
+  "validation": { "validated_by": null, "validated_on": null },
+  "source": {
+    "kind": "csv",
+    "path": "market_data/eiopa/EIOPA_RFR_20260930_spot_no_VA_FR.csv",
+    "column_name": "France"
+  },
+  "sources": [
+    {
+      "label": "EIOPA — Risk-free interest rate term structures, publication du 30 septembre 2026, classeur EIOPA_RFR_20260930_Term_Structures.xlsx (fourni par Sébastien Gallet le 2026-10-25), feuille RFR_spot_no_VA, colonne France (FR_30_09_2026_SWP_LLP_20_EXT_40_UFR_3.30), maturités 1 à 150 ans. SHA-256 du classeur : c923ad0f416cc76b3a0943f8187087ca54b6583703c83c4bb838f49be8bb1df7.",
+      "url": "https://www.eiopa.europa.eu/tools-and-data/risk-free-interest-rate-term-structures_en",
+      "consulted_on": "2026-10-25"
+    }
+  ],
+  "known_gaps": [
+    "STATUT BROUILLON : le CSV est un extrait de la seule colonne France du classeur EIOPA (valeurs recopiées sans arrondi, écart maximal nul), fait pour ne pas versionner un classeur de 1,9 Mo. Aucune personne n'a encore relu la donnée contre la publication EIOPA ; validated_by reste vide jusque-là.",
+    "La feuille Main_Menu du classeur porte en cellule A1 la date 2026-09-30, cohérente avec les identifiants de courbe, mais son titre affiche « Risk-free curves as of 2021-11-15 » (de même la feuille README-Production Notes) : texte de gabarit non mis à jour, ou classeur d'une autre origine. À lever en recoupant avec la publication EIOPA.",
+    "Paramètres EIOPA de la courbe : LLP 20 ans, convergence 40 ans, UFR 3,30 %, alpha 0,05, CRA 10 pb. Au-delà de 20 ans, la courbe est extrapolée vers l'UFR (Smith-Wilson) : ce n'est pas un taux de marché.",
+    "La courbe France sans ajustement de volatilité est identique à la courbe euro sur ce millésime (pas d'ajustement pays dans la courbe de base)."
+  ]
+}

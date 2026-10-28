@@ -268,7 +268,7 @@
         }
       ],
       "confidence": "high",
-      "notes": "IR = 30 000 × 19 % = 5 700 € ; PS = 30 000 × 17,2 % = 5 160 €. La plus-value de 30 000 € est fournie déjà nette des abattements pour durée de détention (capital_gains.real_estate.holding_allowances) : ce cas ne teste pas le calcul de l'abattement lui-même, qui n'est mis en œuvre par aucune méthode de TaxRegime à ce stade — le champ existe mais n'est pas consommé (known_gap implicite, à expliciter)."
+      "notes": "IR = 30 000 × 19 % = 5 700 € ; PS = 30 000 × 17,2 % = 5 160 €. La plus-value de 30 000 € est fournie déjà nette des abattements pour durée de détention (capital_gains.real_estate.holding_allowances) : ce cas ne teste pas le calcul de l'abattement lui-même, couvert par TaxRegime.real_estate_holding_allowance et ses tests (tests/test_wrapper_tax.py)."
     },
     {
       "id": "ir_plafonnement_quotient_familial_general",
@@ -381,11 +381,72 @@
       "blocked_reason": "TaxRegime.wealth_tax_due applique le barème marginal dès le seuil de 1 300 000 €, sans le mécanisme de décote qui lisse l'entrée dans l'IFI jusqu'à 1 400 000 € (CGI art. 977) ; le schéma ne porte pas aujourd'hui les paramètres de cette décote. Sans effet sur ifi_patrimoine_deux_millions (bien au-dessus du couloir concerné), mais produirait un montant trop élevé pour un patrimoine situé entre 1,3 et 1,4 M€."
     },
     {
-      "id": "surtaxe_plus_value_immobiliere_seuil_a_verifier",
-      "description": "Surtaxe sur les plus-values immobilières élevées (CGI art. 1609 nonies G) : seuil et mécanisme du dernier palier à revérifier.",
-      "kind": "known_gap",
-      "status": "pending_regime_data",
-      "blocked_reason": "capital_gains.real_estate.surtax_brackets place le dernier seuil à 250 000 € ; une vérification indique que le texte (art. 1609 nonies G) fixe ce seuil à 260 000 € et prévoit un mécanisme de décote à chaque palier intermédiaire, que de simples tranches marginales ne reproduisent pas. Ce champ n'est de toute façon consommé par aucune méthode de TaxRegime à ce stade (aucun calcul n'en dépend), mais la valeur doit être corrigée avant qu'un calcul ne s'y appuie."
+      "id": "surtaxe_plus_value_immobiliere_sous_le_seuil",
+      "description": "Plus-value immobilière imposable de 50 000 € : pas de surtaxe (elle n'est due qu'au-delà de 50 000 €).",
+      "kind": "real_estate_surtax",
+      "status": "ready",
+      "inputs": { "taxable_gain": 50000 },
+      "expected": { "income_tax": 0.00, "social_contributions": 0.0, "total": 0.00, "net": 50000.00 },
+      "sources": [
+        {
+          "label": "BOFiP BOI-RFPI-TPVIE-20 — Taxe sur les plus-values immobilières élevées : liquidation, § 70",
+          "url": "https://bofip.impots.gouv.fr/doctrine/BOI-RFPI-TPVIE-20",
+          "consulted_on": "2026-10-24"
+        }
+      ],
+      "confidence": "high",
+      "notes": "Barème du § 70 : la première tranche commence à 50 001 €."
+    },
+    {
+      "id": "surtaxe_plus_value_immobiliere_lissage_premier_seuil",
+      "description": "Plus-value immobilière imposable de 55 000 € : surtaxe dans la zone de lissage de la tranche à 2 %.",
+      "kind": "real_estate_surtax",
+      "status": "ready",
+      "inputs": { "taxable_gain": 55000 },
+      "expected": { "income_tax": 850.00, "social_contributions": 0.0, "total": 850.00, "net": 54150.00 },
+      "sources": [
+        {
+          "label": "BOFiP BOI-RFPI-TPVIE-20 — Taxe sur les plus-values immobilières élevées : liquidation, § 70",
+          "url": "https://bofip.impots.gouv.fr/doctrine/BOI-RFPI-TPVIE-20",
+          "consulted_on": "2026-10-24"
+        }
+      ],
+      "confidence": "high",
+      "notes": "2 % × 55 000 − (60 000 − 55 000) × 1/20 = 1 100 − 250 = 850 €."
+    },
+    {
+      "id": "surtaxe_plus_value_immobiliere_cent_mille",
+      "description": "Plus-value immobilière imposable de 100 000 € : le taux de 2 % s'applique au montant total, pas à la seule part au-delà de 50 000 €.",
+      "kind": "real_estate_surtax",
+      "status": "ready",
+      "inputs": { "taxable_gain": 100000 },
+      "expected": { "income_tax": 2000.00, "social_contributions": 0.0, "total": 2000.00, "net": 98000.00 },
+      "sources": [
+        {
+          "label": "BOFiP BOI-RFPI-TPVIE-20 — Taxe sur les plus-values immobilières élevées : liquidation, § 70",
+          "url": "https://bofip.impots.gouv.fr/doctrine/BOI-RFPI-TPVIE-20",
+          "consulted_on": "2026-10-24"
+        }
+      ],
+      "confidence": "high",
+      "notes": "2 % × 100 000 = 2 000 €. Un barème par tranches marginales, comme le décrivait l'ancien champ surtax_brackets, aurait donné 1 000 €."
+    },
+    {
+      "id": "surtaxe_plus_value_immobiliere_lissage_dernier_seuil",
+      "description": "Plus-value immobilière imposable de 255 000 € : surtaxe dans la zone de lissage de la tranche à 6 %.",
+      "kind": "real_estate_surtax",
+      "status": "ready",
+      "inputs": { "taxable_gain": 255000 },
+      "expected": { "income_tax": 14050.00, "social_contributions": 0.0, "total": 14050.00, "net": 240950.00 },
+      "sources": [
+        {
+          "label": "BOFiP BOI-RFPI-TPVIE-20 — Taxe sur les plus-values immobilières élevées : liquidation, § 70",
+          "url": "https://bofip.impots.gouv.fr/doctrine/BOI-RFPI-TPVIE-20",
+          "consulted_on": "2026-10-24"
+        }
+      ],
+      "confidence": "high",
+      "notes": "6 % × 255 000 − (260 000 − 255 000) × 25/100 = 15 300 − 1 250 = 14 050 €."
     }
   ]
 }
