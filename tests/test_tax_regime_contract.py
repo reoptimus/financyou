@@ -45,6 +45,7 @@ MOTEUR_FISCAL = [
     REPO_ROOT / "investment_calculator" / "modules" / "wealth_simulation.py",
     REPO_ROOT / "investment_calculator" / "modules" / "placement_plan.py",
     REPO_ROOT / "investment_calculator" / "modules" / "household_tax.py",
+    REPO_ROOT / "investment_calculator" / "modules" / "rental_property.py",
 ]
 
 #: Régime minimal, valide selon le schéma, utilisé pour tester le MÉCANISME de

@@ -12,6 +12,7 @@ This package contains the core modules of the FinancYou system:
    household_budget - revenus, impôt, dépenses et épargne libre du foyer
    household_loans - crédits en cours et taux d'endettement du foyer
    household_tax - parts fiscales, impôt sur le revenu et tranche marginale du foyer
+   rental_property - bien loué nu acheté à crédit : apport, annuités, loyers
    capital_tranches - découpage du capital en tranches, chacune à son horizon
    tranche_allocation - chaque tranche placée selon l'allocation de sa durée
 4. reporting - Visualization & Reporting
@@ -36,6 +37,7 @@ from investment_calculator.modules import (
     placement_optimizer,
     placement_plan,
     placements,
+    rental_property,
     reporting,
     scenario_generator,
     tranche_allocation,
@@ -55,6 +57,7 @@ __all__ = [
     'household_budget',
     'household_loans',
     'household_tax',
+    'rental_property',
     'capital_tranches',
     'tranche_allocation',
     'reporting'
