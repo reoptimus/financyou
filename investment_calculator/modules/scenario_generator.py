@@ -12,6 +12,7 @@ INPUT STRUCTURE:
     'calibration_date': str,        # Date for EIOPA curve calibration (YYYY-MM-DD)
     'currency': str,                # Currency for calibration (e.g., 'EUR', 'USD')
     'correlation_matrix': dict,     # Cross-asset correlations (optional)
+    'filter_explosive_rates': bool, # Stochastique : retirer les taux hors bornes (défaut True)
     'economic_params': {
         'mean_reversion_speed': float,    # Hull-White parameter
         'volatility': float,              # Interest rate volatility
@@ -225,6 +226,10 @@ class ScenarioGenerator:
             'currency': config.get('currency', 'USD'),
             'yield_curve_id': config.get('yield_curve_id'),
             'correlation_matrix': config.get('correlation_matrix', {}),
+            # Chemin stochastique : retirer et régénérer les chemins de taux
+            # hors bornes (comportement historique), ou les garder. Voir
+            # HullWhiteModel.generate_scenarios(filter_explosive=...).
+            'filter_explosive_rates': bool(config.get('filter_explosive_rates', True)),
             'economic_params': {}
         }
 
@@ -403,10 +408,17 @@ class ScenarioGenerator:
         # l'arrondi flottant (avec dt = 1/12, int(25 * dt / dt) vaut 24).
         T_model = (n_dates + 0.5) * dt
 
+        # Maturité du fonds obligataire, en pas : une hypothèse de marché
+        # versionnée (bond.fund_maturity_years), pas un littéral du moteur.
+        assumptions = load_market_assumptions()
+        bond_maturity_steps = max(1, round(assumptions.bond_fund_maturity_years / dt))
+
         # Step 1: Load the yield curve — une donnée d'entrée versionnée (voir
         # investment_calculator.yield_curve), pas une formule dans le moteur.
+        # Elle doit couvrir T plus la maturité du fonds obligataire, pour
+        # valoriser en T l'obligation qu'il détient.
         yield_curve_id, curve_vintage, f0t, P0t = self._load_yield_curve(
-            config['yield_curve_id'], config['currency'], dt, n_dates
+            config['yield_curve_id'], config['currency'], dt, n_dates + bond_maturity_steps
         )
 
         # Step 2: Generate Hull-White interest rate scenarios
@@ -420,7 +432,9 @@ class ScenarioGenerator:
             T=T_model
         )
 
-        hw_results = hw_model.generate_scenarios()
+        hw_results = hw_model.generate_scenarios(
+            filter_explosive=config['filter_explosive_rates']
+        )
 
         # Step 3: Generate correlated shocks
         corr_gen = CorrelatedRandomGenerator(
@@ -436,7 +450,6 @@ class ScenarioGenerator:
         # projetés à l'utilisateur ; le risque-neutre (prime nulle) n'existe
         # que pour le test de martingalité, jamais pour une projection —
         # voir docs/validation/1b-hypotheses-monde-reel.md.
-        assumptions = load_market_assumptions()
 
         # Step 4: Generate equity scenarios
         equity_model = BlackScholesEquity(
@@ -505,9 +518,12 @@ class ScenarioGenerator:
             drift=re_drift,
         )
 
-        # Step 6: Generate bond returns (simplified - use interest rates)
-        # Bond returns approximately = forward rate - duration * rate change
-        bond_returns = hw_results['Rt'].copy()  # Simplified: use forward rates
+        # Step 6: fonds obligataire à maturité constante, valorisé avec les prix
+        # zéro-coupon Hull-White : rendements simples, coupon compris. Avant,
+        # bond_return était le taux court, sans duration ni risque de taux.
+        # Le coupon n'est pas encore publié : le CTO impose toujours la part
+        # positive du rendement total comme revenu (net_returns._distributed_yield).
+        bond_returns, _ = hw_model.bond_fund_returns(hw_results['rt'], bond_maturity_steps)
 
         # Step 7: Generate inflation (from correlated shocks)
         inflation_shocks = corr_gen.get_asset_shocks(corr_results['shocks'], 'inflation')
@@ -528,7 +544,7 @@ class ScenarioGenerator:
         # test de martingalité restent calculés sur les sorties logarithmiques.
         period_rates = np.expm1(hw_results['Rt'])
         stock_simple = np.expm1(equity_results['total_returns'])
-        bond_simple = np.expm1(bond_returns)
+        bond_simple = bond_returns  # déjà des rendements simples (bond_fund_returns)
         real_estate_simple = np.expm1(re_results['total_returns'])
 
         scenario_ids = []
@@ -608,6 +624,11 @@ class ScenarioGenerator:
                 'yield_curve_id': yield_curve_id,
                 'yield_curve_vintage_date': curve_vintage,
                 'forward_curve_range': (float(f0t.min()), float(f0t.max())),
+                # Chemins de taux sortis des bornes au tirage : retirés et
+                # régénérés si le filtre est actif (ce qui tronque la
+                # distribution), gardés sinon.
+                'filter_explosive_rates': config['filter_explosive_rates'],
+                'rate_paths_out_of_bounds': hw_results['n_out_of_bounds'],
                 # Les rendements projetés (scenarios_df) sont monde réel :
                 # taux sans risque + cette prime. Voir
                 # docs/validation/1b-hypotheses-monde-reel.md.

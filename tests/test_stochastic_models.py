@@ -705,3 +705,57 @@ def test_calage_immobilier_refuse_une_serie_impossible():
 
     with pytest.raises(ValueError, match="autocorrélation"):
         calibrate_from_annual_returns(np.array([0.1, -0.1, 0.1, -0.1, 0.1, -0.1]))
+
+
+def _eiopa_hull_white(n_scenarios: int, n_steps: int, extra_steps: int) -> HullWhiteModel:
+    """Hull-White sur la courbe EIOPA par défaut, pas annuel, courbe allongée de extra_steps."""
+    from investment_calculator.yield_curve import load_yield_curve
+
+    curve = load_yield_curve("eiopa-fr-2018-04", dt=1.0)
+    return HullWhiteModel(
+        a=0.1,
+        sigma=0.01,
+        f0t=curve.get_forward_curve(n_steps=n_steps + extra_steps),
+        P0t=curve.get_bond_prices(n_steps=n_steps + extra_steps),
+        dt=1.0,
+        n_scenarios=n_scenarios,
+        T=n_steps + 0.5,
+    )
+
+
+def test_zero_coupon_prices_coherents_avec_les_deflateurs():
+    """
+    Les prix zéro-coupon en forme fermée doivent vérifier E[D(t)·P(t, T)] = P(0, T) :
+    c'est ce qui garantit que le fonds obligataire est valorisé dans le même
+    univers que les déflateurs.
+    """
+    np.random.seed(42)
+    model = _eiopa_hull_white(n_scenarios=20_000, n_steps=11, extra_steps=8)
+    results = model.generate_scenarios(filter_explosive=False)
+    for i in (1, 5, 10):
+        prices = model.zero_coupon_prices(results['rt'][:, i], i, 7)
+        deflated = (results['deflators'][:, i][:, None] * prices).mean(axis=0)
+        np.testing.assert_allclose(deflated, model.P0t[i + 1:i + 8], rtol=0.005)
+
+
+def test_fonds_obligataire_d_un_pas_rend_le_taux_court():
+    """Une obligation d'un pas rachetée à échéance rend exactement le taux court simple."""
+    np.random.seed(42)
+    model = _eiopa_hull_white(n_scenarios=200, n_steps=11, extra_steps=1)
+    results = model.generate_scenarios(filter_explosive=False)
+    total, coupons = model.bond_fund_returns(results['rt'], maturity_steps=1)
+    np.testing.assert_allclose(total[:, 1:], np.expm1(results['Rt'][:, 1:]), atol=1e-12)
+    np.testing.assert_allclose(coupons, total, atol=1e-12)
+    assert np.all(total[:, 0] == 0.0)
+
+
+def test_fonds_obligataire_porte_un_risque_de_taux():
+    """À sept ans, le fonds a une duration : son excès de rendement sur le taux court varie."""
+    np.random.seed(42)
+    model = _eiopa_hull_white(n_scenarios=2000, n_steps=11, extra_steps=7)
+    results = model.generate_scenarios(filter_explosive=False)
+    total, coupons = model.bond_fund_returns(results['rt'], maturity_steps=7)
+    short = np.expm1(results['Rt'][:, 1:])
+    # Une variation de taux de 1 point déplace le prix d'environ 6 % (duration).
+    assert (total[:, 1:] - short).std(axis=0).min() > 0.02
+    assert np.all(coupons[:, 1:] > -0.05)

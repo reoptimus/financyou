@@ -215,6 +215,18 @@ class MarketAssumptions:
         return float(self.document["bond"]["volatility"])
 
     @property
+    def bond_fund_maturity_years(self) -> float:
+        """Maturité de l'obligation achetée par le fonds obligataire, chemin stochastique."""
+        maturity = self.document["bond"].get("fund_maturity_years")
+        if maturity is None:
+            raise ValueError(
+                f"Les hypothèses de marché {self.id!r} n'ont pas bond.fund_maturity_years : "
+                f"le chemin stochastique en a besoin pour le fonds obligataire. "
+                f"Ajoutez-la dans market_assumptions/{self.id}.json."
+            )
+        return float(maturity)
+
+    @property
     def inflation_mean(self) -> float:
         """Inflation moyenne supposée."""
         return float(self.document["inflation"]["mean"])

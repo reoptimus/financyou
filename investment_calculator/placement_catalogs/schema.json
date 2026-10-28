@@ -81,7 +81,11 @@
                 "additionalProperties": false,
                 "properties": {
                   "model": { "const": "gse_series" },
-                  "series": { "$ref": "#/$defs/gse_series" }
+                  "series": { "$ref": "#/$defs/gse_series" },
+                  "income": {
+                    "enum": ["distributing", "accumulating"],
+                    "description": "Fonds de distribution (dividendes ou coupons versés, imposés chaque année dans une enveloppe imposée au fil de l'eau) ou de capitalisation (revenus réinvestis, impôt à la seule sortie, sur la plus-value). Absent : distribution."
+                  }
                 }
               },
               {
