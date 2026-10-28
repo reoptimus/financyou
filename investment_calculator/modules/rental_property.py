@@ -49,9 +49,9 @@ logger = logging.getLogger(__name__)
 __all__ = ["KNOWN_GAPS", "RentalProperty", "loan_annuity", "property_flows"]
 
 KNOWN_GAPS = [
-    "La valeur du bien n'entre pas dans le patrimoine : l'apport et le capital "
-    "remboursé sortent de l'épargne sans contrepartie. La revente et la plus-value "
-    "immobilière ne sont pas encore portées.",
+    "La valeur du bien suit l'évolution saisie, sans aléa : elle n'est pas tirée des "
+    "scénarios immobiliers. La revente, ses frais et l'impôt sur la plus-value ne sont "
+    "pas encore portés : la valeur nette affichée est avant impôt.",
     "Les réductions d'impôt (Pinel, Malraux, Denormandie) ne sont pas portées : "
     "aucun millésime validé ne les décrit.",
     "La location meublée (LMNP) n'est pas portée : seule la location nue l'est.",
@@ -77,6 +77,8 @@ class RentalProperty:
             foncière, copropriété non récupérable, assurance), en euros.
         rent_growth: évolution annuelle du loyer et des charges (0,015 pour 1,5 %).
         purchase_year: année de l'achat (0 = cette année).
+        market_value: valeur du bien à l'achat, hors frais, en euros.
+        value_growth: évolution annuelle de la valeur du bien (0,01 pour 1 %).
     """
 
     name: str
@@ -89,13 +91,16 @@ class RentalProperty:
     annual_charges: float
     rent_growth: float
     purchase_year: int
+    market_value: float
+    value_growth: float
 
     def __post_init__(self) -> None:
         def fail(what: str, fix: str) -> None:
             raise ValueError(f"Bien « {self.name} » : {what}. {fix}")
 
         for field, value in (("prix", self.price), ("apport", self.down_payment),
-                             ("charges", self.annual_charges)):
+                             ("charges", self.annual_charges),
+                             ("valeur du bien", self.market_value)):
             if not math.isfinite(value) or value < 0:
                 fail(f"{field} invalide ({value})", "Saisissez un montant positif.")
         if self.price <= 0:
@@ -116,9 +121,10 @@ class RentalProperty:
                  "Saisissez un rendement positif, 0,04 pour 4 %.")
         if not 0.0 <= self.collected_share <= 1.0:
             fail(f"part encaissée de {self.collected_share}", "Saisissez une part entre 0 et 1.")
-        if not math.isfinite(self.rent_growth) or self.rent_growth <= -1:
-            fail(f"évolution du loyer invalide ({self.rent_growth})",
-                 "Saisissez un taux supérieur à −100 %, 0,015 pour 1,5 %.")
+        for field, rate in (("du loyer", self.rent_growth), ("de la valeur", self.value_growth)):
+            if not math.isfinite(rate) or rate <= -1:
+                fail(f"évolution {field} invalide ({rate})",
+                     "Saisissez un taux supérieur à −100 %, 0,015 pour 1,5 %.")
         if not isinstance(self.purchase_year, int) or self.purchase_year < 0:
             fail(f"achat à l'année {self.purchase_year}",
                  "Donnez une année à venir (0 = cette année).")
@@ -152,13 +158,15 @@ def property_flows(prop: RentalProperty, horizon: int) -> pd.DataFrame:
     Returns:
         Colonnes ``down_payment`` (apport, l'année d'achat), ``collected_rent``
         (loyers encaissés), ``charges``, ``interest``, ``principal`` et
-        ``outstanding`` (capital restant dû en début d'année). Tous positifs.
+        ``outstanding`` (capital restant dû en début d'année) et ``value``
+        (valeur du bien, à partir de l'année d'achat). Tous positifs.
     """
     if horizon < 1:
         raise ValueError(f"Horizon de {horizon} an(s) : il faut au moins un an.")
     index = pd.RangeIndex(horizon + 1, name="year")
     flows = pd.DataFrame(0.0, index=index, columns=[
         "down_payment", "collected_rent", "charges", "interest", "principal", "outstanding",
+        "value",
     ])
     start = prop.purchase_year
     if start > horizon:
@@ -173,6 +181,7 @@ def property_flows(prop: RentalProperty, horizon: int) -> pd.DataFrame:
         prop.price * prop.gross_yield * prop.collected_share * growth
     )
     flows.loc[start:, "charges"] = prop.annual_charges * growth
+    flows.loc[start:, "value"] = prop.market_value * (1 + prop.value_growth) ** owned
     if prop.borrowed > 0:
         annuity = loan_annuity(prop.borrowed, prop.loan_rate, prop.loan_years)
         loan = Loan(prop.name, annuity, prop.loan_rate, prop.loan_years)

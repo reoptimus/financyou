@@ -30,6 +30,8 @@ from investment_calculator.modules.placement_optimizer import (
 )
 from investment_calculator.modules.placement_plan import plan_placements, profile_holdings
 from investment_calculator.modules.placements import build_gross_placements
+from investment_calculator.modules.rental_property import KNOWN_GAPS as RENTAL_GAPS
+from investment_calculator.modules.rental_property import RentalProperty, property_flows
 from investment_calculator.modules.tranche_allocation import (
     assemble_allocation,
     required_horizons,
@@ -82,9 +84,13 @@ def build_budget(
 
     ``budget`` porte ``earners`` (``taxable_income``, ``annual_growth``,
     ``retirement_year``, ``replacement_rate``), ``rent``, ``loans`` (``name``,
-    ``annual_payment``, ``rate``, ``years_left``), ``dependent_years`` et
-    ``expenses_follow_income``. ``annual_savings_now`` est l'épargne actuelle
+    ``annual_payment``, ``rate``, ``years_left``), ``dependent_years``,
+    ``expenses_follow_income`` et ``properties`` (champs de
+    :class:`RentalProperty`). ``annual_savings_now`` est l'épargne actuelle
     du profil, sur un an : elle fixe les dépenses courantes.
+
+    Avec des biens loués, la table porte aussi ``property_equity`` : valeur des
+    biens moins capital restant dû, en début d'année, avant impôt de revente.
 
     Raises:
         ValueError: saisie refusée par :mod:`household_budget` ; le message dit
@@ -100,11 +106,30 @@ def build_budget(
         Loan(str(c['name']), float(c['annual_payment']), float(c['rate']), int(c['years_left']))
         for c in budget.get('loans', [])
     ]
-    return household_budget(
+    properties = [build_property(p) for p in budget.get('properties', [])]
+    table = household_budget(
         catalog.regime, earners, horizon=horizon, current_savings=annual_savings_now,
         rent=float(budget['rent']), loans=loans,
         dependent_years=[int(n) for n in budget.get('dependent_years', [])],
         expenses_follow_income=bool(budget['expenses_follow_income']),
+        properties=properties,
+    )
+    if properties:
+        flows = [property_flows(p, horizon) for p in properties]
+        table['property_equity'] = sum(f['value'] - f['outstanding'] for f in flows)
+    return table
+
+
+def build_property(row: Mapping[str, Any]) -> RentalProperty:
+    """Bien loué saisi dans l'application (taux en fractions, 0,04 pour 4 %)."""
+    return RentalProperty(
+        name=str(row['name']), price=float(row['price']),
+        down_payment=float(row['down_payment']), loan_rate=float(row['loan_rate']),
+        loan_years=int(row['loan_years']), gross_yield=float(row['gross_yield']),
+        collected_share=float(row['collected_share']),
+        annual_charges=float(row['annual_charges']), rent_growth=float(row['rent_growth']),
+        purchase_year=int(row['purchase_year']), market_value=float(row['market_value']),
+        value_growth=float(row['value_growth']),
     )
 
 
@@ -307,7 +332,8 @@ def run_projection(
         flows = contribution_flows(profile_results['investment_time_series'], horizon)
         table = build_budget(budget, catalog=catalog, horizon=horizon,
                              annual_savings_now=float(flows[0]))
-        results['budget'] = {'table': table, 'known_gaps': BUDGET_GAPS}
+        gaps = BUDGET_GAPS + (RENTAL_GAPS if budget.get('properties') else [])
+        results['budget'] = {'table': table, 'known_gaps': gaps}
         savings = table['free_savings'].tolist()
     if projects:
         if available_savings is None:

@@ -29,7 +29,7 @@ def _flat(**changes: object) -> RentalProperty:
     base = RentalProperty(
         name="studio", price=150_000.0, down_payment=20_000.0, loan_rate=0.035, loan_years=15,
         gross_yield=0.04, collected_share=0.85, annual_charges=0.0, rent_growth=0.0,
-        purchase_year=3,
+        purchase_year=3, market_value=140_000.0, value_growth=0.01,
     )
     return dataclasses.replace(base, **changes)  # type: ignore[arg-type]
 
@@ -64,6 +64,7 @@ def test_flows_by_hand() -> None:
     np.testing.assert_allclose(flows["charges"], [0, 1_000, 1_020, 1_040.4, 1_061.208])
     np.testing.assert_allclose(flows["principal"], [0, 65_000, 65_000, 0, 0])
     np.testing.assert_allclose(flows["outstanding"], [0, 130_000, 65_000, 0, 0])
+    np.testing.assert_allclose(flows["value"], [0, 140_000, 141_400, 142_814, 144_242.14])
 
 
 def test_cash_purchase_has_no_loan() -> None:
@@ -81,6 +82,8 @@ def test_cash_purchase_has_no_loan() -> None:
         ({"gross_yield": -0.01}, "rendement"),
         ({"purchase_year": -1}, "année à venir"),
         ({"price": 0.0}, "prix nul"),
+        ({"market_value": -1.0}, "valeur du bien"),
+        ({"value_growth": -1.0}, "évolution de la valeur"),
     ],
 )
 def test_invalid_property_is_refused(changes: dict[str, object], message: str) -> None:
