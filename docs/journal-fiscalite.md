@@ -125,7 +125,7 @@ l'utilisateur` (bloque une décision produit ou de confiance, pas technique),
 ## 8. Seuil de la surtaxe sur les plus-values immobilières élevées
 
 - **Ouvert le** : 2026-08-27 (étape 1.A.3)
-- **Statut** : en attente de source
+- **Statut** : réglé le 2026-10-25
 - **Contexte** : `capital_gains.real_estate.surtax_brackets` place le
   dernier seuil à 250 000 € ; une vérification indique 260 000 €, avec un
   mécanisme de décote à chaque palier intermédiaire qu'un simple barème par
@@ -134,6 +134,16 @@ l'utilisateur` (bloque une décision produit ou de confiance, pas technique),
   méthode de `TaxRegime`.
 - **À reprendre** : corriger la valeur et modéliser la décote avant qu'un
   calcul ne s'appuie sur ce champ.
+- **Résolution (2026-10-25)** : le BOFiP (BOI-RFPI-TPVIE-20, version du
+  18/07/2023, § 70) confirme que le barème n'est pas marginal : le taux de
+  la tranche s'applique au montant total de la plus-value, avec un lissage
+  à l'entrée de chaque tranche, et le dernier seuil est 260 000 €.
+  `surtax_brackets` est remplacé par `surtax_schedule` (taux et lissage par
+  tranche), calculé par `TaxRegime.real_estate_surtax_due`. Le cas d'or
+  `surtaxe_plus_value_immobiliere_seuil_a_verifier` est remplacé par quatre
+  cas prêts tirés du § 70 (50 000, 55 000, 100 000 et 255 000 €).
+  `fr-2026.json` est corrigé en place, par exception à la règle du
+  millésime figé, validée par SebG : aucun calcul ne lisait l'ancien champ.
 
 ## 9. Barème de l'IFI millésime 2026 — mention "à vérifier" non levée
 

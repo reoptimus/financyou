@@ -248,10 +248,32 @@
                 }
               }
             },
-            "surtax_brackets": {
+            "surtax_schedule": {
               "type": "array",
-              "items": { "$ref": "#/$defs/bracket" },
-              "description": "Surtaxe sur les plus-values immobilières élevées."
+              "description": "Surtaxe sur les plus-values immobilières élevées. Ce n'est PAS un barème marginal : le taux de la tranche où tombe la plus-value imposable s'applique à son montant total, diminué du lissage éventuel (taxe = taux × PV − (until − PV) × factor tant que PV ≤ until). La plus-value tombe dans la tranche si lower < PV ≤ upper.",
+              "items": {
+                "type": "object",
+                "required": ["upper", "rate"],
+                "additionalProperties": false,
+                "properties": {
+                  "lower": { "type": "number", "minimum": 0, "default": 0 },
+                  "upper": {
+                    "type": ["number", "null"],
+                    "description": "Borne supérieure incluse ; null pour la dernière tranche, non bornée."
+                  },
+                  "rate": { "$ref": "#/$defs/rate" },
+                  "smoothing": {
+                    "type": "object",
+                    "required": ["until", "factor"],
+                    "additionalProperties": false,
+                    "description": "Lissage à l'entrée de la tranche, pour éviter un saut de taxe au seuil.",
+                    "properties": {
+                      "until": { "type": "number", "minimum": 0, "description": "Plus-value jusqu'à laquelle le lissage s'applique (incluse)." },
+                      "factor": { "$ref": "#/$defs/rate", "description": "Coefficient appliqué à (until − PV)." }
+                    }
+                  }
+                }
+              }
             }
           }
         }

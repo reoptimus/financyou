@@ -371,9 +371,8 @@ class HullWhiteModel:
         max_attempts: int = 10
     ) -> tuple[np.ndarray, np.ndarray]:
         """Generate replacement scenarios for filtered explosive paths."""
-        # Arrondi au pair SUPÉRIEUR : les antithétiques vont par paires, et
-        # arrondir vers le bas ne régénérait aucun chemin pour un seul manquant
-        # (le R arrondit lui aussi vers le haut, ceiling, dans HullWhite_V2.R).
+        # Arrondi au pair supérieur : arrondi vers le bas, un nombre impair de
+        # scénarios à remplacer n'était jamais atteint, et il en manquait un.
         n_sim = (n_needed + 1) // 2 * 2 if use_antithetic else n_needed
 
         for _attempt in range(max_attempts):

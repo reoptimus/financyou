@@ -23,7 +23,7 @@ from investment_calculator.tax_regime import TaxRegime
 GOLDEN_DIR = Path(__file__).parent
 SCHEMA_PATH = GOLDEN_DIR / "schema.json"
 
-KNOWN_KINDS = {"income_tax", "wealth_tax", "wrapper_withdrawal", "known_gap"}
+KNOWN_KINDS = {"income_tax", "wealth_tax", "real_estate_surtax", "wrapper_withdrawal", "known_gap"}
 
 #: Tolérance de comparaison "au centime" : deux montants arrondis à 0,01 €
 #: doivent coïncider. Un peu de marge absorbe les imprécisions binaires du
@@ -111,6 +111,8 @@ def compute(regime: TaxRegime, case: GoldenCase) -> dict[str, float]:
         return _compute_income_tax(regime, case.inputs)
     if case.kind == "wealth_tax":
         return _compute_wealth_tax(regime, case.inputs)
+    if case.kind == "real_estate_surtax":
+        return _compute_real_estate_surtax(regime, case.inputs)
     if case.kind == "wrapper_withdrawal":
         return _compute_wrapper_withdrawal(regime, case.inputs)
     raise GoldenCaseError(f"cas {case.id!r} : kind inconnu {case.kind!r}")
@@ -143,6 +145,17 @@ def _compute_wealth_tax(regime: TaxRegime, inputs: dict[str, Any]) -> dict[str, 
         "social_contributions": 0.0,
         "total": wealth_tax,
         "net": net_taxable_wealth - wealth_tax,
+    }
+
+
+def _compute_real_estate_surtax(regime: TaxRegime, inputs: dict[str, Any]) -> dict[str, float]:
+    taxable_gain = float(inputs["taxable_gain"])
+    surtax = regime.real_estate_surtax_due(taxable_gain)
+    return {
+        "income_tax": surtax,
+        "social_contributions": 0.0,
+        "total": surtax,
+        "net": taxable_gain - surtax,
     }
 
 
