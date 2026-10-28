@@ -398,7 +398,10 @@ class ScenarioGenerator:
         # nuls, déflateur égal à 1). Pour obtenir n_steps périodes, on simule
         # donc n_steps + 1 dates, et la colonne 0 est retirée à l'assemblage.
         n_dates = n_steps + 1
-        T_model = n_dates * dt
+        # Les modèles recalculent leur nombre de dates par int(T / dt) : un
+        # demi-pas de marge garantit qu'ils retrouvent n_dates malgré
+        # l'arrondi flottant (avec dt = 1/12, int(25 * dt / dt) vaut 24).
+        T_model = (n_dates + 0.5) * dt
 
         # Step 1: Load the yield curve — une donnée d'entrée versionnée (voir
         # investment_calculator.yield_curve), pas une formule dans le moteur.
