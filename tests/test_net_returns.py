@@ -94,6 +94,19 @@ def test_cto_dividendes_imposes_chaque_annee() -> None:
     assert net.multiples[0, 0, 0] == pytest.approx(expected)
 
 
+def test_cto_obligations_fonds_de_capitalisation_impose_a_la_sortie() -> None:
+    """
+    Régression : les obligations du CTO voyaient toute la part positive de
+    leur rendement imposée chaque année comme un coupon. En fonds de
+    capitalisation, seule la plus-value finale est imposée, une fois.
+    """
+    gross = _gross("cto_obligations", [[0.04, -0.02, 0.05]])
+    net = build_net_returns(gross, _catalog(), PROFILE, [3])
+    value = 1.04 * 0.98 * 1.05
+    expected = value - (value - 1.0) * (PFU_IR + PS)
+    assert net.multiples[0, 0, 0] == pytest.approx(expected)
+
+
 def test_livret_a_sans_impot() -> None:
     gross = _gross("livret_a", [[0.015] * 4])
     net = build_net_returns(gross, FR_2026, PROFILE, [4])
