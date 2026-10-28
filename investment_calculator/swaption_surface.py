@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "PACKAGE_SURFACE_DIR",
     "SCHEMA_PATH",
+    "SwaptionQuote",
     "SwaptionSurface",
     "SwaptionSurfaceError",
     "SwaptionSurfaceNotFoundError",
@@ -132,6 +133,60 @@ def _validate_document(document: dict[str, Any], origin: Path) -> None:
         raise SwaptionSurfaceValidationError(f"{origin} ne respecte pas le schéma :\n{details}")
 
 
+@dataclass(frozen=True)
+class SwaptionQuote:
+    """Une cotation de la surface : échéance, ténor, volatilité normale (bp/an)."""
+
+    expiry: str
+    tenor: str
+    vol_normal_bp: float
+
+
+def _check_status(document: dict[str, Any], origin: Path) -> None:
+    """Une surface validated doit être réelle et datée : sinon personne n'a pu la relire."""
+    if document["status"] != "validated":
+        return
+    if document["synthetic"]:
+        raise SwaptionSurfaceValidationError(
+            f"{origin} : une surface synthétique ne peut pas être validated. Repassez-la en "
+            f"draft, ou remplacez-la par des cotations de marché."
+        )
+    if document["observation_date"] is None:
+        raise SwaptionSurfaceValidationError(
+            f"{origin} : une surface validated doit avoir une observation_date. Renseignez la "
+            f"date d'observation de la source, ou repassez la surface en draft."
+        )
+    if not (document.get("validation") or {}).get("validated_by"):
+        raise SwaptionSurfaceValidationError(
+            f"{origin} : une surface validated doit nommer la personne qui l'a relue dans "
+            f"validation.validated_by."
+        )
+
+
+def _check_quotes(document: dict[str, Any], origin: Path) -> tuple[SwaptionQuote, ...]:
+    quotes = []
+    seen = set()
+    for quote in document["quotes"]:
+        try:
+            label_to_years(quote["expiry"])
+            label_to_years(quote["tenor"])
+        except ValueError as exc:
+            raise SwaptionSurfaceValidationError(f"{origin} : {exc}") from exc
+        key = (quote["expiry"], quote["tenor"])
+        if key in seen:
+            raise SwaptionSurfaceValidationError(
+                f"{origin} : la cotation {key[0]} × {key[1]} apparaît deux fois. Gardez-en une."
+            )
+        seen.add(key)
+        vol = float(quote["vol_normal_bp"])
+        if not np.isfinite(vol):
+            raise SwaptionSurfaceValidationError(
+                f"{origin} : volatilité non finie pour {key[0]} × {key[1]}."
+            )
+        quotes.append(SwaptionQuote(expiry=key[0], tenor=key[1], vol_normal_bp=vol))
+    return tuple(quotes)
+
+
 def _check_coherence(document: dict[str, Any], origin: Path) -> np.ndarray:
     grid = document["grid"]
     expiries, tenors, rows = grid["expiries"], grid["tenors"], grid["vol_normal_bp"]
@@ -169,11 +224,17 @@ def _check_coherence(document: dict[str, Any], origin: Path) -> np.ndarray:
 
 @dataclass(frozen=True)
 class SwaptionSurface:
-    """Une surface de volatilité swaptions chargée, validée, prête à calibrer."""
+    """
+    Une surface de volatilité swaptions chargée, validée, prête à calibrer.
+
+    ``quotes`` liste toutes les cotations, que le document soit une grille
+    complète ou une liste éparse. ``vol_grid`` n'existe que pour une grille.
+    """
 
     document: dict[str, Any] = field(repr=False)
-    vol_grid: np.ndarray = field(repr=False)
+    vol_grid: np.ndarray | None = field(repr=False)
     source: Path
+    quotes: tuple[SwaptionQuote, ...] = field(repr=False)
 
     @property
     def id(self) -> str:
@@ -192,9 +253,14 @@ class SwaptionSurface:
         return str(self.document["currency"])
 
     @property
-    def observation_date(self) -> str:
-        """Millésime de la surface, à consigner dans les métadonnées de toute calibration."""
-        return str(self.document["observation_date"])
+    def observation_date(self) -> str | None:
+        """
+        Millésime de la surface, à consigner dans les métadonnées de toute
+        calibration. None si la source ne le donne pas (lacune déclarée dans
+        known_gaps, interdite pour une surface validated).
+        """
+        value = self.document["observation_date"]
+        return None if value is None else str(value)
 
     @property
     def vol_convention(self) -> str:
@@ -202,11 +268,17 @@ class SwaptionSurface:
 
     @property
     def expiries(self) -> list[str]:
-        return list(self.document["grid"]["expiries"])
+        """Échéances distinctes, par ordre croissant."""
+        if "grid" in self.document:
+            return list(self.document["grid"]["expiries"])
+        return sorted({q.expiry for q in self.quotes}, key=label_to_years)
 
     @property
     def tenors(self) -> list[str]:
-        return list(self.document["grid"]["tenors"])
+        """Ténors distincts, par ordre croissant."""
+        if "grid" in self.document:
+            return list(self.document["grid"]["tenors"])
+        return sorted({q.tenor for q in self.quotes}, key=label_to_years)
 
     @property
     def expiries_years(self) -> np.ndarray:
@@ -235,13 +307,21 @@ class SwaptionSurface:
 
     def get_vol(self, expiry: str, tenor: str) -> float:
         """
-        Volatilité normale (bp/an) pour une échéance/ténor exacts de la grille.
+        Volatilité normale (bp/an) pour une échéance/ténor exacts de la surface.
 
         Raises:
             KeyError: l'échéance ou le ténor demandé n'est pas un point exact
-                de la grille (pas d'interpolation ici : voir
+                de la surface (pas d'interpolation ici : voir
                 SwaptionCalibrator pour une sélection de points par distance).
         """
+        if self.vol_grid is None:
+            for quote in self.quotes:
+                if quote.expiry == expiry and quote.tenor == tenor:
+                    return quote.vol_normal_bp
+            raise KeyError(
+                f"Aucune cotation {expiry!r} × {tenor!r} dans la surface {self.id!r}. "
+                f"Cotations : {[(q.expiry, q.tenor) for q in self.quotes]}"
+            )
         try:
             i = self.expiries.index(expiry)
         except ValueError as exc:
@@ -291,7 +371,17 @@ def load_swaption_surface(surface_id: str, *, allow_synthetic: bool = False) -> 
             f"assumé — voir investment_calculator/swaption_surfaces/README.md."
         )
 
-    vol_grid = _check_coherence(document, path)
+    _check_status(document, path)
+    if "grid" in document:
+        grid_values = _check_coherence(document, path)
+        vol_grid: np.ndarray | None = grid_values
+        quotes = tuple(
+            SwaptionQuote(expiry=expiry, tenor=tenor, vol_normal_bp=float(grid_values[i, j]))
+            for i, expiry in enumerate(document["grid"]["expiries"])
+            for j, tenor in enumerate(document["grid"]["tenors"])
+        )
+    else:
+        vol_grid, quotes = None, _check_quotes(document, path)
 
     logger.info(
         "Surface de volatilité swaptions chargée : %s (millésime %s, statut %s, synthétique=%s)",
@@ -300,4 +390,4 @@ def load_swaption_surface(surface_id: str, *, allow_synthetic: bool = False) -> 
         document["status"],
         document["synthetic"],
     )
-    return SwaptionSurface(document=document, vol_grid=vol_grid, source=path)
+    return SwaptionSurface(document=document, vol_grid=vol_grid, source=path, quotes=quotes)

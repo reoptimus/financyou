@@ -111,3 +111,107 @@ def test_une_grille_non_rectangulaire_est_rejetee(tmp_path, monkeypatch):
 
     with pytest.raises(SwaptionSurfaceValidationError, match="non rectangulaire"):
         load_swaption_surface("cassee-test", allow_synthetic=True)
+
+
+# --- Surface réelle à cotations éparses (eur-bloomberg-2018) -----------------
+
+REAL_SURFACE_ID = "eur-bloomberg-2018"
+
+
+def _write_variant(tmp_path, monkeypatch, surface_id, mutate):
+    """Écrire une variante modifiée de la surface réelle dans un répertoire de test."""
+    document = json.loads(
+        (PACKAGE_SURFACE_DIR / f"{REAL_SURFACE_ID}.json").read_text(encoding="utf-8")
+    )
+    document.pop("$schema", None)
+    document["id"] = surface_id
+    mutate(document)
+    (tmp_path / f"{surface_id}.json").write_text(json.dumps(document), encoding="utf-8")
+    monkeypatch.setattr("investment_calculator.swaption_surface.PACKAGE_SURFACE_DIR", tmp_path)
+
+
+class TestSurfaceBloomberg2018:
+    def test_se_charge_sans_opt_in_car_elle_n_est_pas_synthetique(self):
+        surface = load_swaption_surface(REAL_SURFACE_ID)
+        assert surface.synthetic is False
+        assert surface.status == "draft"
+        assert surface.vol_grid is None
+
+    def test_les_neuf_cotations_du_csv_r_sont_reprises(self):
+        """legacy/csv_files/Swaptions_V2.csv donne la vol en % : 0,6789 = 67,89 bp."""
+        surface = load_swaption_surface(REAL_SURFACE_ID)
+        assert len(surface.quotes) == 9
+        assert surface.get_vol("9Y", "2Y") == pytest.approx(67.89)
+        assert surface.get_vol("3Y", "7Y") == pytest.approx(56.96)
+        assert surface.get_vol("15Y", "10Y") == pytest.approx(62.13)
+
+    def test_echeances_et_tenors_distincts_et_croissants(self):
+        surface = load_swaption_surface(REAL_SURFACE_ID)
+        assert surface.expiries == ["3Y", "9Y", "10Y", "12Y", "15Y"]
+        assert surface.tenors == ["2Y", "5Y", "7Y", "10Y"]
+
+    def test_la_date_inconnue_est_une_lacune_declaree(self):
+        surface = load_swaption_surface(REAL_SURFACE_ID)
+        assert surface.observation_date is None
+        assert any("Date d'observation inconnue" in gap for gap in surface.document["known_gaps"])
+
+    def test_une_cotation_absente_leve_key_error(self):
+        surface = load_swaption_surface(REAL_SURFACE_ID)
+        with pytest.raises(KeyError, match="Aucune cotation"):
+            surface.get_vol("1Y", "1Y")
+
+
+class TestStatutValidated:
+    def test_validated_sans_date_est_refuse(self, tmp_path, monkeypatch):
+        def mutate(doc):
+            doc["status"] = "validated"
+            doc["validation"] = {"validated_by": "test", "validated_on": "2026-10-25"}
+
+        _write_variant(tmp_path, monkeypatch, "sans-date", mutate)
+        with pytest.raises(SwaptionSurfaceValidationError, match="observation_date"):
+            load_swaption_surface("sans-date")
+
+    def test_validated_sans_relecteur_est_refuse(self, tmp_path, monkeypatch):
+        def mutate(doc):
+            doc["status"] = "validated"
+            doc["observation_date"] = "2018-08-01"
+
+        _write_variant(tmp_path, monkeypatch, "sans-relecteur", mutate)
+        with pytest.raises(SwaptionSurfaceValidationError, match="validated_by"):
+            load_swaption_surface("sans-relecteur")
+
+    def test_validated_synthetique_est_refuse(self, tmp_path, monkeypatch):
+        def mutate(doc):
+            doc["status"] = "validated"
+            doc["synthetic"] = True
+
+        _write_variant(tmp_path, monkeypatch, "synthetique-validee", mutate)
+        with pytest.raises(SwaptionSurfaceValidationError, match="synthétique"):
+            load_swaption_surface("synthetique-validee", allow_synthetic=True)
+
+    def test_validated_complete_est_acceptee(self, tmp_path, monkeypatch):
+        def mutate(doc):
+            doc["status"] = "validated"
+            doc["observation_date"] = "2018-08-01"
+            doc["validation"] = {"validated_by": "test", "validated_on": "2026-10-25"}
+
+        _write_variant(tmp_path, monkeypatch, "complete", mutate)
+        assert load_swaption_surface("complete").status == "validated"
+
+
+class TestFormeDuDocument:
+    def test_grille_et_cotations_a_la_fois_est_refuse(self, tmp_path, monkeypatch):
+        def mutate(doc):
+            doc["grid"] = {"expiries": ["1Y"], "tenors": ["1Y"], "vol_normal_bp": [[50.0]]}
+
+        _write_variant(tmp_path, monkeypatch, "les-deux", mutate)
+        with pytest.raises(SwaptionSurfaceValidationError, match="schéma"):
+            load_swaption_surface("les-deux")
+
+    def test_une_cotation_en_double_est_refusee(self, tmp_path, monkeypatch):
+        def mutate(doc):
+            doc["quotes"].append(dict(doc["quotes"][0]))
+
+        _write_variant(tmp_path, monkeypatch, "doublon", mutate)
+        with pytest.raises(SwaptionSurfaceValidationError, match="deux fois"):
+            load_swaption_surface("doublon")
