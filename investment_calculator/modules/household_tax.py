@@ -28,9 +28,15 @@ et la même tranche marginale que le R. Il s'en écarte sur quatre points :
 4. **Âge limite.** Le R arrête la part d'un enfant à 20 ans, valeur codée en
    dur. Ici, la durée est saisie par l'utilisateur.
 
+Les loyers d'une location nue sont imposés au micro-foncier
+(``rental_income_regimes.micro_foncier`` du régime) : abattement forfaitaire,
+puis barème et prélèvements sociaux. Le R ajoutait les loyers bruts au revenu
+imposable, sans abattement ni prélèvements sociaux.
+
 Limites déclarées (``KNOWN_GAPS``) : la décote et la déduction forfaitaire
 pour frais professionnels ne sont pas dans le régime. Le revenu attendu est
-donc le revenu imposable, après déductions.
+donc le revenu imposable, après déductions. Le régime réel des revenus
+fonciers n'est pas porté.
 """
 
 from __future__ import annotations
@@ -52,6 +58,8 @@ __all__ = [
     "household_shares",
     "income_tax_by_year",
     "marginal_rate",
+    "rental_social_tax",
+    "rental_taxable_income",
     "shares_by_year",
 ]
 
@@ -60,6 +68,11 @@ KNOWN_GAPS = [
     "foyers modestes est surestimé.",
     "La déduction forfaitaire pour frais professionnels n'est pas dans le régime : "
     "le revenu saisi doit être le revenu imposable, après déductions.",
+    "Les loyers ne sont imposés qu'au micro-foncier : le régime réel (charges et "
+    "intérêts déductibles, déficit foncier) n'est pas porté, et des loyers au-dessus "
+    "du seuil du micro-foncier sont refusés.",
+    "La part déductible de la CSG sur les loyers n'est pas retranchée du revenu "
+    "imposable de l'année suivante : l'impôt est légèrement surestimé.",
 ]
 
 
@@ -171,3 +184,63 @@ def marginal_rate(regime: TaxRegime, taxable_income: float, shares: HouseholdSha
         if per_share > float(bracket.get("lower", 0.0)):
             rate = float(bracket["rate"])
     return rate
+
+
+def rental_taxable_income(
+    regime: TaxRegime, collected_rents: Sequence[Sequence[float]]
+) -> np.ndarray:
+    """
+    Revenu foncier imposable de chaque année, au micro-foncier.
+
+    Args:
+        collected_rents: pour chaque bien loué nu, les loyers encaissés de
+            chaque année (toutes les séries ont la même longueur).
+
+    Returns:
+        Loyers encaissés après l'abattement forfaitaire, tous biens confondus.
+
+    Raises:
+        NotImplementedError: le régime ne décrit pas le micro-foncier, ou les
+            loyers d'une année dépassent son seuil. Le régime réel n'est pas
+            porté : réduisez les loyers saisis ou attendez son portage.
+    """
+    micro = regime.document.get("rental_income_regimes", {}).get("micro_foncier")
+    if not micro:
+        raise NotImplementedError(
+            f"Le régime {regime.id} ne décrit pas le micro-foncier : les loyers ne peuvent "
+            "pas être imposés. Ajoutez rental_income_regimes.micro_foncier au régime."
+        )
+    rents = np.asarray(collected_rents, dtype=float)
+    if rents.size == 0:
+        return np.zeros(0)
+    if rents.ndim != 2:
+        raise ValueError("Donnez une série de loyers par bien, toutes de même longueur.")
+    tested = rents if micro["threshold_basis"] == "per_property" else rents.sum(axis=0)[None, :]
+    years = sorted(set(np.flatnonzero((tested > float(micro["revenue_threshold"])).any(axis=0))))
+    if years:
+        raise NotImplementedError(
+            f"Loyers au-dessus du seuil du micro-foncier ({micro['revenue_threshold']:,.0f} €) "
+            f"aux années {[int(y) for y in years]} : seul le micro-foncier est porté, pas le "
+            "régime réel. Réduisez les loyers saisis."
+        )
+    taxable: np.ndarray = rents.sum(axis=0) * (1 - float(micro["allowance_rate"]))
+    return taxable
+
+
+def rental_social_tax(regime: TaxRegime, taxable_rent: Sequence[float]) -> np.ndarray:
+    """
+    Prélèvements sociaux sur le revenu foncier imposable de chaque année.
+
+    Raises:
+        NotImplementedError: le régime n'applique pas ses prélèvements sociaux
+            aux revenus fonciers (``applies_to`` sans ``rental_income``).
+    """
+    social = regime.document["social_contributions"]["investment_income"]
+    if "rental_income" not in social.get("applies_to", []):
+        raise NotImplementedError(
+            f"Le régime {regime.id} ne dit pas si ses prélèvements sociaux frappent les "
+            "loyers. S'ils les frappent, ajoutez rental_income à "
+            "social_contributions.investment_income.applies_to."
+        )
+    tax: np.ndarray = np.asarray(taxable_rent, dtype=float) * regime.social_rate
+    return tax
