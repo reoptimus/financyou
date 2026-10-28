@@ -52,7 +52,8 @@
     "risk_premia s'applique de façon identique quel que soit l'horizon de simulation ; la littérature distingue parfois prime court terme et prime long terme (30 ans), non modélisé ici.",
     "real_estate.dynamics (a = 0,145 ; σ = 3,79 %) est calé sur une série INSEE dont la période exacte et la nature (prix seul ou loyers compris) ne sont pas documentées dans le dépôt. Voir docs/journal-1b-calibration.md, point 1.",
     "equity.volatility, real_estate.dynamics.volatility, rates.risk_free_proxy, bond, inflation, gdp_growth et correlations (étape 1.B.4) restent l'extraction fidèle de littéraux 'US historical averages' codés en dur dans scenario_generator.py et gse.py, jamais vérifiés contre une source de marché réelle ni adaptés au marché français.",
-    "rates.hull_white (a=0.1, sigma=0.01) est un PLACEHOLDER (status='placeholder'), pas une calibration : l'étape 1.B.5 (calibration Hull-White sur des prix de swaption réels, portage de legacy/R_scripts/Calib_Taux_Swaptions_V2.R) est différée faute de données de marché disponibles dans ce dépôt (le script R référence un fichier 'Prix_swaptions_bloomberg.Rda' introuvable ici). Tant qu'elle n'est pas menée, le chemin stochastique de ScenarioGenerator utilise une dynamique de taux non calibrée sur le marché.",
+    "rates.hull_white (a=0.1, sigma=0.01) est un PLACEHOLDER (status='placeholder'), pas une calibration : l'étape 1.B.5 (calibration Hull-White sur des prix de swaption réels, portage de legacy/R_scripts/Calib_Taux_Swaptions_V2.R) est différée faute de données de marché disponibles dans ce dépôt (le script R référence un fichier 'Prix_swaptions_bloomberg.Rda' introuvable ici). Tant qu'elle n'est pas menée, le chemin stochastique de ScenarioGenerator utilise une dynamique de taux non calibrée sur le marché. DÉFICIT À COMBLER : le 2026-10-25, Sébastien Gallet a décidé de conserver ces valeurs pour les premiers résultats du papier, en attendant une source de prix ou de volatilités de swaptions EUR.",
+    "bond.fund_maturity_years (8 ans) est une hypothèse de modélisation, pas une donnée de marché sourcée : maturité de l'obligation que le fonds obligataire du chemin stochastique achète au pair chaque année (HullWhiteModel.bond_fund_returns). Retenue par Sébastien Gallet le 2026-10-25 comme ordre de grandeur de la duration des actifs des fonds euros d'assurance vie (hors unités de compte), composés d'environ 80 % d'obligations. DÉFICIT À COMBLER : sourcer une duration précise (rapports ACPR ou FFA sur les placements des assureurs) ; une analyse de sensibilité est recommandée avant publication.",
     "correlations n'est actuellement consommé par aucun des deux chemins de génération de ScenarioGenerator (_generate_simple, _generate_stochastic construit sa propre corrélation via CorrelatedRandomGenerator, qui ignore ce champ) : c'est une configuration sans effet observable, pas seulement une hypothèse non validée. Corrigé indépendamment de la présente extraction — voir docs/journal-1b-calibration.md."
   ],
 
@@ -91,7 +92,8 @@
 
   "bond": {
     "mean": 0.05,
-    "volatility": 0.07
+    "volatility": 0.07,
+    "fund_maturity_years": 8
   },
 
   "inflation": {

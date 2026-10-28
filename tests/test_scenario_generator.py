@@ -537,6 +537,28 @@ class TestStochasticScenarioGeneration:
         kept_mean = kept['scenarios']['interest_rate'].mean()
         assert kept_mean > filtered['scenarios']['interest_rate'].mean()
 
+    def test_stochastic_obligations_ne_sont_plus_le_taux_court(self):
+        """
+        Régression : bond_return valait le taux court Hull-White, sans
+        duration. C'est désormais un fonds à maturité constante
+        (bond.fund_maturity_years) : il varie dès la première période, alors
+        que le taux court de la première période est déterministe.
+        """
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 500,
+            'time_horizon': 10,
+            'timestep': 1.0,
+            'use_stochastic': True,
+            'currency': 'EUR',
+            'filter_explosive_rates': False,
+        }
+        scenarios_df = gen.generate(config)['scenarios']
+        first = scenarios_df[scenarios_df['time_period'] == 1.0]
+
+        assert first['interest_rate'].std() == pytest.approx(0.0, abs=1e-12)
+        assert first['bond_return'].std() > 0.01
+
     def test_stochastic_martingale_test_structure(self):
         """La sortie du test de martingalité porte un sous-résultat par composant."""
         gen = scenario_generator.ScenarioGenerator(random_seed=42)
