@@ -445,6 +445,28 @@ class TestStochasticScenarioGeneration:
         np.testing.assert_allclose(first['interest_rate'], 1.0 / d1[0] - 1.0)
         assert sorted(scenarios_df['time_period'].unique()) == [1.0, 2.0, 3.0, 4.0, 5.0]
 
+    def test_stochastic_pas_mensuel(self):
+        """
+        Régression : un pas mensuel sur deux ans plantait (« all input arrays
+        must have the same shape »).
+
+        Les modèles recalculent leur nombre de dates par int(T / dt) ; avec
+        dt = 1/12, int(25 * dt / dt) vaut 24 et une date était perdue.
+        """
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 20,
+            'time_horizon': 2,
+            'timestep': 1 / 12,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+
+        results = gen.generate(config)
+
+        assert len(results['scenarios']) == 20 * 24
+        assert results['deflators'].shape == (20, 1 + 24)
+
     def test_stochastic_remplacement_d_un_nombre_impair_de_scenarios(self):
         """
         Régression : quand le filtre des taux explosifs retirait un nombre
@@ -491,6 +513,51 @@ class TestStochasticScenarioGeneration:
         d_t = deflators[[f"t_{k}" for k in range(1, 11)]].to_numpy()
 
         np.testing.assert_allclose(np.cumprod(1.0 + rates, axis=1), 1.0 / d_t, rtol=1e-12)
+
+    def test_stochastic_sans_filtre_des_taux_explosifs(self):
+        """Sans filtre, tous les chemins tirés sont gardés et ceux hors bornes sont comptés."""
+        config = {
+            'num_scenarios': 1000,
+            'time_horizon': 30,
+            'timestep': 1.0,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+        filtered = scenario_generator.ScenarioGenerator(random_seed=42).generate(config)
+        kept = scenario_generator.ScenarioGenerator(random_seed=42).generate(
+            {**config, 'filter_explosive_rates': False}
+        )
+
+        info = kept['metadata']['calibration_info']
+        assert info['filter_explosive_rates'] is False
+        assert info['rate_paths_out_of_bounds'] > 0
+        assert kept['scenarios']['scenario_id'].nunique() == 1000
+        # Mêmes tirages, sans tri : la moyenne des taux est plus haute, car le
+        # filtre retire surtout des chemins de taux élevés.
+        kept_mean = kept['scenarios']['interest_rate'].mean()
+        assert kept_mean > filtered['scenarios']['interest_rate'].mean()
+
+    def test_stochastic_obligations_ne_sont_plus_le_taux_court(self):
+        """
+        Régression : bond_return valait le taux court Hull-White, sans
+        duration. C'est désormais un fonds à maturité constante
+        (bond.fund_maturity_years) : il varie dès la première période, alors
+        que le taux court de la première période est déterministe.
+        """
+        gen = scenario_generator.ScenarioGenerator(random_seed=42)
+        config = {
+            'num_scenarios': 500,
+            'time_horizon': 10,
+            'timestep': 1.0,
+            'use_stochastic': True,
+            'currency': 'EUR',
+            'filter_explosive_rates': False,
+        }
+        scenarios_df = gen.generate(config)['scenarios']
+        first = scenarios_df[scenarios_df['time_period'] == 1.0]
+
+        assert first['interest_rate'].std() == pytest.approx(0.0, abs=1e-12)
+        assert first['bond_return'].std() > 0.01
 
     def test_stochastic_martingale_test_structure(self):
         """La sortie du test de martingalité porte un sous-résultat par composant."""

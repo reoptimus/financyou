@@ -122,6 +122,50 @@ crd_out <- lapply(crd_cases, function(cs) {
   c(cs, list(principal = as.numeric(res[[1]]), interest = as.numeric(res[[2]])))
 })
 
+# --- fct_recalcul_revenu.R et modif_chrono_flux_plc.R : bien loué à crédit ---
+suppressPackageStartupMessages(library(dplyr))
+load_r(file.path(L, "ShinyR/BetaV1/Financyou/Data_Log/FCT_Global/fct_recalcul_revenu.R"))
+load_r(file.path(L, "ShinyR/BetaV1/Financyou/Data_Log/FCT_Global/modif_chrono_flux_plc.R"))
+rental_revenu <- lapply(c("RimmoLoc", "RimmoPinel", "Autre"), function(nom) {
+  list(nom = nom, montant = 250000, output = fct_recalcul_revenu(nom, 250000, NULL))
+})
+# tab_chrono minimal : un salaire, deux parts, pas de loyer versé ni de projet.
+horiz <- 20
+rental_chrono <- function(salaire, parts) {
+  rows <- rbind(
+    c("life", "revenu", "salaire"), c("life", "hors_imp", "loyer"),
+    c("life", "part_imp", "avec projets"), c("impots", "IR", "final"),
+    c("life", "hors_imp", "depenses hors projets"),
+    c("life", "hors_imp", "Epargne libre avec projets"), c("life", "credit sup", "0")
+  )
+  tc <- data.frame(type = rows[, 1], sous.type = rows[, 2], sous.type_2 = rows[, 3],
+                   stringsAsFactors = FALSE)
+  values <- matrix(0, nrow(rows), horiz)
+  values[1, ] <- salaire
+  values[3, ] <- parts
+  cbind(tc, as.data.frame(values))
+}
+rental_case <- list(salaire = 60000, parts = 2, debut_optim = 4, annuite = 9000,
+                    tau = 0.035, n = 15)
+rental_case$montant <- rental_case$annuite * (1 - (1 + rental_case$tau)^-rental_case$n) /
+  rental_case$tau + 20000
+rental_case$revenu <- fct_recalcul_revenu("RimmoLoc", rental_case$montant, NULL)
+rental_tc <- modif_chrono_flux_plc(
+  rental_chrono(rental_case$salaire, rental_case$parts), rental_case$debut_optim,
+  rental_case$revenu, Flux_crd(horiz, rental_case$annuite, rental_case$tau, rental_case$n),
+  rep(0, horiz), "RimmoLoc"
+)
+rental_row <- function(st, st2) {
+  as.numeric(rental_tc %>% filter(sous.type == st, sous.type_2 == st2) %>%
+               select(-type, -sous.type, -sous.type_2))
+}
+rental_case$output <- list(
+  revenu = rental_row("revenu", "ajout_RimmoLoc"),
+  principal = rental_row("principal", "ajout_RimmoLoc"),
+  interet = rental_row("interet", "ajout_RimmoLoc"),
+  ir = rental_row("IR", "final")
+)
+
 out <- list(
   r_version = R.version.string,
   exp_proj_hist = list(horiz = horiz, cases = proj_out),
@@ -136,6 +180,7 @@ out <- list(
     returns = michaud_returns[, 1, , ], cases = michaud_out
   ),
   imp_ir = list(qf = ir_qf, output = ir_out),
-  crd_flux = crd_out
+  crd_flux = crd_out,
+  rental = list(revenu = rental_revenu, chrono = rental_case)
 )
 write_json(out, "tests/reference_r/r_outputs.json", digits = NA, auto_unbox = TRUE, pretty = TRUE)

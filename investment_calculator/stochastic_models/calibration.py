@@ -722,22 +722,21 @@ class SwaptionCalibrator:
 
     def _build_instruments(self) -> list[SwaptionInstrument]:
         instruments = []
-        for i, expiry_label in enumerate(self.surface.expiries):
-            expiry_years = label_to_years(expiry_label)
-            for j, tenor_label in enumerate(self.surface.tenors):
-                n_payments = int(round(label_to_years(tenor_label)))
-                forward, annuity = self._forward_and_annuity(expiry_years, n_payments)
-                instruments.append(
-                    SwaptionInstrument(
-                        expiry_label=expiry_label,
-                        tenor_label=tenor_label,
-                        expiry_years=expiry_years,
-                        n_payments=n_payments,
-                        forward_rate=forward,
-                        annuity=annuity,
-                        market_vol_bp=float(self.surface.vol_grid[i, j]),
-                    )
+        for quote in self.surface.quotes:
+            expiry_years = label_to_years(quote.expiry)
+            n_payments = int(round(label_to_years(quote.tenor)))
+            forward, annuity = self._forward_and_annuity(expiry_years, n_payments)
+            instruments.append(
+                SwaptionInstrument(
+                    expiry_label=quote.expiry,
+                    tenor_label=quote.tenor,
+                    expiry_years=expiry_years,
+                    n_payments=n_payments,
+                    forward_rate=forward,
+                    annuity=annuity,
+                    market_vol_bp=quote.vol_normal_bp,
                 )
+            )
         return instruments
 
     def _forward_and_annuity(self, expiry_years: float, n_payments: int) -> tuple[float, float]:

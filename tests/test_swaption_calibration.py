@@ -19,6 +19,7 @@ import pytest
 
 from investment_calculator.stochastic_models.calibration import (
     SwaptionCalibrator,
+    grid_curve_functions,
     hull_white_payer_swaption_price,
     hull_white_zero_coupon_bond_put_price,
     nelson_siegel_curve_functions,
@@ -27,6 +28,7 @@ from investment_calculator.swaption_surface import (
     SwaptionSurfaceSyntheticNotAllowedError,
     load_swaption_surface,
 )
+from investment_calculator.yield_curve import load_yield_curve
 
 SURFACE_ID = "eur-synthetic-2026-08"
 
@@ -197,3 +199,59 @@ class TestSelectCoTerminalBand:
                 assert distance <= 5.0, inst
             else:
                 assert inst.tenor_label == "1Y"  # ténor le plus court possible
+
+
+@pytest.fixture(scope="module")
+def calibrator_2018():
+    """Surface eur-bloomberg-2018 sur la courbe EIOPA d'avril 2018, au pas du script R."""
+    dt = 0.025
+    curve = load_yield_curve("eiopa-fr-2018-04", dt=dt)
+    curve_p0, curve_f0 = grid_curve_functions(
+        curve.get_bond_prices(), curve.get_forward_curve(), dt
+    )
+    return SwaptionCalibrator(load_swaption_surface("eur-bloomberg-2018"), curve_p0, curve_f0)
+
+
+class TestCalibrationContreLeR2018:
+    """
+    Non-régression contre la calibration R de 2018, sur les mêmes données :
+    les 9 cotations Bloomberg de legacy/csv_files/Swaptions_V2.csv (surface
+    eur-bloomberg-2018) et la courbe EIOPA d'avril 2018.
+
+    Calib_Taux_Swaptions_V2.R ne pondère que les trois premières swaptions du
+    fichier (9Y×2Y, 9Y×5Y, 10Y×5Y), fixe a et calibre sigma par Monte-Carlo
+    (1 000 tirages antithétiques, pas de 0,025 an). Son résultat est dans
+    legacy/R_Financyou/GSE/2. Organisation scripts/R4 CALIBRAGE/R4 OUT/a_sigma.Rda :
+    a = 0,0058333, sigma = 0,006875. Le pricer Python est fermé (Jamshidian) :
+    l'écart attendu vient du bruit Monte-Carlo du R, d'où la tolérance de 1 %
+    de la feuille de route.
+    """
+
+    R_A = 0.0058333
+    R_SIGMA = 0.006875
+    R_WEIGHTED = {("9Y", "2Y"), ("9Y", "5Y"), ("10Y", "5Y")}
+
+    def test_les_strikes_cites_sont_proches_du_forward_atm(self, calibrator_2018):
+        quoted = {
+            (q["expiry"], q["tenor"]): q["quoted_strike"]
+            for q in calibrator_2018.surface.document["quotes"]
+        }
+        for inst in calibrator_2018.instruments:
+            gap = abs(inst.forward_rate - quoted[(inst.expiry_label, inst.tenor_label)])
+            assert gap < 0.0035, inst
+
+    def test_sigma_a_moins_de_1_pourcent_du_r(self, calibrator_2018):
+        band = [
+            inst for inst in calibrator_2018.instruments
+            if (inst.expiry_label, inst.tenor_label) in self.R_WEIGHTED
+        ]
+        result = calibrator_2018.calibrate(band, fixed_a=self.R_A)
+        assert result.n_instruments == 3
+        assert result.sigma == pytest.approx(self.R_SIGMA, rel=0.01)
+        assert result.rmse_bp < 1.0
+
+    def test_les_parametres_r_reproduisent_les_trois_cotations(self, calibrator_2018):
+        for inst in calibrator_2018.instruments:
+            if (inst.expiry_label, inst.tenor_label) in self.R_WEIGHTED:
+                model = calibrator_2018.model_vol_bp(self.R_A, self.R_SIGMA, inst)
+                assert model == pytest.approx(inst.market_vol_bp, abs=1.0), inst

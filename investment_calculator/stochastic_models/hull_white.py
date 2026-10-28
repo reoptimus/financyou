@@ -19,9 +19,13 @@ References:
   The Review of Financial Studies, 3(4), 573-592.
 """
 
+import logging
 import warnings
+from typing import Any
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 class HullWhiteModel:
@@ -140,8 +144,9 @@ class HullWhiteModel:
         lim_high: float = 0.1,
         lim_low: float = -0.05,
         max_retries: int = 50,
-        use_antithetic: bool = True
-    ) -> dict[str, np.ndarray]:
+        use_antithetic: bool = True,
+        filter_explosive: bool = True,
+    ) -> dict[str, Any]:
         """
         Generate interest rate scenarios using Hull-White model.
 
@@ -154,6 +159,11 @@ class HullWhiteModel:
             lim_low: Lower limit for continuous rates (to filter explosive scenarios)
             max_retries: Maximum percentage of scenarios to retry if filtered (0-50)
             use_antithetic: Whether to use antithetic variates for variance reduction
+            filter_explosive: retirer et régénérer les chemins qui sortent de
+                [lim_low, lim_high]. Ce tri tronque la distribution des taux et
+                casse les paires antithétiques ; ``False`` garde tous les chemins
+                (le modèle est gaussien, un taux négatif n'est pas aberrant) et
+                se contente de compter ceux qui sortent des bornes.
 
         Returns:
             Dictionary containing:
@@ -161,6 +171,8 @@ class HullWhiteModel:
                 - 'Rt': Instantaneous forward rates (n_scenarios × n_steps)
                 - 'deflators': Deflator paths (n_scenarios × n_steps)
                 - 'residuals': Extracted residuals for correlation (n_scenarios × n_steps)
+                - 'n_out_of_bounds': nombre de chemins tirés qui sortent des
+                  bornes (retirés si ``filter_explosive``, gardés sinon)
         """
         # Ensure even number of scenarios for antithetic variates
         n_sim = self.n_scenarios // 2 * 2 if use_antithetic else self.n_scenarios
@@ -219,10 +231,19 @@ class HullWhiteModel:
             Tp += self.dt
             tp += self.dt
 
-        # Filter explosive scenarios
-        Rt, rt = self._filter_explosive_scenarios(
-            Rt, rt, lim_high, lim_low, max_retries, use_antithetic
+        n_out_of_bounds = int(
+            np.sum(self._out_of_bounds(Rt, np.log(1 + lim_high), np.log(1 + lim_low)))
         )
+        if filter_explosive:
+            Rt, rt = self._filter_explosive_scenarios(
+                Rt, rt, lim_high, lim_low, max_retries, use_antithetic
+            )
+        elif n_out_of_bounds:
+            logger.info(
+                "%d chemin(s) de taux sur %d sortent de [%.1f %% ; %.1f %%], gardés "
+                "(filtre des taux explosifs désactivé)",
+                n_out_of_bounds, len(Rt), 100 * lim_low, 100 * lim_high,
+            )
 
         # Calculate deflators
         deflators = self._calculate_deflators(Rt)
@@ -234,7 +255,8 @@ class HullWhiteModel:
             'rt': rt,
             'Rt': Rt,
             'deflators': deflators,
-            'residuals': residuals
+            'residuals': residuals,
+            'n_out_of_bounds': n_out_of_bounds,
         }
 
     def log_deflator_loadings(self) -> np.ndarray:
@@ -266,6 +288,12 @@ class HullWhiteModel:
         loadings[:, 0] = 0.0
         return loadings
 
+    @staticmethod
+    def _out_of_bounds(Rt: np.ndarray, high: float, low: float) -> np.ndarray:
+        """Chemins dont un taux de période sort de [low, high] (taux continus)."""
+        mask: np.ndarray = np.any(Rt > high, axis=1) | np.any(Rt < low, axis=1)
+        return mask
+
     def _filter_explosive_scenarios(
         self,
         Rt: np.ndarray,
@@ -294,9 +322,7 @@ class HullWhiteModel:
         lim_low_cont = np.log(1 + lim_low)
 
         # Find scenarios exceeding limits
-        high_mask = np.any(Rt > lim_high_cont, axis=1)
-        low_mask = np.any(Rt < lim_low_cont, axis=1)
-        bad_scenarios = high_mask | low_mask
+        bad_scenarios = self._out_of_bounds(Rt, lim_high_cont, lim_low_cont)
 
         n_bad = np.sum(bad_scenarios)
         pct_removed = n_bad / len(Rt) * 100
@@ -314,7 +340,15 @@ class HullWhiteModel:
         # Regenerate removed scenarios if below 50% threshold
         n_needed = self.n_scenarios - len(Rt)
 
-        if n_needed > 0 and pct_removed < max_retries:
+        if n_needed > 0 and pct_removed >= max_retries:
+            raise RuntimeError(
+                f"{pct_removed:.1f} % des chemins de taux sortent des bornes, au-delà du "
+                f"seuil de régénération ({max_retries} %) : la dynamique Hull-White "
+                f"(a={self.a}, sigma={self.sigma}) est incompatible avec ces bornes. "
+                f"Élargissez lim_high/lim_low ou passez filter_explosive=False."
+            )
+
+        if n_needed > 0:
             # Recursively generate replacement scenarios
             Rt_new, rt_new = self._generate_replacement_scenarios(
                 n_needed, lim_high_cont, lim_low_cont, use_antithetic
@@ -392,12 +426,12 @@ class HullWhiteModel:
             if np.sum(good_scenarios) >= n_needed:
                 return Rt_new[good_scenarios][:n_needed], rt_new[good_scenarios][:n_needed]
 
-        # If max attempts reached, return what we have
-        warnings.warn(
-            f"Could not generate {n_needed} non-explosive scenarios after {max_attempts} attempts",
-            stacklevel=2,
+        raise RuntimeError(
+            f"Impossible de régénérer {n_needed} chemin(s) de taux dans les bornes en "
+            f"{max_attempts} tentatives : la dynamique Hull-White (a={self.a}, "
+            f"sigma={self.sigma}) sort trop souvent de [lim_low, lim_high]. Élargissez "
+            f"les bornes ou passez filter_explosive=False."
         )
-        return Rt_new[:n_needed], rt_new[:n_needed]
 
     def _calculate_deflators(self, Rt: np.ndarray) -> np.ndarray:
         """
@@ -450,6 +484,83 @@ class HullWhiteModel:
             residuals[:, i + 1] = (rt[:, i + 1] - drift) / np.sqrt(L_dt)
 
         return residuals
+
+    def zero_coupon_prices(self, rt: np.ndarray, i: int, n_maturities: int) -> np.ndarray:
+        """
+        Prix zéro-coupon P(t_i, t_i + k·dt), k = 1 à n_maturities, en forme fermée.
+
+        ln P(t, T) = ln(P(0, T) / P(0, t)) + B·f(0, t) - L(t)/2·B² - B·r(t),
+        avec B = K(T - t). C'est la formule dont ``Rt`` est le cas k = 1 :
+        ``Rt[:, i + 1] = -ln P(t_i, t_{i+1})``, donc ces prix sont cohérents
+        avec les déflateurs (E[D(t)·P(t, T)] = P(0, T)).
+
+        Args:
+            rt: taux court r(t_i), un par scénario.
+            i: indice de t_i sur la grille (t_i = i·dt).
+            n_maturities: nombre de maturités, en pas de temps.
+
+        Returns:
+            Prix (n_scénarios × n_maturities).
+
+        Raises:
+            ValueError: la courbe initiale ne couvre pas t_i + n_maturities·dt.
+        """
+        if i + n_maturities >= len(self.P0t):
+            raise ValueError(
+                f"La courbe initiale compte {len(self.P0t)} points : il en faut "
+                f"{i + n_maturities + 1} pour valoriser {n_maturities} pas après t_{i}. "
+                f"Chargez la courbe sur un horizon plus long."
+            )
+        k = np.arange(1, n_maturities + 1)
+        B = (1 - np.exp(-self.a * k * self.dt)) / self.a if self.a != 0 else k * self.dt
+        log_ratio = np.log(self.P0t[i + 1:i + n_maturities + 1] / self.P0t[i])
+        L_t = self.L(i * self.dt, self.sigma, self.a)
+        log_prices = (
+            log_ratio + B * self.f0t[i] - 0.5 * L_t * B**2
+        )[None, :] - np.outer(rt, B)
+        prices: np.ndarray = np.exp(log_prices)
+        return prices
+
+    def bond_fund_returns(
+        self, rt: np.ndarray, maturity_steps: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Rendement d'un fonds obligataire à maturité constante, sans risque de crédit.
+
+        Chaque période, le fonds achète au pair une obligation de maturité
+        ``maturity_steps`` pas, à coupon de pair, et la revend une période plus
+        tard (portage d'``Oblig_V1.R``). Rendement simple de la période
+        ]t_{i-1}, t_i] : coupon + prix de l'obligation en t_i - 1.
+
+        Args:
+            rt: taux courts (n_scénarios × n_steps), sortie ``'rt'`` de
+                ``generate_scenarios``.
+            maturity_steps: maturité de l'obligation achetée, en pas de temps (≥ 1).
+
+        Returns:
+            ``(total_returns, coupons)``, chacun (n_scénarios × n_steps), rendements
+            simples de période, colonne 0 nulle (instant t = 0). Le coupon est la
+            part distribuée ; le reste est la variation de prix.
+        """
+        if maturity_steps < 1:
+            raise ValueError(
+                f"La maturité du fonds obligataire doit valoir au moins un pas, "
+                f"reçu {maturity_steps}. Corrigez bond.fund_maturity_years."
+            )
+        n_scenarios, n_steps = rt.shape
+        total_returns = np.zeros((n_scenarios, n_steps))
+        coupons = np.zeros((n_scenarios, n_steps))
+        m = maturity_steps
+        for i in range(1, n_steps):
+            issue = self.zero_coupon_prices(rt[:, i - 1], i - 1, m)
+            coupon = (1 - issue[:, -1]) / issue.sum(axis=1)
+            value = coupon + 1.0  # une obligation d'un pas rembourse le pair
+            if m > 1:
+                later = self.zero_coupon_prices(rt[:, i], i, m - 1)
+                value = coupon + coupon * later.sum(axis=1) + later[:, -1]
+            total_returns[:, i] = value - 1.0
+            coupons[:, i] = coupon
+        return total_returns, coupons
 
     def bond_price(self, t: float, T: float, rt: float) -> float:
         """

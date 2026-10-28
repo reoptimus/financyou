@@ -88,3 +88,26 @@ def test_flux_crd_translation_matches_r(case: dict[str, Any]) -> None:
     principal, interest = r_flux_crd(case["horiz"], case["annuite"], case["taux"], case["an_rest"])
     np.testing.assert_array_equal(principal, case["principal"])
     np.testing.assert_array_equal(interest, case["interest"])
+
+
+@pytest.mark.parametrize("case", R_OUTPUTS["rental"]["revenu"], ids=str)
+def test_recalcul_revenu_translation_matches_r(case: dict[str, Any]) -> None:
+    from tests.reference_r.rental import r_recalcul_revenu
+
+    assert r_recalcul_revenu(case["nom"], case["montant"], np.zeros(1)) == pytest.approx(
+        case["output"]
+    )
+
+
+def test_rental_chrono_translation_matches_r() -> None:
+    from tests.reference_r.rental import r_chrono_location, r_emprunt
+
+    case = R_OUTPUTS["rental"]["chrono"]
+    assert r_emprunt(case["annuite"], case["tau"], case["n"]) + 20_000 == pytest.approx(
+        case["montant"]
+    )
+    rows = r_chrono_location(
+        20, case["debut_optim"], case["revenu"], case["annuite"], case["tau"], case["n"]
+    )
+    for name in ("revenu", "principal", "interet"):
+        np.testing.assert_allclose(rows[name], case["output"][name], atol=1e-9)

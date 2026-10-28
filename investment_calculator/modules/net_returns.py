@@ -113,6 +113,10 @@ def _distributed_yield(series: str, returns: np.ndarray) -> np.ndarray:
     if series == "stock_return":
         return np.full_like(returns, load_market_assumptions().dividend_yield)
     if series == "bond_return":
+        # Approximation pour un fonds de distribution : toute la part positive
+        # du rendement total est traitée comme un coupon distribué, sans report
+        # des années de perte, ce qui surimpose un fonds à duration. Un fonds de
+        # capitalisation (support.income = accumulating) ne passe pas ici.
         clipped: np.ndarray = np.clip(returns, 0.0, None)
         return clipped
     raise NotImplementedError(
@@ -243,7 +247,8 @@ def build_net_returns(
             income_rate = regime.resolve_income_tax_rate(
                 rule, taxable_amount=1.0
             ) + regime.resolve_social_rate(rule)
-            income_yield = _distributed_yield(str(series), returns)
+            if placement["support"].get("income", "distributing") == "distributing":
+                income_yield = _distributed_yield(str(series), returns)
         value, basis = _paths(returns, entry_fees[pid], income_yield, income_rate)
 
         seniority = float(profile.wrapper_seniority.get(wrapper, 0.0))

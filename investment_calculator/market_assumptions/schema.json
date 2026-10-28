@@ -171,10 +171,15 @@
       "type": "object",
       "required": ["mean", "volatility"],
       "additionalProperties": false,
-      "description": "Rendement obligataire utilisé par le chemin de génération simple. Extraction fidèle des anciens littéraux, jamais confrontée à une source de marché.",
+      "description": "Rendement obligataire. mean et volatility servent au chemin de génération simple : extraction fidèle des anciens littéraux, jamais confrontée à une source de marché. fund_maturity_years sert au chemin stochastique.",
       "properties": {
         "mean": { "type": "number" },
-        "volatility": { "type": "number", "exclusiveMinimum": 0 }
+        "volatility": { "type": "number", "exclusiveMinimum": 0 },
+        "fund_maturity_years": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Maturité, en années, de l'obligation au pair que le fonds obligataire du chemin stochastique achète chaque période et revend une période plus tard."
+        }
       }
     },
 
