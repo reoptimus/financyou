@@ -21,6 +21,7 @@ References:
 
 import logging
 import warnings
+from typing import Any
 
 import numpy as np
 
@@ -145,7 +146,7 @@ class HullWhiteModel:
         max_retries: int = 50,
         use_antithetic: bool = True,
         filter_explosive: bool = True,
-    ) -> dict[str, np.ndarray]:
+    ) -> dict[str, Any]:
         """
         Generate interest rate scenarios using Hull-White model.
 
