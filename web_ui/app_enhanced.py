@@ -455,6 +455,9 @@ def display_results(results):
     })
     st.dataframe(weights.style.format({'Part': '{:.1%}'}), use_container_width=True)
     st.caption(optimization['constraints_explanation'])
+    for placement_id, reason in optimization.get('excluded_placements', {}).items():
+        st.info(f"{catalog.placement(placement_id)['label']} : {reason} "
+                "Saisissez le budget du foyer pour le proposer.")
 
     waterfall = optimization.get('wealth_waterfall')
     if waterfall is not None:

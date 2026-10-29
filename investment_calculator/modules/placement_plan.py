@@ -35,7 +35,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from investment_calculator.modules.net_returns import TaxProfile, build_net_returns
+from investment_calculator.modules.net_returns import (
+    TaxProfile,
+    build_net_returns,
+    without_unpriced_placements,
+)
 from investment_calculator.modules.placement_optimizer import (
     efficient_frontier,
     optimize_horizon,
@@ -99,6 +103,7 @@ def plan_placements(
     max_equity: float | None = None,
     min_bond: float | None = None,
     holdings: tuple[Holding, ...] = (),
+    marginal_income_tax_rate: float | None = None,
 ) -> dict[str, Any]:
     """
     Allocation optimale entre les placements du catalogue et patrimoine projeté.
@@ -122,12 +127,17 @@ def plan_placements(
             réallouée, s'ajoute au patrimoine projeté, donne son ancienneté à son
             enveloppe et s'impute sur les plafonds à vie. L'optimisation ne porte
             que sur les nouveaux versements.
+        marginal_income_tax_rate: tranche marginale du foyer, qui impose les
+            revenus fonciers des SCPI détenues en direct. Sans elle, ces
+            placements sont écartés (``excluded_placements`` dans le résultat).
 
     Raises:
         ValueError: placement de référence inconnu, ou entrées refusées par
             les modules appelés.
     """
-    gross = build_gross_placements(scenarios, catalog)
+    gross, excluded = without_unpriced_placements(
+        build_gross_placements(scenarios, catalog), catalog, marginal_income_tax_rate
+    )
     placement_ids = list(gross.columns)
     if risk_free_placement is not None and risk_free_placement not in placement_ids:
         raise ValueError(
@@ -155,7 +165,7 @@ def plan_placements(
         existing[wrapper] = existing.get(wrapper, 0.0) + holding.contributions
     profile = TaxProfile(
         invested_amount=total + sum(existing.values()), couple=couple,
-        wrapper_seniority=seniority,
+        wrapper_seniority=seniority, marginal_income_tax_rate=marginal_income_tax_rate,
     )
     net = build_net_returns(gross, catalog, profile, [horizon])
     constraints = placement_constraints(
@@ -216,6 +226,8 @@ def plan_placements(
         "constraints_explanation": constraints.explanation,
         "known_gaps": catalog.known_gaps,
     }
+    if excluded:
+        results["excluded_placements"] = excluded
     if holdings:
         results["existing_holdings"] = [
             {"placement": h.placement_id, "value": h.value,
