@@ -9,9 +9,9 @@ marché n'a de valeur par défaut.
 
 L'année d'achat, l'apport sort de l'épargne et le crédit commence : sa
 première annuité est payée cette année-là. Les loyers sont encaissés dès
-cette année et suivent l'évolution saisie, comme les charges. Ce module ne
-calcule que les flux du bien : leur imposition et leur entrée dans le budget du
-foyer viennent à l'étape suivante.
+cette année et suivent l'évolution saisie, comme les charges. Leur imposition
+est celle de :func:`household_tax.rental_taxable_income`, et
+:func:`household_budget.household_budget` ajoute ces flux au budget du foyer.
 
 Équivalent R : ``fct_recalcul_revenu.R`` (loyer d'un bien loué), le calcul de
 l'emprunt de ``fct_discret_optim.R`` et la branche « location » de
@@ -49,8 +49,6 @@ logger = logging.getLogger(__name__)
 __all__ = ["KNOWN_GAPS", "RentalProperty", "loan_annuity", "property_flows"]
 
 KNOWN_GAPS = [
-    "Les loyers ne sont pas encore imposés ni ajoutés au budget du foyer : ce module "
-    "ne donne que les flux du bien.",
     "La valeur du bien n'entre pas dans le patrimoine : l'apport et le capital "
     "remboursé sortent de l'épargne sans contrepartie. La revente et la plus-value "
     "immobilière ne sont pas encore portées.",

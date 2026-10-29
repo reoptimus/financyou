@@ -26,10 +26,14 @@ sur deux points :
 2. **Impôt avec plafonnement.** L'impôt est celui de :mod:`household_tax`
    (plafonnement du quotient familial compris, absent du R).
 
+Les biens loués nus (:mod:`rental_property`) ajoutent leurs loyers, leurs
+charges, leurs annuités, leur apport et leur impôt (barème et prélèvements
+sociaux sur le revenu foncier). Les dépenses courantes restent celles de la
+situation actuelle, sans ces biens.
+
 Limites déclarées (``KNOWN_GAPS``) : les dépenses ne suivent pas la
 composition du foyer, car les unités de consommation du R ne sont pas
-sourcées. Les pensions alimentaires et les revenus locatifs ne sont pas encore
-portés.
+sourcées. Les pensions alimentaires ne sont pas portées.
 """
 
 from __future__ import annotations
@@ -43,7 +47,13 @@ import numpy as np
 import pandas as pd
 
 from investment_calculator.modules.household_loans import Loan, loans_total
-from investment_calculator.modules.household_tax import income_tax_by_year, shares_by_year
+from investment_calculator.modules.household_tax import (
+    income_tax_by_year,
+    rental_social_tax,
+    rental_taxable_income,
+    shares_by_year,
+)
+from investment_calculator.modules.rental_property import RentalProperty, property_flows
 from investment_calculator.tax_regime import TaxRegime
 
 logger = logging.getLogger(__name__)
@@ -54,8 +64,6 @@ KNOWN_GAPS = [
     "Les dépenses courantes ne suivent pas la composition du foyer : les unités de "
     "consommation (naissance, départ d'un enfant) ne sont pas encore sourcées.",
     "Les pensions alimentaires versées ou reçues ne sont pas portées.",
-    "Les revenus locatifs et leur imposition ne sont pas portés : ils viendront avec "
-    "l'immobilier à crédit.",
 ]
 
 
@@ -130,6 +138,7 @@ def household_budget(
     loans: Sequence[Loan] = (),
     dependent_years: Sequence[int] = (),
     expenses_follow_income: bool,
+    properties: Sequence[RentalProperty] = (),
 ) -> pd.DataFrame:
     """
     Budget du foyer, une ligne par année de 0 à ``horizon``.
@@ -144,10 +153,13 @@ def household_budget(
         dependent_years: pour chaque personne à charge, nombre d'années à charge.
         expenses_follow_income: les dépenses suivent les revenus d'activité et
             de pension (sinon elles restent constantes).
+        properties: biens achetés à crédit pour être loués nus.
 
     Returns:
-        Colonnes ``salaries``, ``pensions``, ``income_tax``, ``rent``,
-        ``loan_payments``, ``expenses`` et ``free_savings``.
+        Colonnes ``salaries``, ``pensions``, ``income_tax`` (loyers compris),
+        ``rent``, ``loan_payments`` (biens loués compris), ``expenses``,
+        ``rental_income`` (loyers encaissés), ``property_charges``,
+        ``rental_social_tax``, ``down_payments`` et ``free_savings``.
 
     Raises:
         ValueError: nombre d'adultes autre que 1 ou 2, ou épargne actuelle
@@ -169,6 +181,7 @@ def household_budget(
     payments = (schedule["interest"] + schedule["principal"]).to_numpy()
     rent_paid = np.full(horizon + 1, float(rent))
 
+    # Les dépenses viennent de la situation déclarée, sans les biens à acheter.
     expenses_0 = taxable[0] - tax[0] - rent_paid[0] - payments[0] - current_savings
     if expenses_0 < 0:
         raise ValueError(
@@ -185,7 +198,22 @@ def household_budget(
         expenses = expenses_0 * taxable / taxable[0]
     else:
         expenses = np.full(horizon + 1, expenses_0)
-    free = taxable - tax - rent_paid - payments - expenses
+    flows = [property_flows(p, horizon) for p in properties]
+    zero = np.zeros(horizon + 1)
+    rental = sum((f["collected_rent"].to_numpy() for f in flows), zero)
+    charges = sum((f["charges"].to_numpy() for f in flows), zero)
+    down = sum((f["down_payment"].to_numpy() for f in flows), zero)
+    social = zero
+    if flows:
+        rental_taxable = rental_taxable_income(
+            regime, [f["collected_rent"].tolist() for f in flows]
+        )
+        tax = income_tax_by_year(regime, (taxable + rental_taxable).tolist(), shares)
+        social = rental_social_tax(regime, rental_taxable.tolist())
+        payments = payments + sum(
+            (f["interest"].to_numpy() + f["principal"].to_numpy() for f in flows), zero
+        )
+    free = taxable - tax - rent_paid - payments - expenses + rental - charges - social - down
     if (free < 0).any():
         logger.warning(
             "Épargne libre négative aux années %s : le foyer puise dans son capital.",
@@ -195,7 +223,8 @@ def household_budget(
         {
             "salaries": salaries, "pensions": pensions, "income_tax": tax,
             "rent": rent_paid, "loan_payments": payments, "expenses": expenses,
-            "free_savings": free,
+            "rental_income": rental, "property_charges": charges,
+            "rental_social_tax": social, "down_payments": down, "free_savings": free,
         },
         index=pd.RangeIndex(horizon + 1, name="year"),
     )
