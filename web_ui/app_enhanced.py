@@ -20,7 +20,7 @@ from investment_calculator.placement_catalog import (
     list_placement_catalogs,
     load_placement_catalog,
 )
-from web_ui.pipeline import build_profile_config, build_projects, run_projection
+from web_ui.pipeline import build_profile_config, build_projects, build_property, run_projection
 
 st.set_page_config(
     page_title="FinancYou",
@@ -35,7 +35,16 @@ PAGES = {
     "💼 Épargne existante": "Holdings",
     "🎯 Projets": "Projects",
     "🏡 Budget du foyer": "Budget",
+    "🏢 Investissement locatif": "Rentals",
     "📊 Projection": "Projection",
+}
+
+RENTAL_LABELS = {
+    'name': 'Bien', 'price': 'Coût total (€)', 'down_payment': 'Apport (€)',
+    'loan_rate': 'Taux', 'loan_years': 'Durée', 'gross_yield': 'Rendement brut',
+    'collected_share': 'Part encaissée', 'annual_charges': 'Charges (€)',
+    'rent_growth': 'Évolution du loyer', 'purchase_year': 'Achat (année)',
+    'market_value': 'Valeur hors frais (€)',
 }
 
 
@@ -43,7 +52,7 @@ def init_session_state():
     """Initialiser l'état de session."""
     defaults = {
         'form': None, 'holdings': [], 'projects': [], 'available_savings': None,
-        'budget': None, 'loans': [],
+        'budget': None, 'loans': [], 'properties': [],
         'results': None, 'page': 'Home',
     }
     for key, value in defaults.items():
@@ -407,6 +416,70 @@ def page_budget():
         st.rerun()
 
 
+def page_rentals():
+    """Biens achetés à crédit pour être loués nus ; ils entrent dans le budget du foyer."""
+    st.markdown("# 🏢 Investissement locatif")
+    st.markdown(
+        "Un bien acheté à crédit et loué nu : l'apport, les annuités, les loyers, les "
+        "charges et l'impôt (micro-foncier) entrent dans le budget du foyer. Les "
+        "hypothèses du bien sont les vôtres, sans valeur par défaut ; sa valeur suit "
+        "ensuite les scénarios immobiliers du GSE."
+    )
+    if st.session_state.budget is None:
+        st.info("Ces biens ne comptent qu'avec un budget du foyer enregistré.")
+    properties = st.session_state.properties
+    if properties:
+        st.dataframe(pd.DataFrame(properties).rename(columns=RENTAL_LABELS),
+                     use_container_width=True)
+        if st.button("🗑️ Retirer le dernier bien"):
+            properties.pop()
+            st.session_state.results = None
+            st.rerun()
+    with st.form("add_property"):
+        name = st.text_input("Nom du bien")
+        col1, col2 = st.columns(2)
+        with col1:
+            price = st.number_input("Coût total de l'achat, frais compris (€)", 0.0, None,
+                                    None, 5000.0)
+            market_value = st.number_input("Valeur du bien hors frais (€)", 0.0, None, None,
+                                           5000.0)
+            down = st.number_input("Apport (€)", 0.0, None, None, 5000.0)
+            rate = st.number_input("Taux du crédit (%)", 0.0, 30.0, None, 0.1)
+            years = st.number_input("Durée du crédit (années)", 0, 40, None, 1)
+            purchase = st.number_input("Achat dans (années, 0 = cette année)", 0, 60, None, 1)
+        with col2:
+            gross_yield = st.number_input("Loyer annuel hors charges / coût total (%)",
+                                          0.0, 30.0, None, 0.1)
+            collected = st.number_input("Part du loyer encaissée (vacance, impayés) (%)",
+                                        0.0, 100.0, None, 1.0)
+            charges = st.number_input("Charges annuelles du propriétaire (€)", 0.0, None,
+                                      None, 100.0)
+            rent_growth = st.number_input("Évolution du loyer et des charges (%/an)",
+                                          -20.0, 20.0, None, 0.1)
+        submitted = st.form_submit_button("➕ Ajouter le bien")
+    if submitted:
+        values = (price, market_value, down, rate, years, purchase, gross_yield, collected,
+                  charges, rent_growth)
+        if not name.strip() or None in values:
+            st.error("Renseignez tous les champs : aucune hypothèse n'est prise à votre place.")
+            return
+        row = {
+            'name': name.strip(), 'price': price, 'down_payment': down,
+            'loan_rate': rate / 100, 'loan_years': int(years),
+            'gross_yield': gross_yield / 100, 'collected_share': collected / 100,
+            'annual_charges': charges, 'rent_growth': rent_growth / 100,
+            'purchase_year': int(purchase), 'market_value': market_value,
+        }
+        try:
+            build_property(row)
+        except ValueError as exc:
+            st.error(str(exc))
+            return
+        properties.append(row)
+        st.session_state.results = None
+        st.rerun()
+
+
 def page_projection():
     """Calcul et résultats."""
     st.markdown("# 📊 Projection")
@@ -498,9 +571,17 @@ def display_budget(budget):
     table = budget['table'].rename(columns={
         'salaries': 'Revenus d\'activité', 'pensions': 'Pensions', 'income_tax': 'Impôt',
         'rent': 'Loyer', 'loan_payments': 'Annuités', 'expenses': 'Dépenses',
+        'rental_income': 'Loyers encaissés', 'property_charges': 'Charges des biens',
+        'rental_social_tax': 'Prélèvements sociaux (loyers)', 'down_payments': 'Apports',
         'free_savings': 'Épargne libre',
     })
     st.line_chart(table['Épargne libre'])
+    if 'property_equity' in budget:
+        st.markdown("Valeur nette des biens loués selon les scénarios immobiliers : valeur "
+                    "moins capital restant dû, avant frais et impôt de revente")
+        st.line_chart(budget['property_equity'].rename(columns={
+            'p5': '5 % des scénarios', 'median': 'Médiane', 'p95': '95 % des scénarios',
+        }))
     st.dataframe(table.style.format('{:,.0f}'), use_container_width=True)
     with st.expander("Limites connues du budget"):
         for gap in budget['known_gaps']:
@@ -532,7 +613,10 @@ def display_tranche_plan(plan, catalog):
 
 def _budget_with_loans():
     budget = st.session_state.budget
-    return None if budget is None else {**budget, 'loans': st.session_state.loans}
+    if budget is None:
+        return None
+    return {**budget, 'loans': st.session_state.loans,
+            'properties': st.session_state.properties}
 
 
 def run_analysis(form):
@@ -569,6 +653,8 @@ def main():
         page_projects()
     elif page == 'Budget':
         page_budget()
+    elif page == 'Rentals':
+        page_rentals()
     elif page == 'Projection':
         page_projection()
     else:

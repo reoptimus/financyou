@@ -8,6 +8,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from investment_calculator.modules.rental_property import KNOWN_GAPS as RENTAL_GAPS
 from web_ui.pipeline import build_profile_config, build_projects, run_projection
 
 
@@ -286,3 +287,75 @@ def test_budget_saisi_dans_l_application() -> None:
     _click(app, 'Lancer')
     assert not app.exception and not app.error
     assert any('Budget du foyer' in m.value for m in app.markdown)
+
+
+# --- Investissement locatif -----------------------------------------------------
+
+FLAT = {
+    'name': 'studio', 'price': 160_000.0, 'down_payment': 30_000.0, 'loan_rate': 0.035,
+    'loan_years': 20, 'gross_yield': 0.045, 'collected_share': 0.9, 'annual_charges': 1_500.0,
+    'rent_growth': 0.01, 'purchase_year': 2, 'market_value': 145_000.0,
+}
+
+
+def test_un_bien_loue_entre_dans_le_budget() -> None:
+    config = build_profile_config({**FORM, 'retirement_age': 55, 'holdings': []})
+    kwargs = dict(num_scenarios=20, catalog_id='fr-2026', risk_aversion=5.0,
+                  risk_free_placement=None, couple=True)
+    without = run_projection(config, budget=BUDGET, **kwargs)['budget']
+    with_flat = run_projection(config, budget={**BUDGET, 'properties': [FLAT]}, **kwargs)['budget']
+    table = with_flat['table']
+    # Avant l'achat, rien ne change ; l'année d'achat, l'apport sort de l'épargne.
+    np.testing.assert_allclose(table['free_savings'][:2], without['table']['free_savings'][:2])
+    assert table['down_payments'][2] == 30_000.0
+    assert table['free_savings'][2] < without['table']['free_savings'][2] - 25_000.0
+    # Valeur nette selon les scénarios : nulle avant l'achat, valeur saisie moins
+    # emprunt l'année d'achat, puis dispersée par l'indice immobilier du GSE.
+    bands = with_flat['property_equity']
+    assert (bands.loc[1] == 0.0).all()
+    np.testing.assert_allclose(bands.loc[2], 145_000.0 - 130_000.0)
+    last = bands.iloc[-1]
+    assert last['p5'] < last['median'] < last['p95']
+    assert all(gap in with_flat['known_gaps'] for gap in RENTAL_GAPS)
+    assert not any(gap in without['known_gaps'] for gap in RENTAL_GAPS)
+    assert 'property_equity' not in without
+
+
+def test_bien_saisi_dans_l_application() -> None:
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file('../web_ui/app_enhanced.py', default_timeout=60).run()
+    app.session_state['form'] = {**{k: v for k, v in FORM.items() if k != 'holdings'},
+                                 'retirement_age': 55}
+    app.session_state['budget'] = {k: v for k, v in BUDGET.items() if k != 'loans'}
+    app.session_state['page'] = 'Rentals'
+    app.run()
+    assert not app.exception
+    app.text_input[0].set_value('studio')
+    # Ordre des champs : colonne de gauche, puis de droite.
+    values = (160_000.0, 145_000.0, 30_000.0, 3.5, 20, 2, 4.5, 90.0, 1_500.0, 1.0)
+    for field, value in zip(app.number_input, values, strict=True):
+        field.set_value(value)
+    _click(app, 'Ajouter le bien')
+    assert not app.error
+    saved = app.session_state['properties'][0]
+    assert saved.keys() == FLAT.keys()
+    for key, value in FLAT.items():
+        assert saved[key] == (value if isinstance(value, str) else pytest.approx(value))
+    app.session_state['page'] = 'Projection'
+    app.run()
+    _click(app, 'Lancer')
+    assert not app.exception and not app.error
+    assert any('Valeur nette des biens' in m.value for m in app.markdown)
+
+
+def test_un_bien_incomplet_est_refuse_dans_l_application() -> None:
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file('../web_ui/app_enhanced.py', default_timeout=60).run()
+    app.session_state['page'] = 'Rentals'
+    app.run()
+    app.text_input[0].set_value('studio')
+    _click(app, 'Ajouter le bien')
+    assert app.error and "aucune hypothèse" in app.error[0].value
+    assert app.session_state['properties'] == []

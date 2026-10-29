@@ -17,6 +17,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from investment_calculator.market_assumptions import load_market_assumptions
 from investment_calculator.modules import scenario_generator, user_profile
 from investment_calculator.modules.capital_tranches import split_into_tranches
 from investment_calculator.modules.household_budget import KNOWN_GAPS as BUDGET_GAPS
@@ -30,6 +31,12 @@ from investment_calculator.modules.placement_optimizer import (
 )
 from investment_calculator.modules.placement_plan import plan_placements, profile_holdings
 from investment_calculator.modules.placements import build_gross_placements
+from investment_calculator.modules.rental_property import KNOWN_GAPS as RENTAL_GAPS
+from investment_calculator.modules.rental_property import (
+    RentalProperty,
+    property_flows,
+    property_values,
+)
 from investment_calculator.modules.tranche_allocation import (
     assemble_allocation,
     required_horizons,
@@ -82,8 +89,9 @@ def build_budget(
 
     ``budget`` porte ``earners`` (``taxable_income``, ``annual_growth``,
     ``retirement_year``, ``replacement_rate``), ``rent``, ``loans`` (``name``,
-    ``annual_payment``, ``rate``, ``years_left``), ``dependent_years`` et
-    ``expenses_follow_income``. ``annual_savings_now`` est l'épargne actuelle
+    ``annual_payment``, ``rate``, ``years_left``), ``dependent_years``,
+    ``expenses_follow_income`` et ``properties`` (champs de
+    :class:`RentalProperty`). ``annual_savings_now`` est l'épargne actuelle
     du profil, sur un an : elle fixe les dépenses courantes.
 
     Raises:
@@ -100,11 +108,53 @@ def build_budget(
         Loan(str(c['name']), float(c['annual_payment']), float(c['rate']), int(c['years_left']))
         for c in budget.get('loans', [])
     ]
-    return household_budget(
+    properties = [build_property(p) for p in budget.get('properties', [])]
+    table = household_budget(
         catalog.regime, earners, horizon=horizon, current_savings=annual_savings_now,
         rent=float(budget['rent']), loans=loans,
         dependent_years=[int(n) for n in budget.get('dependent_years', [])],
         expenses_follow_income=bool(budget['expenses_follow_income']),
+        properties=properties,
+    )
+    return table
+
+
+def property_equity_bands(
+    budget: Mapping[str, Any], scenarios: pd.DataFrame, horizon: int
+) -> pd.DataFrame:
+    """
+    Valeur nette des biens loués en début d'année : 5e centile, médiane et 95e
+    centile sur les scénarios du GSE.
+
+    La valeur de chaque bien suit l'indice immobilier de chaque scénario
+    (:func:`property_values`) ; on en retranche le capital restant dû. C'est
+    une valeur avant frais et impôt de revente.
+    """
+    returns = scenarios.pivot(
+        index='scenario_id', columns='time_period', values='real_estate_return'
+    ).to_numpy()[:, :horizon]
+    rental_yield = load_market_assumptions().real_estate_rental_yield
+    equity = np.zeros((returns.shape[0], horizon + 1))
+    for row in budget.get('properties', []):
+        prop = build_property(row)
+        outstanding = property_flows(prop, horizon)['outstanding'].to_numpy()
+        equity += property_values(prop, returns, rental_yield) - outstanding
+    return pd.DataFrame(
+        {'p5': np.percentile(equity, 5, axis=0), 'median': np.median(equity, axis=0),
+         'p95': np.percentile(equity, 95, axis=0)},
+        index=pd.RangeIndex(horizon + 1, name='year'),
+    )
+
+
+def build_property(row: Mapping[str, Any]) -> RentalProperty:
+    """Bien loué saisi dans l'application (taux en fractions, 0,04 pour 4 %)."""
+    return RentalProperty(
+        name=str(row['name']), price=float(row['price']),
+        down_payment=float(row['down_payment']), loan_rate=float(row['loan_rate']),
+        loan_years=int(row['loan_years']), gross_yield=float(row['gross_yield']),
+        collected_share=float(row['collected_share']),
+        annual_charges=float(row['annual_charges']), rent_growth=float(row['rent_growth']),
+        purchase_year=int(row['purchase_year']), market_value=float(row['market_value']),
     )
 
 
@@ -307,7 +357,13 @@ def run_projection(
         flows = contribution_flows(profile_results['investment_time_series'], horizon)
         table = build_budget(budget, catalog=catalog, horizon=horizon,
                              annual_savings_now=float(flows[0]))
-        results['budget'] = {'table': table, 'known_gaps': BUDGET_GAPS}
+        gaps = BUDGET_GAPS + (RENTAL_GAPS if budget.get('properties') else [])
+        budget_results: dict[str, Any] = {'table': table, 'known_gaps': gaps}
+        if budget.get('properties'):
+            budget_results['property_equity'] = property_equity_bands(
+                budget, scenario_results['scenarios'], horizon
+            )
+        results['budget'] = budget_results
         savings = table['free_savings'].tolist()
     if projects:
         if available_savings is None:
