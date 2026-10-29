@@ -9,10 +9,14 @@ deviennent les versements de l'utilisateur répartis selon ces poids :
    rendements de GSE+ (déjà nets des frais annuels) ;
 2. dans une enveloppe imposée au fil de l'eau (le CTO), les revenus distribués
    sont imposés chaque année et leur part nette s'ajoute au prix de revient ;
+   les revenus fonciers de parts de SCPI détenues en direct sont imposés à la
+   tranche marginale du foyer et réinvestis en nouveaux lots, frais d'entrée
+   compris (:mod:`~investment_calculator.modules.real_estate_fund`) ;
 3. à l'horizon, chaque enveloppe est liquidée une fois, sur la somme de ses
    placements, avec l'ancienneté de l'enveloppe : abattement de
    l'assurance-vie et seuil de primes s'appliquent au contrat, pas à chaque
-   versement.
+   versement. Les parts de SCPI détenues en direct sont cédées lot par lot,
+   chaque lot avec son ancienneté.
 
 Chaque euro versé suit l'allocation cible et n'est pas rééquilibré ensuite,
 comme dans GSE++ : la valeur projetée est la somme exacte des trajectoires de
@@ -34,11 +38,22 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from investment_calculator.modules.net_returns import TaxProfile, _distributed_yield
+from investment_calculator.modules.net_returns import (
+    TaxProfile,
+    _distributed_yield,
+    distributes_rental_income,
+    fund_distribution_rate,
+    rental_income_tax_rate,
+)
 from investment_calculator.modules.placements import entry_fee_rates
+from investment_calculator.modules.real_estate_fund import project_distributing
 from investment_calculator.placement_catalog import PlacementCatalog
 from investment_calculator.wrapper_allocation import TOLERANCE
-from investment_calculator.wrapper_tax import liquidation_tax
+from investment_calculator.wrapper_tax import (
+    RealEstateLot,
+    liquidation_tax,
+    real_estate_liquidation_tax,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +99,7 @@ class _WrapperBook:
     taxed: np.ndarray
     paid: float = 0.0
     annual_income: bool = False
+    lots: list[RealEstateLot] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -186,7 +202,7 @@ def simulate_wealth(
             d'une enveloppe est la plus grande entre ``profile.wrapper_seniority``
             et celle de ses avoirs.
         entry_fees, annual_income_tax: ``False`` retire les frais d'entrée, ou
-            l'impôt annuel du compte-titres. Sert uniquement à décomposer le
+            l'impôt annuel sur les revenus distribués. Sert uniquement à décomposer le
             patrimoine (:func:`wealth_waterfall`), jamais à une projection.
 
     Raises:
@@ -221,12 +237,36 @@ def simulate_wealth(
     books: dict[str, _WrapperBook] = {}
     seniority = {w: float(y) for w, y in profile.wrapper_seniority.items()}
 
-    def project(pid: str, paid: np.ndarray, fee: float, value0: float, basis0: float) -> None:
+    def project(
+        pid: str, paid: np.ndarray, fee: float, value0: float, basis0: float, years0: float = 0.0
+    ) -> None:
         """Projeter une position : mise de départ, puis versements de fin d'année."""
         placement = catalog.placement(pid)
         wrapper = str(placement["wrapper"])
         spec = regime.wrapper(wrapper)
         returns = ordered[pid].to_numpy(dtype=float).reshape(n_scenarios, n_periods)[:, :horizon]
+        book = books.setdefault(wrapper, _WrapperBook(
+            np.zeros(n_scenarios), np.zeros(n_scenarios), np.zeros(n_scenarios)
+        ))
+        if distributes_rental_income(regime, wrapper):
+            support = placement["support"]
+            position = project_distributing(
+                returns, paid, entry_fee=fee,
+                distribution_yield=fund_distribution_rate(
+                    str(support.get("series") or support.get("reference_series"))
+                ),
+                income_tax_rate=(
+                    rental_income_tax_rate(regime, profile) if annual_income_tax else 0.0
+                ),
+                initial_value=value0, initial_cost=basis0,
+                initial_years=years0,
+            )
+            paths[:] += position.value
+            book.value += position.value[:, horizon]
+            book.taxed += position.income_tax.sum(axis=1)
+            book.paid += basis0 + float(paid.sum())
+            book.lots.extend(position.lots(horizon))
+            return
         income_yield, income_rate = None, 0.0
         if (annual_income_tax and spec.get("tax_treatment") == "taxable"
                 and not spec.get("growth_taxed_annually")):
@@ -252,9 +292,6 @@ def simulate_wealth(
             value = np.clip(grown, 0.0, None) + paid[t + 1] * (1.0 - fee)
             basis += paid[t + 1]
             paths[:, t + 1] += value
-        book = books.setdefault(wrapper, _WrapperBook(
-            np.zeros(n_scenarios), np.zeros(n_scenarios), np.zeros(n_scenarios)
-        ))
         book.value += value
         book.basis += basis
         book.taxed += taxed
@@ -267,7 +304,10 @@ def simulate_wealth(
     no_flow = np.zeros(horizon + 1)
     for holding in holdings:
         # Ni frais d'entrée ni réallocation : l'avoir garde sa valeur et son prix de revient.
-        project(holding.placement_id, no_flow, 0.0, holding.value, holding.contributions)
+        project(
+            holding.placement_id, no_flow, 0.0, holding.value, holding.contributions,
+            holding.years_held,
+        )
         wrapper = str(catalog.placement(holding.placement_id)["wrapper"])
         seniority[wrapper] = max(seniority.get(wrapper, 0.0), holding.years_held)
 
@@ -276,15 +316,20 @@ def simulate_wealth(
     income_tax: dict[str, np.ndarray] = {}
     exit_tax: dict[str, np.ndarray] = {}
     for wrapper, book in books.items():
-        result = liquidation_tax(
-            regime,
-            wrapper,
-            contributions=book.paid,
-            final_value=book.value,
-            holding_years=seniority.get(wrapper, 0.0) + horizon,
-            couple=profile.couple,
-            cost_basis=book.basis if book.annual_income else None,
-        )
+        if book.lots:
+            result = real_estate_liquidation_tax(
+                regime, wrapper, book.lots, couple=profile.couple
+            )
+        else:
+            result = liquidation_tax(
+                regime,
+                wrapper,
+                contributions=book.paid,
+                final_value=book.value,
+                holding_years=seniority.get(wrapper, 0.0) + horizon,
+                couple=profile.couple,
+                cost_basis=book.basis if book.annual_income else None,
+            )
         net_terminal += result.net_value
         contributions[wrapper] = book.paid
         income_tax[wrapper] = book.taxed
@@ -313,7 +358,7 @@ class WealthWaterfall:
     contributions: float  # nouveaux versements
     market_gains: float  # gains des marchés, sans frais ni impôt
     fees: float  # frais d'entrée et frais annuels du catalogue
-    income_tax: float  # impôt annuel du compte-titres sur les revenus distribués
+    income_tax: float  # impôt annuel sur les revenus distribués (compte-titres, SCPI en direct)
     exit_tax: float  # impôt de sortie à l'horizon
     net_wealth: float
 

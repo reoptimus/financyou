@@ -12,6 +12,12 @@ fait en début de projection, puis liquidé au bout de H ans :
    :func:`investment_calculator.wrapper_tax.liquidation_tax`, qui lit le régime
    fiscal : durée de détention, seuil de primes, abattement selon le foyer.
 
+Les parts de SCPI détenues en direct (enveloppe imposée chaque année au
+barème, ``immobilier_direct``) suivent :mod:`~investment_calculator.modules.real_estate_fund` :
+revenus fonciers imposés à la tranche marginale du foyer, revenus nets
+réinvestis en nouveaux lots, cession lot par lot
+(:func:`investment_calculator.wrapper_tax.real_estate_liquidation_tax`).
+
 Le résultat est le **multiple net** (valeur nette par euro versé) et le
 **rendement net annualisé** ``multiple ** (1 / H) - 1``. Moyenne et covariance
 de ce rendement sur les scénarios, à l'horizon H, sont ce que lit
@@ -32,8 +38,10 @@ import pandas as pd
 
 from investment_calculator.market_assumptions import load_market_assumptions
 from investment_calculator.modules.placements import entry_fee_rates
+from investment_calculator.modules.real_estate_fund import project_distributing
 from investment_calculator.placement_catalog import PlacementCatalog
-from investment_calculator.wrapper_tax import liquidation_tax
+from investment_calculator.tax_regime import TaxRegime
+from investment_calculator.wrapper_tax import liquidation_tax, real_estate_liquidation_tax
 
 logger = logging.getLogger(__name__)
 
@@ -52,17 +60,28 @@ class TaxProfile:
         couple: foyer soumis à imposition commune (abattement doublé).
         wrapper_seniority: ancienneté, en années, des enveloppes déjà ouvertes
             (``{"pea": 6}``) ; une enveloppe absente est ouverte au versement.
+        marginal_income_tax_rate: tranche marginale d'imposition du foyer
+            (:func:`~investment_calculator.modules.household_tax.marginal_rate`).
+            Elle impose les revenus fonciers des parts de SCPI détenues en direct ;
+            sans elle, ces placements ne sont pas projetés.
     """
 
     invested_amount: float
     couple: bool = False
     wrapper_seniority: dict[str, float] = field(default_factory=dict)
+    marginal_income_tax_rate: float | None = None
 
     def __post_init__(self) -> None:
         if self.invested_amount <= 0:
             raise ValueError(
                 f"Le montant versé doit être strictement positif (reçu "
                 f"{self.invested_amount}). Indiquez le montant que l'utilisateur place."
+            )
+        rate = self.marginal_income_tax_rate
+        if rate is not None and not 0.0 <= rate <= 1.0:
+            raise ValueError(
+                f"La tranche marginale doit être entre 0 et 1 (reçu {rate}) : passez "
+                "un taux, par exemple 0.30 pour 30 %."
             )
 
 
@@ -103,6 +122,38 @@ def _distributed_yield(series: str, returns: np.ndarray) -> np.ndarray:
     raise NotImplementedError(
         f"Revenu distribué de la série {series!r} inconnu : seuls stock_return et "
         f"bond_return sont modélisés dans une enveloppe imposée au fil de l'eau."
+    )
+
+
+def distributes_rental_income(regime: TaxRegime, wrapper: str) -> bool:
+    """Vrai pour une enveloppe dont les revenus sont imposés au barème chaque année."""
+    return bool(regime.wrapper(wrapper).get("growth_taxed_annually"))
+
+
+def rental_income_tax_rate(regime: TaxRegime, profile: TaxProfile) -> float:
+    """
+    Impôt sur les revenus fonciers, en fraction des revenus : tranche marginale
+    du foyer et prélèvements sociaux du régime.
+
+    Raises:
+        NotImplementedError: le profil ne donne pas de tranche marginale.
+    """
+    if profile.marginal_income_tax_rate is None:
+        raise NotImplementedError(
+            "Les revenus fonciers des parts détenues en direct sont imposés à la tranche "
+            "marginale du foyer, que ce profil ne donne pas : renseignez "
+            "TaxProfile.marginal_income_tax_rate, ou retirez ces placements du catalogue."
+        )
+    return profile.marginal_income_tax_rate + regime.social_rate
+
+
+def fund_distribution_rate(series: str) -> float:
+    """Revenus distribués chaque année par des parts de SCPI, en fraction de leur valeur."""
+    if series == "real_estate_return":
+        return load_market_assumptions().real_estate_fund_distribution_rate
+    raise NotImplementedError(
+        f"Revenu distribué de la série {series!r} inconnu pour des parts détenues en direct : "
+        "seule real_estate_return est modélisée."
     )
 
 
@@ -172,16 +223,31 @@ def build_net_returns(
         wrapper = placement["wrapper"]
         spec = regime.wrapper(wrapper)
         returns = tensor[:, :, p]
+        series = placement["support"].get("series") or placement["support"].get(
+            "reference_series"
+        )
+        if distributes_rental_income(regime, wrapper):
+            unit = np.zeros(n_periods + 1)
+            unit[0] = 1.0
+            position = project_distributing(
+                returns, unit, entry_fee=entry_fees[pid],
+                distribution_yield=fund_distribution_rate(str(series)),
+                income_tax_rate=rental_income_tax_rate(regime, profile),
+            )
+            for h_index, horizon in enumerate(horizons):
+                sale = real_estate_liquidation_tax(
+                    regime, wrapper, position.lots(horizon, scale=amount), couple=profile.couple
+                )
+                multiples[:, h_index, p] = sale.net_value / amount
+            continue
         income_yield = None
         income_rate = 0.0
-        if spec.get("tax_treatment") == "taxable" and not spec.get("growth_taxed_annually"):
+        if spec.get("tax_treatment") == "taxable":
             rule = regime.select_withdrawal_rule(wrapper, holding_years=0.0)
             income_rate = regime.resolve_income_tax_rate(
                 rule, taxable_amount=1.0
             ) + regime.resolve_social_rate(rule)
-            support = placement["support"]
-            if support.get("income", "distributing") == "distributing":
-                series = support.get("series") or support.get("reference_series")
+            if placement["support"].get("income", "distributing") == "distributing":
                 income_yield = _distributed_yield(str(series), returns)
         value, basis = _paths(returns, entry_fees[pid], income_yield, income_rate)
 

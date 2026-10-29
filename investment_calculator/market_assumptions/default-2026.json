@@ -40,6 +40,12 @@
     {
       "label": "INSEE, rendements immobiliers annuels France hors inflation (61 valeurs, fichier daté du 25/10/2017), legacy/csv_files/Rdt_immo_France_horsinfla_INSEE_20172510.txt, série de Script_calibrage_immo.R. Calage par les moments : a sur l'autocorrélation d'ordre 1 (0,79), σ sur la variance (6,87 %) des rendements annuels. Valeurs validées par Sébastien Gallet le 2026-10-24 (choix « Valider France »).",
       "covers": ["real_estate.dynamics.instantaneous_volatility", "real_estate.dynamics.mean_reversion"]
+    },
+    {
+      "label": "ASPIM/IEIF — Communiqué du 10/02/2026, marché des SCPI au 4e trimestre 2025 : taux de distribution moyen 2025 de 4,91 %",
+      "url": "https://www.aspim.fr/content/uploads/2026/02/ASPIM_CP-4T-2025_V4.pdf",
+      "consulted_on": "2026-10-24",
+      "covers": ["real_estate_fund.distribution_rate"]
     }
   ],
 
@@ -54,12 +60,17 @@
     "equity.volatility, real_estate.dynamics.volatility, rates.risk_free_proxy, bond, inflation, gdp_growth et correlations (étape 1.B.4) restent l'extraction fidèle de littéraux 'US historical averages' codés en dur dans scenario_generator.py et gse.py, jamais vérifiés contre une source de marché réelle ni adaptés au marché français.",
     "rates.hull_white (a=0.1, sigma=0.01) est un PLACEHOLDER (status='placeholder'), pas une calibration : l'étape 1.B.5 (calibration Hull-White sur des prix de swaption réels, portage de legacy/R_scripts/Calib_Taux_Swaptions_V2.R) est différée faute de données de marché disponibles dans ce dépôt (le script R référence un fichier 'Prix_swaptions_bloomberg.Rda' introuvable ici). Tant qu'elle n'est pas menée, le chemin stochastique de ScenarioGenerator utilise une dynamique de taux non calibrée sur le marché. DÉFICIT À COMBLER : le 2026-10-25, Sébastien Gallet a décidé de conserver ces valeurs pour les premiers résultats du papier, en attendant une source de prix ou de volatilités de swaptions EUR.",
     "bond.fund_maturity_years (8 ans) est une hypothèse de modélisation, pas une donnée de marché sourcée : maturité de l'obligation que le fonds obligataire du chemin stochastique achète au pair chaque année (HullWhiteModel.bond_fund_returns). Retenue par Sébastien Gallet le 2026-10-25 comme ordre de grandeur de la duration des actifs des fonds euros d'assurance vie (hors unités de compte), composés d'environ 80 % d'obligations. DÉFICIT À COMBLER : sourcer une duration précise (rapports ACPR ou FFA sur les placements des assureurs) ; une analyse de sensibilité est recommandée avant publication.",
+    "real_estate_fund.distribution_rate (4,91 %) est la moyenne de place d'une seule année (2025, ASPIM/IEIF), appliquée chaque année de la projection et à toute SCPI. C'est une statistique de l'association professionnelle, pas une valeur de loi ni une moyenne longue.",
     "correlations n'est actuellement consommé par aucun des deux chemins de génération de ScenarioGenerator (_generate_simple, _generate_stochastic construit sa propre corrélation via CorrelatedRandomGenerator, qui ignore ce champ) : c'est une configuration sans effet observable, pas seulement une hypothèse non validée. Corrigé indépendamment de la présente extraction — voir docs/journal-1b-calibration.md."
   ],
 
   "equity": {
     "dividend_yield": 0.02,
     "volatility": 0.18
+  },
+
+  "real_estate_fund": {
+    "distribution_rate": 0.0491
   },
 
   "real_estate": {
