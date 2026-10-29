@@ -294,7 +294,7 @@ def test_budget_saisi_dans_l_application() -> None:
 FLAT = {
     'name': 'studio', 'price': 160_000.0, 'down_payment': 30_000.0, 'loan_rate': 0.035,
     'loan_years': 20, 'gross_yield': 0.045, 'collected_share': 0.9, 'annual_charges': 1_500.0,
-    'rent_growth': 0.01, 'purchase_year': 2, 'market_value': 145_000.0, 'value_growth': 0.01,
+    'rent_growth': 0.01, 'purchase_year': 2, 'market_value': 145_000.0,
 }
 
 
@@ -309,13 +309,16 @@ def test_un_bien_loue_entre_dans_le_budget() -> None:
     np.testing.assert_allclose(table['free_savings'][:2], without['table']['free_savings'][:2])
     assert table['down_payments'][2] == 30_000.0
     assert table['free_savings'][2] < without['table']['free_savings'][2] - 25_000.0
-    # Valeur nette : valeur du bien moins capital restant dû, nulle avant l'achat.
-    assert table['property_equity'][1] == 0.0
-    assert table['property_equity'][2] == pytest.approx(145_000.0 - 130_000.0)
-    assert table['property_equity'].iloc[-1] > table['property_equity'][2]
+    # Valeur nette selon les scénarios : nulle avant l'achat, valeur saisie moins
+    # emprunt l'année d'achat, puis dispersée par l'indice immobilier du GSE.
+    bands = with_flat['property_equity']
+    assert (bands.loc[1] == 0.0).all()
+    np.testing.assert_allclose(bands.loc[2], 145_000.0 - 130_000.0)
+    last = bands.iloc[-1]
+    assert last['p5'] < last['median'] < last['p95']
     assert all(gap in with_flat['known_gaps'] for gap in RENTAL_GAPS)
     assert not any(gap in without['known_gaps'] for gap in RENTAL_GAPS)
-    assert 'property_equity' not in without['table']
+    assert 'property_equity' not in without
 
 
 def test_bien_saisi_dans_l_application() -> None:
@@ -330,7 +333,7 @@ def test_bien_saisi_dans_l_application() -> None:
     assert not app.exception
     app.text_input[0].set_value('studio')
     # Ordre des champs : colonne de gauche, puis de droite.
-    values = (160_000.0, 145_000.0, 30_000.0, 3.5, 20, 2, 4.5, 90.0, 1_500.0, 1.0, 1.0)
+    values = (160_000.0, 145_000.0, 30_000.0, 3.5, 20, 2, 4.5, 90.0, 1_500.0, 1.0)
     for field, value in zip(app.number_input, values, strict=True):
         field.set_value(value)
     _click(app, 'Ajouter le bien')

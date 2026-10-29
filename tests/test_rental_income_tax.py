@@ -35,7 +35,7 @@ def _r_property() -> RentalProperty:
         down_payment=price - r_emprunt(R_CASE["annuite"], R_CASE["tau"], R_CASE["n"]),
         loan_rate=R_CASE["tau"], loan_years=R_CASE["n"], gross_yield=0.04,
         collected_share=0.85, annual_charges=0.0, rent_growth=0.0,
-        purchase_year=R_CASE["debut_optim"] - 1, market_value=price, value_growth=0.0,
+        purchase_year=R_CASE["debut_optim"] - 1, market_value=price,
     )
 
 

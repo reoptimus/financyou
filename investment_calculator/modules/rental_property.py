@@ -46,12 +46,14 @@ from investment_calculator.modules.household_loans import Loan, loan_schedule
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["KNOWN_GAPS", "RentalProperty", "loan_annuity", "property_flows"]
+__all__ = ["KNOWN_GAPS", "RentalProperty", "loan_annuity", "property_flows", "property_values"]
 
 KNOWN_GAPS = [
-    "La valeur du bien suit l'évolution saisie, sans aléa : elle n'est pas tirée des "
-    "scénarios immobiliers. La revente, ses frais et l'impôt sur la plus-value ne sont "
-    "pas encore portés : la valeur nette affichée est avant impôt.",
+    "La valeur du bien suit l'indice immobilier national du GSE : l'écart propre au "
+    "bien (quartier, état) n'est pas modélisé. Le loyer saisi ne dépend pas du "
+    "scénario.",
+    "La revente, ses frais et l'impôt sur la plus-value ne sont pas encore portés : la "
+    "valeur nette affichée est avant impôt.",
     "Les réductions d'impôt (Pinel, Malraux, Denormandie) ne sont pas portées : "
     "aucun millésime validé ne les décrit.",
     "La location meublée (LMNP) n'est pas portée : seule la location nue l'est.",
@@ -77,8 +79,8 @@ class RentalProperty:
             foncière, copropriété non récupérable, assurance), en euros.
         rent_growth: évolution annuelle du loyer et des charges (0,015 pour 1,5 %).
         purchase_year: année de l'achat (0 = cette année).
-        market_value: valeur du bien à l'achat, hors frais, en euros.
-        value_growth: évolution annuelle de la valeur du bien (0,01 pour 1 %).
+        market_value: valeur du bien à l'achat, hors frais, en euros. Elle
+            évolue ensuite selon les scénarios immobiliers (:func:`property_values`).
     """
 
     name: str
@@ -92,7 +94,6 @@ class RentalProperty:
     rent_growth: float
     purchase_year: int
     market_value: float
-    value_growth: float
 
     def __post_init__(self) -> None:
         def fail(what: str, fix: str) -> None:
@@ -121,10 +122,9 @@ class RentalProperty:
                  "Saisissez un rendement positif, 0,04 pour 4 %.")
         if not 0.0 <= self.collected_share <= 1.0:
             fail(f"part encaissée de {self.collected_share}", "Saisissez une part entre 0 et 1.")
-        for field, rate in (("du loyer", self.rent_growth), ("de la valeur", self.value_growth)):
-            if not math.isfinite(rate) or rate <= -1:
-                fail(f"évolution {field} invalide ({rate})",
-                     "Saisissez un taux supérieur à −100 %, 0,015 pour 1,5 %.")
+        if not math.isfinite(self.rent_growth) or self.rent_growth <= -1:
+            fail(f"évolution du loyer invalide ({self.rent_growth})",
+                 "Saisissez un taux supérieur à −100 %, 0,015 pour 1,5 %.")
         if not isinstance(self.purchase_year, int) or self.purchase_year < 0:
             fail(f"achat à l'année {self.purchase_year}",
                  "Donnez une année à venir (0 = cette année).")
@@ -158,15 +158,13 @@ def property_flows(prop: RentalProperty, horizon: int) -> pd.DataFrame:
     Returns:
         Colonnes ``down_payment`` (apport, l'année d'achat), ``collected_rent``
         (loyers encaissés), ``charges``, ``interest``, ``principal`` et
-        ``outstanding`` (capital restant dû en début d'année) et ``value``
-        (valeur du bien, à partir de l'année d'achat). Tous positifs.
+        ``outstanding`` (capital restant dû en début d'année). Tous positifs.
     """
     if horizon < 1:
         raise ValueError(f"Horizon de {horizon} an(s) : il faut au moins un an.")
     index = pd.RangeIndex(horizon + 1, name="year")
     flows = pd.DataFrame(0.0, index=index, columns=[
         "down_payment", "collected_rent", "charges", "interest", "principal", "outstanding",
-        "value",
     ])
     start = prop.purchase_year
     if start > horizon:
@@ -181,7 +179,6 @@ def property_flows(prop: RentalProperty, horizon: int) -> pd.DataFrame:
         prop.price * prop.gross_yield * prop.collected_share * growth
     )
     flows.loc[start:, "charges"] = prop.annual_charges * growth
-    flows.loc[start:, "value"] = prop.market_value * (1 + prop.value_growth) ** owned
     if prop.borrowed > 0:
         annuity = loan_annuity(prop.borrowed, prop.loan_rate, prop.loan_years)
         loan = Loan(prop.name, annuity, prop.loan_rate, prop.loan_years)
@@ -189,3 +186,39 @@ def property_flows(prop: RentalProperty, horizon: int) -> pd.DataFrame:
         for column in ("interest", "principal", "outstanding"):
             flows.loc[start:, column] = schedule[column].to_numpy()
     return flows
+
+
+def property_values(
+    prop: RentalProperty, real_estate_returns: np.ndarray, rental_yield: float
+) -> np.ndarray:
+    """
+    Valeur du bien en début de chaque année, scénario par scénario.
+
+    Le rendement immobilier du GSE est un rendement total, loyers compris :
+    comme pour une part de SCPI (:mod:`real_estate_fund`), le prix ne
+    s'apprécie que du rendement total diminué du rendement locatif du modèle.
+
+    Args:
+        real_estate_returns: ``real_estate_return`` du GSE, [scénarios,
+            années] ; la colonne ``k`` couvre l'année ``k`` à ``k + 1``.
+        rental_yield: rendement locatif du modèle immobilier (hypothèses de
+            marché), retranché du rendement total.
+
+    Returns:
+        [scénarios, années + 1], nul avant l'achat.
+    """
+    returns = np.asarray(real_estate_returns, dtype=float)
+    if returns.ndim != 2:
+        raise ValueError(
+            "Rendements immobiliers attendus en [scénarios, années] : passez la série "
+            "real_estate_return du GSE, une ligne par scénario."
+        )
+    n_scenarios, horizon = returns.shape
+    values = np.zeros((n_scenarios, horizon + 1))
+    start = prop.purchase_year
+    if start > horizon:
+        return values
+    growth = np.cumprod(1.0 + returns[:, start:] - rental_yield, axis=1)
+    values[:, start] = prop.market_value
+    values[:, start + 1:] = prop.market_value * growth
+    return values

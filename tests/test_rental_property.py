@@ -17,6 +17,7 @@ from investment_calculator.modules.rental_property import (
     RentalProperty,
     loan_annuity,
     property_flows,
+    property_values,
 )
 from tests.reference_r.rental import r_chrono_location, r_emprunt, r_recalcul_revenu
 
@@ -29,7 +30,7 @@ def _flat(**changes: object) -> RentalProperty:
     base = RentalProperty(
         name="studio", price=150_000.0, down_payment=20_000.0, loan_rate=0.035, loan_years=15,
         gross_yield=0.04, collected_share=0.85, annual_charges=0.0, rent_growth=0.0,
-        purchase_year=3, market_value=140_000.0, value_growth=0.01,
+        purchase_year=3, market_value=140_000.0,
     )
     return dataclasses.replace(base, **changes)  # type: ignore[arg-type]
 
@@ -64,13 +65,25 @@ def test_flows_by_hand() -> None:
     np.testing.assert_allclose(flows["charges"], [0, 1_000, 1_020, 1_040.4, 1_061.208])
     np.testing.assert_allclose(flows["principal"], [0, 65_000, 65_000, 0, 0])
     np.testing.assert_allclose(flows["outstanding"], [0, 130_000, 65_000, 0, 0])
-    np.testing.assert_allclose(flows["value"], [0, 140_000, 141_400, 142_814, 144_242.14])
 
 
 def test_cash_purchase_has_no_loan() -> None:
     flows = property_flows(_flat(down_payment=150_000.0, loan_years=0), 10)
     assert flows[["interest", "principal", "outstanding"]].to_numpy().sum() == 0
     assert flows["down_payment"].sum() == 150_000
+
+
+def test_values_follow_the_gse_price_index() -> None:
+    """Rendement total du GSE moins le rendement locatif du modèle, dès l'achat."""
+    returns = np.array([[0.05, 0.06, 0.02, 0.04], [0.01, -0.03, 0.03, 0.05]])
+    values = property_values(_flat(purchase_year=1), returns, rental_yield=0.03)
+    np.testing.assert_allclose(values[0], [0, 140_000, 140_000 * 1.03, 140_000 * 1.03 * 0.99,
+                                           140_000 * 1.03 * 0.99 * 1.01])
+    np.testing.assert_allclose(values[1], [0, 140_000, 140_000 * 0.94, 140_000 * 0.94,
+                                           140_000 * 0.94 * 1.02])
+    assert not property_values(_flat(purchase_year=5), returns, 0.03).any()
+    with pytest.raises(ValueError, match="scénarios, années"):
+        property_values(_flat(), returns[0], 0.03)
 
 
 @pytest.mark.parametrize(
@@ -83,7 +96,6 @@ def test_cash_purchase_has_no_loan() -> None:
         ({"purchase_year": -1}, "année à venir"),
         ({"price": 0.0}, "prix nul"),
         ({"market_value": -1.0}, "valeur du bien"),
-        ({"value_growth": -1.0}, "évolution de la valeur"),
     ],
 )
 def test_invalid_property_is_refused(changes: dict[str, object], message: str) -> None:

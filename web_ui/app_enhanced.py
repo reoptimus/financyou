@@ -44,7 +44,7 @@ RENTAL_LABELS = {
     'loan_rate': 'Taux', 'loan_years': 'Durée', 'gross_yield': 'Rendement brut',
     'collected_share': 'Part encaissée', 'annual_charges': 'Charges (€)',
     'rent_growth': 'Évolution du loyer', 'purchase_year': 'Achat (année)',
-    'market_value': 'Valeur hors frais (€)', 'value_growth': 'Évolution de la valeur',
+    'market_value': 'Valeur hors frais (€)',
 }
 
 
@@ -421,8 +421,9 @@ def page_rentals():
     st.markdown("# 🏢 Investissement locatif")
     st.markdown(
         "Un bien acheté à crédit et loué nu : l'apport, les annuités, les loyers, les "
-        "charges et l'impôt (micro-foncier) entrent dans le budget du foyer. Toutes les "
-        "hypothèses sont les vôtres : aucune n'est proposée par défaut."
+        "charges et l'impôt (micro-foncier) entrent dans le budget du foyer. Les "
+        "hypothèses du bien sont les vôtres, sans valeur par défaut ; sa valeur suit "
+        "ensuite les scénarios immobiliers du GSE."
     )
     if st.session_state.budget is None:
         st.info("Ces biens ne comptent qu'avec un budget du foyer enregistré.")
@@ -455,12 +456,10 @@ def page_rentals():
                                       None, 100.0)
             rent_growth = st.number_input("Évolution du loyer et des charges (%/an)",
                                           -20.0, 20.0, None, 0.1)
-            value_growth = st.number_input("Évolution de la valeur du bien (%/an)",
-                                           -20.0, 20.0, None, 0.1)
         submitted = st.form_submit_button("➕ Ajouter le bien")
     if submitted:
         values = (price, market_value, down, rate, years, purchase, gross_yield, collected,
-                  charges, rent_growth, value_growth)
+                  charges, rent_growth)
         if not name.strip() or None in values:
             st.error("Renseignez tous les champs : aucune hypothèse n'est prise à votre place.")
             return
@@ -470,7 +469,6 @@ def page_rentals():
             'gross_yield': gross_yield / 100, 'collected_share': collected / 100,
             'annual_charges': charges, 'rent_growth': rent_growth / 100,
             'purchase_year': int(purchase), 'market_value': market_value,
-            'value_growth': value_growth / 100,
         }
         try:
             build_property(row)
@@ -575,13 +573,15 @@ def display_budget(budget):
         'rent': 'Loyer', 'loan_payments': 'Annuités', 'expenses': 'Dépenses',
         'rental_income': 'Loyers encaissés', 'property_charges': 'Charges des biens',
         'rental_social_tax': 'Prélèvements sociaux (loyers)', 'down_payments': 'Apports',
-        'property_equity': 'Valeur nette des biens', 'free_savings': 'Épargne libre',
+        'free_savings': 'Épargne libre',
     })
     st.line_chart(table['Épargne libre'])
-    if 'Valeur nette des biens' in table:
-        st.markdown("Valeur nette des biens loués (valeur moins capital restant dû, "
-                    "avant frais et impôt de revente)")
-        st.line_chart(table['Valeur nette des biens'])
+    if 'property_equity' in budget:
+        st.markdown("Valeur nette des biens loués selon les scénarios immobiliers : valeur "
+                    "moins capital restant dû, avant frais et impôt de revente")
+        st.line_chart(budget['property_equity'].rename(columns={
+            'p5': '5 % des scénarios', 'median': 'Médiane', 'p95': '95 % des scénarios',
+        }))
     st.dataframe(table.style.format('{:,.0f}'), use_container_width=True)
     with st.expander("Limites connues du budget"):
         for gap in budget['known_gaps']:
