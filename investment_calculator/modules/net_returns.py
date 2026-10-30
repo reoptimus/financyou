@@ -45,7 +45,10 @@ from investment_calculator.wrapper_tax import liquidation_tax, real_estate_liqui
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["NetReturns", "TaxProfile", "build_net_returns", "net_return_moments"]
+__all__ = [
+    "NetReturns", "TaxProfile", "build_net_returns", "net_return_moments",
+    "without_unpriced_placements",
+]
 
 
 @dataclass(frozen=True)
@@ -145,6 +148,34 @@ def rental_income_tax_rate(regime: TaxRegime, profile: TaxProfile) -> float:
             "TaxProfile.marginal_income_tax_rate, ou retirez ces placements du catalogue."
         )
     return profile.marginal_income_tax_rate + regime.social_rate
+
+
+def without_unpriced_placements(
+    gross: pd.DataFrame, catalog: PlacementCatalog, marginal_income_tax_rate: float | None
+) -> tuple[pd.DataFrame, dict[str, str]]:
+    """
+    Écarter de GSE+ les placements dont l'impôt ne peut pas être calculé.
+
+    Sans tranche marginale du foyer, les revenus fonciers des parts détenues en
+    direct ne peuvent pas être imposés : ces placements sont retirés, plutôt
+    qu'imposés à un taux supposé.
+
+    Returns:
+        GSE+ sans ces placements, et pour chacun la raison de son retrait.
+    """
+    if marginal_income_tax_rate is not None:
+        return gross, {}
+    excluded = {
+        str(pid): (
+            "écarté : ses revenus fonciers sont imposés à la tranche marginale du foyer, "
+            "inconnue sans le budget du foyer (revenus imposables et personnes à charge)."
+        )
+        for pid in gross.columns
+        if distributes_rental_income(catalog.regime, str(catalog.placement(str(pid))["wrapper"]))
+    }
+    if excluded:
+        logger.info("Placements écartés faute de tranche marginale : %s", sorted(excluded))
+    return gross.drop(columns=list(excluded)), excluded
 
 
 def fund_distribution_rate(series: str) -> float:

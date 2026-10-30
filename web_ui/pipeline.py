@@ -23,7 +23,12 @@ from investment_calculator.modules.household_budget import KNOWN_GAPS as BUDGET_
 from investment_calculator.modules.household_budget import Earner, household_budget
 from investment_calculator.modules.household_cash_flow import Project, capital_curve
 from investment_calculator.modules.household_loans import Loan
-from investment_calculator.modules.net_returns import TaxProfile, build_net_returns
+from investment_calculator.modules.household_tax import household_shares, marginal_rate
+from investment_calculator.modules.net_returns import (
+    TaxProfile,
+    build_net_returns,
+    without_unpriced_placements,
+)
 from investment_calculator.modules.placement_optimizer import (
     optimize_by_horizon,
     placement_constraints,
@@ -108,6 +113,21 @@ def build_budget(
     )
 
 
+def budget_marginal_rate(budget: Mapping[str, Any], *, catalog: PlacementCatalog) -> float:
+    """
+    Tranche marginale du foyer aujourd'hui, à partir de la saisie de la page Budget :
+    revenus imposables des adultes et personnes à charge de l'année 0.
+
+    Elle impose les revenus fonciers des SCPI détenues en direct, pour toute la
+    durée de la projection.
+    """
+    earners = budget['earners']
+    dependents = sum(1 for n in budget.get('dependent_years', []) if int(n) > 0)
+    shares = household_shares(catalog.regime, adults=len(earners), dependents=dependents)
+    income = sum(float(e['taxable_income']) for e in earners)
+    return marginal_rate(catalog.regime, income, shares)
+
+
 def plan_tranches(
     scenarios: pd.DataFrame,
     catalog: PlacementCatalog,
@@ -123,6 +143,7 @@ def plan_tranches(
     holdings: tuple[Holding, ...] = (),
     n_batches: int | None = None,
     annual_savings: Sequence[float] | None = None,
+    marginal_income_tax_rate: float | None = None,
 ) -> dict[str, Any]:
     """
     Plan de placement par tranches : chaque euro est placé jusqu'à son projet.
@@ -165,8 +186,13 @@ def plan_tranches(
         seniority[wrapper] = max(seniority.get(wrapper, 0.0), holding.years_held)
         existing[wrapper] = existing.get(wrapper, 0.0) + holding.contributions
     largest = float(curve.max())
-    gross = build_gross_placements(scenarios, catalog)
-    profile = TaxProfile(invested_amount=largest, couple=couple, wrapper_seniority=seniority)
+    gross, excluded = without_unpriced_placements(
+        build_gross_placements(scenarios, catalog), catalog, marginal_income_tax_rate
+    )
+    profile = TaxProfile(
+        invested_amount=largest, couple=couple, wrapper_seniority=seniority,
+        marginal_income_tax_rate=marginal_income_tax_rate,
+    )
     net = build_net_returns(gross, catalog, profile, horizons)
     constraints = placement_constraints(
         catalog, list(gross.columns), total_contributions=largest, n_periods=horizon,
@@ -187,6 +213,7 @@ def plan_tranches(
         'amounts': allocation.amounts,
         'unplaced': allocation.unplaced,
         'known_gaps': TRANCHE_PLAN_GAPS,
+        'excluded_placements': excluded,
     }
 
 
@@ -283,6 +310,7 @@ def run_projection(
     })
     profile_results = user_profile.UserProfileManager().process(profile_config)
     catalog = load_placement_catalog(catalog_id)
+    marginal = None if budget is None else budget_marginal_rate(budget, catalog=catalog)
     optimization = plan_placements(
         scenario_results['scenarios'],
         catalog,
@@ -295,6 +323,7 @@ def run_projection(
         min_bond=profile_results['validated_profile']['constraints']['min_bond_allocation'],
         holdings=profile_holdings(profile_results['validated_profile']),
         couple=couple,
+        marginal_income_tax_rate=marginal,
     )
     results = {
         'scenarios': scenario_results,
@@ -324,6 +353,6 @@ def run_projection(
             max_equity=constraints['max_equity_allocation'],
             min_bond=constraints['min_bond_allocation'],
             holdings=profile_holdings(profile_results['validated_profile']),
-            annual_savings=savings,
+            annual_savings=savings, marginal_income_tax_rate=marginal,
         )
     return results

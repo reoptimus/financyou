@@ -8,7 +8,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from web_ui.pipeline import build_profile_config, build_projects, run_projection
+from investment_calculator.modules.household_tax import household_shares, marginal_rate
+from investment_calculator.placement_catalog import load_placement_catalog
+from web_ui.pipeline import (
+    budget_marginal_rate,
+    build_profile_config,
+    build_projects,
+    run_projection,
+)
 
 
 def _profile(age: int = 40, retirement_age: int = 50) -> dict:
@@ -36,6 +43,8 @@ def test_projection_par_placement() -> None:
         'cto_actions', 'cto_obligations', 'pea_actions', 'av_fonds_euros',
         'av_uc_actions', 'livret_a', 'av_scpi',
     }
+    # Sans budget du foyer, la tranche marginale est inconnue : la SCPI en direct est écartée.
+    assert list(results['optimization']['excluded_placements']) == ['scpi_direct']
     assert sum(portfolio['weights'].values()) == pytest.approx(1.0)
     assert portfolio['sharpe_ratio'] is not None
     assert {'return', 'volatility'} <= set(results['optimization']['efficient_frontier'])
@@ -240,6 +249,21 @@ def test_le_budget_part_de_l_epargne_du_profil() -> None:
     d = table.iloc[10] - table.iloc[9]
     jump = d['salaries'] + d['pensions'] - d['income_tax'] + 9_000.0
     assert d['free_savings'] == pytest.approx(jump)
+
+
+def test_la_tranche_marginale_vient_du_budget() -> None:
+    catalog = load_placement_catalog('fr-2026')
+    expected = marginal_rate(
+        catalog.regime, 65_000.0, household_shares(catalog.regime, adults=2, dependents=1)
+    )
+    assert budget_marginal_rate(BUDGET, catalog=catalog) == pytest.approx(expected)
+    assert expected > 0
+
+
+def test_avec_le_budget_la_scpi_en_direct_est_proposee() -> None:
+    results = _budget_results()
+    assert 'scpi_direct' in results['optimization']['optimal_portfolio']['weights']
+    assert 'excluded_placements' not in results['optimization']
 
 
 def test_l_epargne_libre_alimente_le_plan_par_tranches() -> None:
