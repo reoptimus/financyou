@@ -41,7 +41,9 @@ def _weights(**w: float) -> pd.Series:
     return pd.Series(w, dtype=float)
 
 
-@pytest.mark.parametrize("placement", ["pea_actions", "av_uc_actions", "cto_actions", "livret_a"])
+@pytest.mark.parametrize(
+    "placement", ["pea_actions", "av_uc_actions", "cto_actions", "cto_obligations", "livret_a"]
+)
 def test_un_versement_unique_reproduit_gse_plus_plus(placement: str) -> None:
     gross = _gross()
     amount, horizon = 40_000.0, 8
