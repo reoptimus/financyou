@@ -176,6 +176,14 @@ class MarketAssumptions:
         return float(self.document["real_estate"]["dynamics"]["mean_reversion"])
 
     @property
+    def real_estate_rate_correlation(self) -> float:
+        """
+        Corrélation ρ entre les chocs du taux court Hull-White et du rendement
+        instantané immobilier (chemin stochastique seulement).
+        """
+        return float(self.document["real_estate"]["dynamics"]["rate_correlation"])
+
+    @property
     def real_estate_rental_yield(self) -> float:
         """Rendement locatif annuel supposé (paramètre du modèle stochastique immobilier)."""
         return float(self.document["real_estate"]["dynamics"]["rental_yield"])

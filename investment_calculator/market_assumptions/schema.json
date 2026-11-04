@@ -100,7 +100,7 @@
         },
         "dynamics": {
           "type": "object",
-          "required": ["volatility", "instantaneous_volatility", "mean_reversion", "rental_yield", "inflation_adjustment"],
+          "required": ["volatility", "instantaneous_volatility", "mean_reversion", "rate_correlation", "rental_yield", "inflation_adjustment"],
           "additionalProperties": false,
           "description": "Paramètres immobiliers des deux chemins de génération. Voir docs/journal-1b-calibration.md, point 1.",
           "properties": {
@@ -118,6 +118,12 @@
               "type": "number",
               "exclusiveMinimum": 0,
               "description": "Vitesse de retour à la moyenne du processus immobilier (paramètre 'a' de RealEstateModel)."
+            },
+            "rate_correlation": {
+              "type": "number",
+              "minimum": -1,
+              "maximum": 1,
+              "description": "Corrélation ρ entre le choc du taux court Hull-White et le choc du rendement instantané immobilier r2(t) (chemin stochastique). Remplace le coefficient taux court / immobilier de CorrelatedRandomGenerator.DEFAULT_CORRELATION_MATRIX."
             },
             "rental_yield": {
               "type": "number",
