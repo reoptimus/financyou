@@ -336,9 +336,10 @@ class RealEstateModel:
         n_steps: int,
         rate_loadings: np.ndarray,
         shock_covariances: np.ndarray,
+        market_yield: float = 0.0,
     ) -> np.ndarray:
         """
-        Drift de chaque période qui rend ``D(t) * Indice(t)`` martingale.
+        Drift de chaque période qui rend ``D(t) * Indice(t) * e^(y t)`` martingale.
 
         Le drift d'ImmoHW_V2.R (``k(t)*dt``) ne corrige ni la convexité ni la
         covariance avec les taux. Tout le modèle étant linéaire dans des chocs
@@ -351,6 +352,23 @@ class RealEstateModel:
         Les variances et covariances sont calculées exactement à partir des
         sensibilités des deux modèles, pas estimées sur les scénarios.
 
+        Avec ``market_yield = y > 0``, l'indice produit est la valeur libre H
+        d'un immeuble loué (papier EAJ, registre A15) : un actif qui verse un
+        rendement locatif de marché continu y et ne capitalise pas ce flux. Sa
+        dérive risque-neutre est r - y, et la contrainte devient
+        E[D(t) * H(t)] = e^(-y t), soit :
+
+            E[log H(t)] = -log P(0, t) - y t - Var(log H(t)) / 2
+                          - Cov(log H(t), log D(t))
+
+        La variance et la covariance ne dépendent pas de y : seul le niveau
+        k_A baisse de y par unité de temps (y * dt par pas). Avec y = 0 (défaut),
+        on retrouve l'indice de rendement total, au bit près.
+
+        Les ``total_returns`` produits avec ce drift sont alors les rendements
+        de H, loyers exclus : en déduire ``rental_returns`` une seconde fois
+        retirerait le loyer deux fois.
+
         Args:
             f0t: courbe des taux forward, celle passée à ``generate_returns``.
             P0t: prix zéro-coupon, ``P0t[i] = P(0, i*dt)``.
@@ -358,10 +376,20 @@ class RealEstateModel:
             rate_loadings: ``HullWhiteModel.log_deflator_loadings()``.
             shock_covariances: (n_steps × 3 × 3), covariance par colonne du
                 résidu de taux, du choc de prix et du choc de r2, dans cet ordre.
+            market_yield: rendement locatif de marché y, taux annuel continu,
+                versé par l'actif et non capitalisé dans l'indice. 0 (défaut)
+                = indice de rendement total. C'est une hypothèse de marché,
+                pas une valeur fiscale.
 
         Returns:
             Drift de chaque période, (n_steps - 1,), à passer à ``generate_returns``.
         """
+        if not np.isfinite(market_yield) or market_yield < 0:
+            raise ValueError(
+                f"Le rendement locatif de marché doit être un taux positif ou nul, "
+                f"reçu {market_yield} : le passer en taux annuel continu "
+                "(0,03 pour 3 %)."
+            )
         if len(P0t) < n_steps:
             raise ValueError(
                 f"La courbe zéro-coupon couvre {len(P0t)} pas, il en faut {n_steps} : "
@@ -375,6 +403,8 @@ class RealEstateModel:
         variance = np.einsum('tjk,jkl,tjl->t', index_loadings, shock_covariances, index_loadings)
         covariance = np.einsum('tjk,jkl,tjl->t', index_loadings, shock_covariances, rate)
         target_mean = -np.log(np.asarray(P0t[:n_steps], dtype=float)) - variance / 2 - covariance
+        if market_yield:
+            target_mean = target_mean - market_yield * self.dt * np.arange(n_steps)
 
         # Espérance de r2 : même récurrence que _generate_auxiliary_rates, sans choc.
         kimmo = np.array([f0t[t] if t < len(f0t) else f0t[-1] for t in range(n_steps)])
