@@ -275,9 +275,12 @@ def simulate_wealth(
                 rule, taxable_amount=1.0
             ) + regime.resolve_social_rate(rule)
             support = placement["support"]
-            income_yield = _distributed_yield(
-                str(support.get("series") or support.get("reference_series")), returns
-            )
+            # Un fonds de capitalisation n'est imposé qu'à la sortie, comme
+            # dans GSE++ (net_returns.build_net_returns).
+            if support.get("income", "distributing") == "distributing":
+                income_yield = _distributed_yield(
+                    str(support.get("series") or support.get("reference_series")), returns
+                )
         value = np.full(n_scenarios, value0 + paid[0] * (1.0 - fee))
         basis = np.full(n_scenarios, basis0 + paid[0])
         taxed = np.zeros(n_scenarios)
