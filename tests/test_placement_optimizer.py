@@ -13,6 +13,7 @@ import pytest
 from investment_calculator.modules.net_returns import NetReturns, TaxProfile, build_net_returns
 from investment_calculator.modules.placement_optimizer import (
     OptimizationError,
+    envelope_value,
     optimize_by_horizon,
     optimize_horizon,
     placement_constraints,
@@ -247,3 +248,64 @@ def test_versements_existants_s_imputent_sur_le_plafond_du_pea() -> None:
         existing_contributions={"pea": 100_000.0},
     )
     assert constraints.b_ub[0] == pytest.approx((PEA_CAP - 100_000.0) / 300_000.0, abs=1e-6)
+
+
+# --- Valeur des enveloppes V_H (évolution E10) ---------------------------------
+
+
+def test_valeur_des_enveloppes_nulle_quand_seul_le_cto_est_ouvert() -> None:
+    rng = np.random.default_rng(3)
+    returns = np.column_stack([
+        0.06 + 0.15 * rng.standard_normal(1000),
+        0.02 + 0.04 * rng.standard_normal(1000),
+    ])
+    net = _net(["cto_actions", "cto_obligations"], returns)
+    result = envelope_value(
+        net, 1, _free(net), FR_2026, reference_wrapper="cto", risk_aversion=5.0
+    )
+    assert result.value == 0.0
+    assert result.certainty_equivalent_all == result.certainty_equivalent_reference
+
+
+def test_valeur_des_enveloppes_ecart_d_equivalent_certain() -> None:
+    # Le PEA porte les mêmes actions que le CTO, avec 1 point de plus chaque année.
+    rng = np.random.default_rng(4)
+    shocks = 0.15 * rng.standard_normal(2000)
+    returns = np.column_stack([0.05 + shocks, 0.06 + shocks])
+    net = _net(["cto_actions", "pea_actions"], returns)
+    lam = 2.0
+    result = envelope_value(
+        net, 1, _free(net), FR_2026, reference_wrapper="cto", risk_aversion=lam
+    )
+    annualized = net.annualized(1)
+    mu, var = annualized.mean().to_numpy(), annualized.var().to_numpy()
+    # Référence : tout en CTO. Optimum : tout en PEA (aucun plafond ne mord à 10 000 €).
+    assert result.reference_weights.to_dict() == pytest.approx(
+        {"cto_actions": 1.0, "pea_actions": 0.0}, abs=1e-6
+    )
+    assert result.certainty_equivalent_reference == pytest.approx(
+        mu[0] - lam / 2 * var[0], abs=1e-8
+    )
+    assert result.certainty_equivalent_all == pytest.approx(mu[1] - lam / 2 * var[1], abs=1e-6)
+    assert result.value == pytest.approx(0.01, abs=1e-4)
+
+
+def test_valeur_des_enveloppes_sous_le_plafond_du_pea() -> None:
+    # Le plafond du PEA borne la valeur : seule la part plafonnée profite du point de plus.
+    rng = np.random.default_rng(5)
+    shocks = 0.15 * rng.standard_normal(2000)
+    net = _net(["cto_actions", "pea_actions"], np.column_stack([0.05 + shocks, 0.06 + shocks]))
+    total = 4 * PEA_CAP
+    constraints = placement_constraints(
+        FR_2026, net.placement_ids, total_contributions=total, n_periods=1
+    )
+    result = envelope_value(
+        net, 1, constraints, FR_2026, reference_wrapper="cto", risk_aversion=2.0
+    )
+    assert result.value == pytest.approx(0.01 * PEA_CAP / total, abs=1e-4)
+
+
+def test_valeur_des_enveloppes_sans_placement_de_reference_refusee() -> None:
+    net = _net(["pea_actions", "av_fonds_euros"], np.zeros((5, 2)) + 0.03)
+    with pytest.raises(ValueError, match="Aucun placement de l'enveloppe 'cto'"):
+        envelope_value(net, 1, _free(net), FR_2026, reference_wrapper="cto", risk_aversion=5.0)

@@ -24,7 +24,13 @@ Définitions des indicateurs restitués :
   référence, le ratio n'est pas calculé et vaut ``None`` ;
 - ``max_drawdown`` : médiane, sur les scénarios, de la perte maximale depuis un
   plus haut d'un euro placé selon les poids et conservé sans rééquilibrage, sur
-  GSE+ (avant impôt).
+  GSE+ (avant impôt) ;
+- ``envelope_value`` (si ``reference_wrapper`` est donné) : valeur des
+  enveloppes V_H, équivalent certain de l'optimum avec toutes les enveloppes
+  moins celui de l'optimum restreint à l'enveloppe de référence, en rendement
+  annualisé (:func:`~investment_calculator.modules.placement_optimizer.envelope_value`).
+  Elle n'est définie que pour l'objectif ``mean_variance`` ; pour un autre
+  objectif, ``value`` vaut ``None`` et ``reason`` dit pourquoi.
 """
 
 from __future__ import annotations
@@ -36,12 +42,14 @@ import numpy as np
 import pandas as pd
 
 from investment_calculator.modules.net_returns import (
+    NetReturns,
     TaxProfile,
     build_net_returns,
     without_unpriced_placements,
 )
 from investment_calculator.modules.placement_optimizer import (
     efficient_frontier,
+    envelope_value,
     optimize_horizon,
     placement_constraints,
 )
@@ -53,6 +61,7 @@ from investment_calculator.modules.wealth_simulation import (
     wealth_waterfall,
 )
 from investment_calculator.placement_catalog import PlacementCatalog
+from investment_calculator.wrapper_allocation import WeightConstraints
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +113,7 @@ def plan_placements(
     min_bond: float | None = None,
     holdings: tuple[Holding, ...] = (),
     marginal_income_tax_rate: float | None = None,
+    reference_wrapper: str | None = None,
 ) -> dict[str, Any]:
     """
     Allocation optimale entre les placements du catalogue et patrimoine projeté.
@@ -130,6 +140,8 @@ def plan_placements(
         marginal_income_tax_rate: tranche marginale du foyer, qui impose les
             revenus fonciers des SCPI détenues en direct. Sans elle, ces
             placements sont écartés (``excluded_placements`` dans le résultat).
+        reference_wrapper: enveloppe de référence de la valeur des enveloppes
+            (``"cto"`` pour fr-2026) ; sans elle, la valeur n'est pas calculée.
 
     Raises:
         ValueError: placement de référence inconnu, ou entrées refusées par
@@ -226,6 +238,10 @@ def plan_placements(
         "constraints_explanation": constraints.explanation,
         "known_gaps": catalog.known_gaps,
     }
+    if reference_wrapper is not None:
+        results["optimal_portfolio"]["envelope_value"] = _envelope_value_summary(
+            net, horizon, constraints, catalog, reference_wrapper, objective, risk_aversion
+        )
     if excluded:
         results["excluded_placements"] = excluded
     if holdings:
@@ -242,3 +258,37 @@ def plan_placements(
             "expected_surplus": float((terminal - goal_amount).mean()),
         }
     return results
+
+
+def _envelope_value_summary(
+    net: NetReturns,
+    horizon: int,
+    constraints: WeightConstraints,
+    catalog: PlacementCatalog,
+    reference_wrapper: str,
+    objective: str,
+    risk_aversion: float | None,
+) -> dict[str, Any]:
+    """Valeur des enveloppes au format JSON du rapport, ou la raison de son absence."""
+    if objective != "mean_variance" or risk_aversion is None:
+        return {
+            "value": None,
+            "reference_wrapper": reference_wrapper,
+            "reason": (
+                f"La valeur des enveloppes est un écart d'équivalent certain, défini par "
+                f"l'aversion au risque de l'objectif 'mean_variance' ; l'objectif "
+                f"{objective!r} n'en a pas. Choisissez 'mean_variance' pour l'obtenir."
+            ),
+        }
+    result = envelope_value(
+        net, horizon, constraints, catalog,
+        reference_wrapper=reference_wrapper, risk_aversion=risk_aversion,
+    )
+    return {
+        "value": result.value,
+        "reference_wrapper": reference_wrapper,
+        "risk_aversion": result.risk_aversion,
+        "certainty_equivalent_all": result.certainty_equivalent_all,
+        "certainty_equivalent_reference": result.certainty_equivalent_reference,
+        "reference_weights": {str(p): float(w) for p, w in result.reference_weights.items()},
+    }
