@@ -407,3 +407,11 @@ semestrielle), et la valeur de a.
 
 *Dernière mise à jour : 2026-08-28, étape 1.B.4 (extraction des constantes
 économiques en donnée versionnée) ; étape 1.B.5 différée.*
+
+### Mise à jour du 2026-11-04 — recalibrage sur l'indice INSEE trimestriel 2000-2025
+
+La série annuelle hors inflation de 2017 est remplacée par l'indice INSEE des prix des logements anciens, France métropolitaine, CVS, trimestriel (idBank 010567059, `market_data/insee/ipla_010567059_cvs.csv`). `calibrate_from_returns` (méthode des moments au pas de 0,25 an) donne sur 2000-T1 à 2025-T4 **a = 0,222 et σ = 3,98 %** (autocorrélation trimestrielle 0,912, vol long terme σ/a ≈ 18 %). seb a retenu ces valeurs le 2026-11-04, de préférence au a = 0,51 / σ = 5,7 % de l'article EAJ, qui ne se retrouve pas sur cette série (annuel : a ≈ 0,22 ; AR(1) trimestriel : 0,36 / 5,1 %). Script : `examples/calibrate_real_estate_insee.py`.
+
+Mesures, chemin stochastique, graine 42 :
+- martingalité (10 000 scénarios, 30 ans, pas de 0,25 an) : écart maximal **0,58 %**, valeur finale 1,005 ;
+- rendement immobilier annualisé à 30 ans (1 000 scénarios, pas annuel), P5 / P50 / P95 : **−1,7 % / 2,5 % / 6,9 %**, contre −3,9 % / 1,6 % / 7,5 % avec 0,145 / 3,79 %.
