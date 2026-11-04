@@ -324,6 +324,7 @@ def run_projection(
         holdings=profile_holdings(profile_results['validated_profile']),
         couple=couple,
         marginal_income_tax_rate=marginal,
+        reference_wrapper='cto',
     )
     results = {
         'scenarios': scenario_results,
