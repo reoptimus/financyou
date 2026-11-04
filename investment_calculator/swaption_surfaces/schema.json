@@ -61,7 +61,11 @@
     "observation_date": {
       "type": ["string", "null"],
       "format": "date",
-      "description": "Date d'observation de la surface (millésime), à consigner dans les métadonnées de toute simulation qui en dépend, au même titre que yield_curve_vintage_date. null : la source ne la donne pas, lacune déclarée dans known_gaps ; une surface validated doit avoir une date (contrôlé au chargement)."
+      "description": "Date d'observation de la surface (millésime), à consigner dans les métadonnées de toute simulation qui en dépend, au même titre que yield_curve_vintage_date. null : la source ne la donne pas, lacune déclarée dans known_gaps ; une surface validated doit alors porter observation_period (contrôlé au chargement)."
+    },
+    "observation_period": {
+      "type": "string",
+      "description": "Période d'observation, quand la date exacte est inconnue mais que la personne qui valide la surface peut la situer, par exemple « été 2018 ». Remplace observation_date pour une surface validated, sans inventer de jour précis."
     },
     "vol_convention": {
       "enum": ["normal", "lognormal"],

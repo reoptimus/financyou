@@ -633,6 +633,13 @@ class ScenarioGenerator:
                 # taux sans risque + cette prime. Voir
                 # docs/validation/1b-hypotheses-monde-reel.md.
                 'market_assumptions_id': assumptions.id,
+                # Provenance des paramètres Hull-White (surface de
+                # swaptions et courbe de calibration), pour rejouer la
+                # simulation ; voir rates.hull_white.calibration.
+                'hull_white_status': assumptions.document['rates']['hull_white']['status'],
+                'hull_white_calibration': assumptions.document['rates']['hull_white'].get(
+                    'calibration'
+                ),
                 'equity_risk_premium': assumptions.equity_risk_premium,
                 'real_estate_risk_premium': assumptions.real_estate_risk_premium,
             },

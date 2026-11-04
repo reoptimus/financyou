@@ -151,10 +151,11 @@ def _check_status(document: dict[str, Any], origin: Path) -> None:
             f"{origin} : une surface synthétique ne peut pas être validated. Repassez-la en "
             f"draft, ou remplacez-la par des cotations de marché."
         )
-    if document["observation_date"] is None:
+    if document["observation_date"] is None and not document.get("observation_period"):
         raise SwaptionSurfaceValidationError(
-            f"{origin} : une surface validated doit avoir une observation_date. Renseignez la "
-            f"date d'observation de la source, ou repassez la surface en draft."
+            f"{origin} : une surface validated doit avoir une observation_date, ou à défaut une "
+            f"observation_period. Renseignez la date ou la période d'observation de la source, "
+            f"ou repassez la surface en draft."
         )
     if not (document.get("validation") or {}).get("validated_by"):
         raise SwaptionSurfaceValidationError(
@@ -260,6 +261,12 @@ class SwaptionSurface:
         known_gaps, interdite pour une surface validated).
         """
         value = self.document["observation_date"]
+        return None if value is None else str(value)
+
+    @property
+    def observation_period(self) -> str | None:
+        """Période d'observation, quand la date exacte est inconnue (par exemple « été 2018 »)."""
+        value = self.document.get("observation_period")
         return None if value is None else str(value)
 
     @property
