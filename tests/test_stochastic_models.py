@@ -700,6 +700,25 @@ def test_calage_immobilier_sur_la_serie_insee_france():
     assert abs(returns.std() - series.std(ddof=1)) < 0.004
 
 
+def test_calage_immobilier_au_pas_trimestriel_retrouve_les_parametres():
+    """Sur une longue série simulée au pas de 0,25 an, le calage rend a et σ du modèle."""
+    from investment_calculator.stochastic_models.real_estate import calibrate_from_returns
+
+    rng = np.random.default_rng(1)
+    steps = 20_000
+    model = RealEstateModel(a=0.51, sigma=0.057, rental_yield=0.0, dt=0.25,
+                            n_scenarios=1, T=steps * 0.25)
+    shocks = rng.standard_normal((2, 1, steps))
+    returns = model.generate_returns(np.zeros((1, steps)), np.zeros(steps),
+                                     re_price_shocks=shocks[0],
+                                     re_rental_shocks=shocks[1])['total_returns'][0, 100:]
+    a, sigma = calibrate_from_returns(returns, dt=0.25)
+    assert abs(a - 0.51) < 0.03
+    assert abs(sigma - 0.057) < 0.002
+    with pytest.raises(ValueError, match="Pas de temps"):
+        calibrate_from_returns(returns, dt=0.0)
+
+
 def test_calage_immobilier_refuse_une_serie_impossible():
     from investment_calculator.stochastic_models.real_estate import calibrate_from_annual_returns
 
