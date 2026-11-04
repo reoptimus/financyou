@@ -588,43 +588,61 @@ class ResidentialRealEstate(RealEstateModel):
 
 def calibrate_from_annual_returns(annual_returns: np.ndarray) -> tuple[float, float]:
     """
-    Calage de ``a`` et ``sigma`` de :class:`RealEstateModel` sur des rendements annuels.
+    Calage de ``a`` et ``sigma`` sur des rendements annuels.
 
-    Méthode des moments, au pas d'un an : dans le modèle, l'autocorrélation
-    d'ordre 1 des rendements annuels ne dépend que de ``a``, et leur variance
-    est proportionnelle à ``sigma²``. On résout la première pour ``a``, puis la
-    seconde pour ``sigma``. (``Script_calibrage_immo.R`` ne calculait que
+    Cas particulier ``dt = 1`` de :func:`calibrate_from_returns`.
+    """
+    return calibrate_from_returns(annual_returns, dt=1.0)
+
+
+def calibrate_from_returns(returns: np.ndarray, dt: float) -> tuple[float, float]:
+    """
+    Calage de ``a`` et ``sigma`` de :class:`RealEstateModel` sur des rendements de pas ``dt``.
+
+    Méthode des moments, au pas des données : dans le modèle, l'autocorrélation
+    d'ordre 1 des rendements de période ``dt`` ne dépend que de ``a``, et leur
+    variance est proportionnelle à ``sigma²``. On résout la première pour ``a``,
+    puis la seconde pour ``sigma``. (``Script_calibrage_immo.R`` ne calculait que
     l'écart-type des résidus d'un AR(1), sans ``a``.)
 
+    Args:
+        returns: rendements logarithmiques non annualisés, un par période.
+        dt: durée d'une période en années (0,25 pour une série trimestrielle).
+
     Returns:
-        ``(a, sigma)``.
+        ``(a, sigma)``, annualisés.
 
     Raises:
-        ValueError: série trop courte, ou autocorrélation hors de ]0, 1[, que
-            ce modèle ne peut pas reproduire.
+        ValueError: série trop courte, pas de temps non positif, ou
+            autocorrélation hors de l'intervalle que ce modèle peut reproduire.
     """
     from scipy.optimize import brentq
 
-    x = np.asarray(annual_returns, dtype=float)
+    if dt <= 0:
+        raise ValueError(f"Pas de temps de {dt} : donner une durée de période positive, en années.")
+    x = np.asarray(returns, dtype=float)
     if x.size < 3:
-        raise ValueError("Au moins trois rendements annuels sont nécessaires au calage.")
+        raise ValueError("Au moins trois rendements sont nécessaires au calage.")
     centered = x - x.mean()
     rho = float(centered[1:] @ centered[:-1] / (centered @ centered))
 
     def moments(a: float) -> tuple[float, float]:
-        k = (1 - np.exp(-a)) / a
-        k2 = (1 - np.exp(-2 * a)) / (2 * a)
-        eta2 = (1 - 2 * k + k2) / a**2
+        # Variance et autocorrélation d'ordre 1 d'un rendement de période dt
+        # pour sigma = 1, dans la discrétisation de _generate_price_returns.
+        k = (1 - np.exp(-a * dt)) / a
+        k2 = (1 - np.exp(-2 * a * dt)) / (2 * a)
+        eta2 = (dt - 2 * k + k2) / a**2
         r2_variance = 1 / (2 * a)
         gamma0 = k**2 * r2_variance + eta2
-        return gamma0, k**2 * np.exp(-a) * r2_variance / gamma0
+        return gamma0, k**2 * np.exp(-a * dt) * r2_variance / gamma0
 
-    low, high = 1e-4, 50.0
+    low, high = 1e-4, 50.0 / dt
     if not moments(high)[1] < rho < moments(low)[1]:
         raise ValueError(
-            f"Autocorrélation des rendements annuels de {rho:.3f} : le modèle ne "
-            "reproduit qu'une autocorrélation positive et inférieure à 1. Vérifiez "
-            "que la série est bien une suite de rendements annuels."
+            f"Autocorrélation des rendements de {rho:.3f} : au pas de {dt} an, le modèle "
+            f"ne reproduit qu'une autocorrélation comprise entre {moments(high)[1]:.3f} "
+            f"et {moments(low)[1]:.3f}. Vérifiez que la série est bien une suite de "
+            "rendements (et non de niveaux) et que dt correspond à son pas."
         )
     a = brentq(lambda a: moments(a)[1] - rho, low, high)
     sigma = float(np.sqrt(x.var(ddof=1) / moments(a)[0]))

@@ -42,7 +42,9 @@
       "covers": ["rates.hull_white"]
     },
     {
-      "label": "INSEE, rendements immobiliers annuels France hors inflation (61 valeurs, fichier daté du 25/10/2017), legacy/csv_files/Rdt_immo_France_horsinfla_INSEE_20172510.txt, série de Script_calibrage_immo.R. Calage par les moments : a sur l'autocorrélation d'ordre 1 (0,79), σ sur la variance (6,87 %) des rendements annuels. Valeurs validées par Sébastien Gallet le 2026-10-24 (choix « Valider France »).",
+      "label": "INSEE, indice des prix des logements anciens, France métropolitaine, ensemble, base 100 en 2015, série CVS trimestrielle (idBank 010567059, mise à jour du 08/09/2026), market_data/insee/ipla_010567059_cvs.csv. Calage par les moments du modèle (calibrate_from_returns, pas 0,25 an) sur les 103 rendements logarithmiques de 2000-T1 à 2025-T4 : a sur l'autocorrélation d'ordre 1 (0,912), σ sur la variance. Script : examples/calibrate_real_estate_insee.py. Valeurs retenues par Sébastien Gallet le 2026-11-04 (choix « Mesure INSEE : 0,222 / 3,98 % »).",
+      "url": "https://www.insee.fr/fr/statistiques/serie/010567059",
+      "consulted_on": "2026-11-04",
       "covers": ["real_estate.dynamics.instantaneous_volatility", "real_estate.dynamics.mean_reversion"]
     },
     {
@@ -66,7 +68,7 @@
     "risk_premia.equity (5 %) est sourcé (Damodaran, Vernimmen) mais la valeur France précise du Dimson-Marsh-Staunton Global Investment Returns Yearbook — la référence académique la plus rigoureuse pour un horizon 30 ans — n'a pas pu être extraite lors de la recherche ; seuls des agrégats mondiaux ont été confirmés (voir docs/validation/1b-hypotheses-monde-reel.md).",
     "risk_premia.real_estate (1,5 %) repose sur une source professionnelle secondaire (Newmark/MeilleureSCPI), pas sur une étude académique ou IEIF de premier rang — aucun chiffre agrégé IEIF n'a été retrouvé lors de la recherche. À confirmer par recoupement avec les indices IEIF Immobilier d'Entreprise France ou l'Observatoire MSCI France.",
     "risk_premia s'applique de façon identique quel que soit l'horizon de simulation ; la littérature distingue parfois prime court terme et prime long terme (30 ans), non modélisé ici.",
-    "real_estate.dynamics (a = 0,145 ; σ = 3,79 %) est calé sur une série INSEE dont la période exacte et la nature (prix seul ou loyers compris) ne sont pas documentées dans le dépôt. Voir docs/journal-1b-calibration.md, point 1.",
+    "real_estate.dynamics (a = 0,222 ; σ = 3,98 %, vol long terme σ/a ≈ 18 %) est calé sur les seuls prix des logements anciens (indice INSEE CVS, nominal, hors loyers) alors que RealEstateModel en tire le rendement total, loyers compris. Le calage diffère de celui de l'article EAJ (a = 0,51 ; σ = 5,7 % ; vol long terme 11,1 %), annoncé sur l'indice INSEE 2000-2025 mais non reproduit sur cette série, ni en annuel, ni par AR(1) : la série ou la méthode de l'EAJ reste à identifier. Sur 104 trimestres, a est mal identifié (sur données simulées avec a = 0,51, le même estimateur donne 0,89). Une sensibilité à a et σ est recommandée avant publication.",
     "equity.volatility, real_estate.dynamics.volatility, rates.risk_free_proxy, bond, inflation, gdp_growth et correlations (étape 1.B.4) restent l'extraction fidèle de littéraux 'US historical averages' codés en dur dans scenario_generator.py et gse.py, jamais vérifiés contre une source de marché réelle ni adaptés au marché français.",
     "rates.hull_white est calibré sur 9 swaptions EUR Bloomberg de l'été 2018 seulement (échéances de 3 à 15 ans), et sigma sur les 3 que pondérait le script R. Une seule volatilité constante sur tout l'horizon : elle laisse 3,4 bp d'écart quadratique moyen et jusqu'à 9,8 bp (3Y×7Y) sur les 9 cotations.",
     "rates.hull_white.mean_reversion_speed (a = 0,0058333) n'est pas ajusté sur le marché : c'est la valeur fixée par le calibrage R de 2018 (a_sigma.Rda), retenue par Sébastien Gallet le 2026-11-04. Avec un a aussi faible, la variance du taux court croît presque linéairement avec l'horizon (écart-type d'environ 3,7 % à 30 ans).",
@@ -91,8 +93,8 @@
     "appreciation_share": 0.6,
     "dynamics": {
       "volatility": 0.12,
-      "instantaneous_volatility": 0.0379,
-      "mean_reversion": 0.145,
+      "instantaneous_volatility": 0.0398,
+      "mean_reversion": 0.222,
       "rate_correlation": -0.039,
       "rental_yield": 0.03,
       "inflation_adjustment": 0.02
