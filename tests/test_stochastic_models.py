@@ -719,6 +719,26 @@ def test_calage_immobilier_au_pas_trimestriel_retrouve_les_parametres():
         calibrate_from_returns(returns, dt=0.0)
 
 
+def test_calage_immobilier_sur_la_serie_insee_trimestrielle_2000_2025():
+    """Mesure sur l'indice INSEE CVS 010567059 : ne retrouve pas le 0,51 / 5,7 % de l'EAJ."""
+    import importlib.util
+    from pathlib import Path
+
+    from investment_calculator.stochastic_models.real_estate import calibrate_from_returns
+
+    root = Path(__file__).parent.parent
+    spec = importlib.util.spec_from_file_location(
+        "calibrate_real_estate_insee", root / "examples" / "calibrate_real_estate_insee.py")
+    assert spec is not None and spec.loader is not None
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    rows = script.read_bdm_quarterly(root / "market_data" / "insee" / "ipla_010567059_cvs.csv")
+    levels = np.array([v for year, _, v in rows if 2000 <= year <= 2025])
+    assert levels.size == 104
+    a, sigma = calibrate_from_returns(np.diff(np.log(levels)), dt=0.25)
+    assert (round(a, 3), round(sigma, 4)) == (0.222, 0.0398)
+
+
 def test_calage_immobilier_refuse_une_serie_impossible():
     from investment_calculator.stochastic_models.real_estate import calibrate_from_annual_returns
 
