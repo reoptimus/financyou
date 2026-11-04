@@ -1162,3 +1162,38 @@ def test_drift_immobilier_exact():
     assert empirical_covariance == pytest.approx(covariance[last], rel=0.05)
     # La covariance avec les taux n'est pas négligeable devant la convexité.
     assert abs(covariance[last]) > 0.1 * variance[last] / 2
+
+
+def test_correlation_taux_immobilier_lue_dans_les_hypotheses(monkeypatch):
+    """
+    Le chemin stochastique corrèle les chocs du taux court et de l'immobilier
+    avec la valeur sourcée de market_assumptions (Armel et Planchet 2018,
+    −3,9 %), et non plus avec le 0,35 par défaut d'Ahlgrim et al.
+    """
+    from investment_calculator.market_assumptions import load_market_assumptions
+    from investment_calculator.stochastic_models import CorrelatedRandomGenerator
+
+    rho = load_market_assumptions().real_estate_rate_correlation
+    assert rho == -0.039
+
+    used = []
+    original_generate = CorrelatedRandomGenerator.generate
+
+    def spy(self, *args, **kwargs):
+        result = original_generate(self, *args, **kwargs)
+        used.append(result)
+        return result
+
+    monkeypatch.setattr(CorrelatedRandomGenerator, 'generate', spy)
+    generator = scenario_generator.ScenarioGenerator(random_seed=3)
+    generator.generate({
+        'num_scenarios': 2_000, 'time_horizon': 10, 'timestep': 1.0,
+        'use_stochastic': True, 'currency': 'EUR', 'filter_explosive_rates': False,
+    })
+    (result,) = used
+    names = result['asset_names']
+    i, j = names.index('short_rate'), names.index('real_estate')
+    assert result['correlation_matrix'][i, j] == rho
+    shocks = result['shocks']
+    empirical = np.corrcoef(shocks[i].ravel(), shocks[j].ravel())[0, 1]
+    assert abs(empirical - rho) < 0.03

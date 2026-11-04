@@ -46,6 +46,12 @@
       "covers": ["real_estate.dynamics.instantaneous_volatility", "real_estate.dynamics.mean_reversion"]
     },
     {
+      "label": "Armel K., Planchet F. (2018), « Comment construire un générateur de scénarios économiques risque neutre destiné à l'évaluation économique des contrats d'épargne ? », Assurances et gestion des risques 85(1-2), p. 27-55, doi:10.7202/1051315ar. Tableau 5, p. 50, matrice des modèles Hull-White et G2++ : corrélation immobilier / taux (Euribor 12 mois) de −3,9 %. Retenue par Sébastien Gallet le 2026-11-04 avec le calibrage de l'article EAJ.",
+      "url": "https://assets.erudit.tech/en/revue/agr/2018/v85/n1-2/1051315ar.pdf",
+      "consulted_on": "2026-11-04",
+      "covers": ["real_estate.dynamics.rate_correlation"]
+    },
+    {
       "label": "ASPIM/IEIF — Communiqué du 10/02/2026, marché des SCPI au 4e trimestre 2025 : taux de distribution moyen 2025 de 4,91 %",
       "url": "https://www.aspim.fr/content/uploads/2026/02/ASPIM_CP-4T-2025_V4.pdf",
       "consulted_on": "2026-10-24",
@@ -67,6 +73,7 @@
     "rates.hull_white est calé sur la courbe EIOPA d'avril 2018 (yield_curve_id eiopa-fr-2018-04), la courbe par défaut du chemin stochastique. Une simulation sur une autre courbe garde ces paramètres sans recalibrage : il faudrait une surface de swaptions du même millésime que la courbe.",
     "bond.fund_maturity_years (8 ans) est une hypothèse de modélisation, pas une donnée de marché sourcée : maturité de l'obligation que le fonds obligataire du chemin stochastique achète au pair chaque année (HullWhiteModel.bond_fund_returns). Retenue par Sébastien Gallet le 2026-10-25 comme ordre de grandeur de la duration des actifs des fonds euros d'assurance vie (hors unités de compte), composés d'environ 80 % d'obligations. DÉFICIT À COMBLER : sourcer une duration précise (rapports ACPR ou FFA sur les placements des assureurs) ; une analyse de sensibilité est recommandée avant publication.",
     "real_estate_fund.distribution_rate (4,91 %) est la moyenne de place d'une seule année (2025, ASPIM/IEIF), appliquée chaque année de la projection et à toute SCPI. C'est une statistique de l'association professionnelle, pas une valeur de loi ni une moyenne longue.",
+    "real_estate.dynamics.rate_correlation (−3,9 %) vient d'une étude publiée (Armel et Planchet 2018), pas d'une estimation propre au dépôt : elle porte sur l'Euribor 12 mois, et la même étude donne +3,9 % dans sa matrice LMM sans expliquer le changement de signe. Les autres coefficients de la matrice de CorrelatedRandomGenerator restent les valeurs par défaut d'Ahlgrim et al., non vérifiées pour la France.",
     "correlations n'est actuellement consommé par aucun des deux chemins de génération de ScenarioGenerator (_generate_simple, _generate_stochastic construit sa propre corrélation via CorrelatedRandomGenerator, qui ignore ce champ) : c'est une configuration sans effet observable, pas seulement une hypothèse non validée. Corrigé indépendamment de la présente extraction — voir docs/journal-1b-calibration.md."
   ],
 
@@ -86,6 +93,7 @@
       "volatility": 0.12,
       "instantaneous_volatility": 0.0379,
       "mean_reversion": 0.145,
+      "rate_correlation": -0.039,
       "rental_yield": 0.03,
       "inflation_adjustment": 0.02
     }
