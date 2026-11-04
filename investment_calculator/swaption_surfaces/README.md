@@ -20,7 +20,7 @@ du modèle Hull-White : voir
 
 | Surface | Nature | Statut |
 |---|---|---|
-| `eur-bloomberg-2018` | 9 cotations Bloomberg réelles, reprises du calibrage R de 2018 (`legacy/csv_files/Swaptions_V2.csv`) | `draft` : date d'observation et jambe fixe à confirmer par seb |
+| `eur-bloomberg-2018` | 9 cotations Bloomberg réelles, reprises du calibrage R de 2018 (`legacy/csv_files/Swaptions_V2.csv`) | `validated` par Sébastien Gallet le 2026-11-04 (été 2018, jambe annuelle) ; calibre `rates.hull_white` des hypothèses de marché |
 | `eur-synthetic-2026-08` | grille synthétique, fixture de développement | `draft`, ne peut pas devenir `validated` |
 
 `eur-bloomberg-2018` n'est pas une grille complète : c'est une liste de
@@ -30,7 +30,8 @@ sur ces cotations et la courbe EIOPA d'avril 2018, le sigma du script R
 (`a_sigma.Rda`) à moins de 1 %.
 
 Une surface `validated` doit être réelle (`synthetic: false`), datée
-(`observation_date`) et nommer son relecteur (`validation.validated_by`) :
+(`observation_date`, ou à défaut `observation_period` quand seule la période
+est connue) et nommer son relecteur (`validation.validated_by`) :
 `load_swaption_surface` le vérifie.
 
 ### La surface synthétique
