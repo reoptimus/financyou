@@ -149,6 +149,7 @@ class ScenarioGenerator:
             'equity_dividend_yield': assumptions.dividend_yield,
             're_mean_reversion': assumptions.real_estate_mean_reversion,
             're_instantaneous_volatility': assumptions.real_estate_instantaneous_volatility,
+            're_rate_correlation': assumptions.real_estate_rate_correlation,
             're_rental_yield': assumptions.real_estate_rental_yield,
             're_inflation_adj': assumptions.real_estate_inflation_adjustment,
         }
@@ -438,6 +439,7 @@ class ScenarioGenerator:
 
         # Step 3: Generate correlated shocks
         corr_gen = CorrelatedRandomGenerator(
+            correlation_matrix=shock_correlation_matrix(params['re_rate_correlation']),
             n_scenarios=n_scenarios,
             n_steps=n_dates,
             random_seed=self.random_seed
@@ -633,6 +635,13 @@ class ScenarioGenerator:
                 # taux sans risque + cette prime. Voir
                 # docs/validation/1b-hypotheses-monde-reel.md.
                 'market_assumptions_id': assumptions.id,
+                # Provenance des paramètres Hull-White (surface de
+                # swaptions et courbe de calibration), pour rejouer la
+                # simulation ; voir rates.hull_white.calibration.
+                'hull_white_status': assumptions.document['rates']['hull_white']['status'],
+                'hull_white_calibration': assumptions.document['rates']['hull_white'].get(
+                    'calibration'
+                ),
                 'equity_risk_premium': assumptions.equity_risk_premium,
                 'real_estate_risk_premium': assumptions.real_estate_risk_premium,
             },
@@ -866,6 +875,23 @@ class ScenarioGenerator:
 
 
 # Convenience functions for backward compatibility
+def shock_correlation_matrix(rate_real_estate_correlation: float) -> np.ndarray:
+    """
+    Matrice de corrélation des chocs du chemin stochastique.
+
+    Seul le coefficient taux court / immobilier est une hypothèse sourcée
+    (``real_estate.dynamics.rate_correlation`` de market_assumptions) ; les
+    autres coefficients gardent les valeurs par défaut de
+    :class:`CorrelatedRandomGenerator` (Ahlgrim et al.), non vérifiées pour la
+    France.
+    """
+    matrix = CorrelatedRandomGenerator.DEFAULT_CORRELATION_MATRIX.copy()
+    names = CorrelatedRandomGenerator.DEFAULT_ASSET_NAMES
+    i, j = names.index('short_rate'), names.index('real_estate')
+    matrix[i, j] = matrix[j, i] = rate_real_estate_correlation
+    return matrix
+
+
 def generate_scenarios(config: dict, random_seed: int | None = None) -> dict:
     """
     Generate economic scenarios (convenience function).

@@ -241,6 +241,7 @@ def main():
         max_equity=validated['constraints']['max_equity_allocation'],
         min_bond=validated['constraints']['min_bond_allocation'],
         holdings=profile_holdings(validated),
+        reference_wrapper='cto',
     )
 
     optimal = optimization_results['optimal_portfolio']
@@ -261,6 +262,12 @@ def main():
     print(f"  Expected volatility: {optimal['expected_volatility']:.2%}")
     print(f"  Sharpe ratio: {sharpe:.2f}" if sharpe is not None else "  Sharpe ratio: not computed")
     print(f"  Max drawdown: {optimal['max_drawdown']:.1%}")
+    envelope = optimal['envelope_value']
+    if envelope['value'] is not None:
+        print(f"  Envelope value V_H (certainty equivalent vs {envelope['reference_wrapper']} "
+              f"only): {envelope['value'] * 1e4:.0f} bp/year")
+    else:
+        print(f"  Envelope value V_H: not computed ({envelope['reason']})")
 
     print(f"\nMonte Carlo Simulation ({scenario_config['num_scenarios']} scenarios, "
           f"after exit tax):")

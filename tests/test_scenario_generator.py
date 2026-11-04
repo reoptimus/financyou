@@ -587,11 +587,14 @@ class TestStochasticScenarioGeneration:
         faisait donc échouer le test par construction dès que t>0 et le taux
         est positif, quel que soit le modèle sous-jacent.
 
-        Objectif explicite de l'étape 1.B.1 : une fois comparé à P(0,t), l'écart
-        doit rester sous 0,5 % à 30 ans. Vérifié stable sur 5 graines
-        différentes avant d'écrire ce test (0,23 % à 0,40 %) ; 10 000
-        scénarios et un pas semestriel de 0,25 an suffisent, sans avoir besoin
-        d'un Monte-Carlo massif.
+        L'étape 1.B.1 visait 0,5 % à 30 ans avec le Hull-White provisoire
+        (a = 0,1 ; σ = 1 %), mesuré entre 0,23 % et 0,40 %. Avec la calibration
+        sur swaptions (a = 0,0058 ; σ = 0,68 %), la variance du déflateur à 30
+        ans est bien plus forte : à 10 000 scénarios, l'erreur type
+        Monte-Carlo vaut 0,36 % à elle seule, et l'écart mesuré va de 0,48 % à
+        0,68 % selon la graine. À 100 000 scénarios, il tombe à 0,33 % pour une
+        erreur type de 0,12 %. Le test compare donc l'écart à l'erreur type de
+        l'échantillon (trois erreurs types), et garde 1 % comme plafond absolu.
         """
         gen = scenario_generator.ScenarioGenerator(random_seed=42)
         config = {
@@ -605,10 +608,40 @@ class TestStochasticScenarioGeneration:
         results = gen.generate(config)
         rates = results['diagnostics']['martingale_test']['rates']
 
-        assert rates['max_relative_deviation'] < 0.005, (
-            f"E[D(t)] s'écarte de P(0,t) de {rates['max_relative_deviation']:.4%} "
-            f"au pire point de la courbe : au-delà de l'objectif de 0,5 % à 30 ans."
+        # Erreur type relative au pire point, sur les moyennes des paires
+        # antithétiques (lignes i et i + N/2 : chocs opposés).
+        deflators = results['deflators'].drop(columns='scenario_id').to_numpy(dtype=float)
+        half = len(deflators) // 2
+        pairs = (deflators[:half] + deflators[half:2 * half]) / 2
+        relative_se = float((pairs.std(axis=0) / np.sqrt(half) / pairs.mean(axis=0)).max())
+
+        deviation = rates['max_relative_deviation']
+        assert deviation < min(0.01, 3 * relative_se), (
+            f"E[D(t)] s'écarte de P(0,t) de {deviation:.4%} au pire point de la courbe, "
+            f"pour une erreur type Monte-Carlo de {relative_se:.4%} : au-delà de trois "
+            f"erreurs types (ou de 1 %)."
         )
+
+    def test_stochastic_filtre_remplace_les_chemins_hors_bornes(self):
+        """
+        Régression : la régénération des chemins hors bornes exigeait qu'une
+        seule tentative fournisse tous les remplacements. Avec la calibration
+        sur swaptions, 14 % des chemins sortent de [-5 %, 10 %] sur 30 ans au
+        pas annuel, et aucune tentative n'y parvenait (RuntimeError).
+        """
+        config = {
+            'num_scenarios': 1000,
+            'time_horizon': 30,
+            'timestep': 1.0,
+            'use_stochastic': True,
+            'currency': 'EUR',
+        }
+        results = scenario_generator.ScenarioGenerator(random_seed=42).generate(config)
+        info = results['metadata']['calibration_info']
+        assert info['rate_paths_out_of_bounds'] > 0
+        assert results['scenarios']['scenario_id'].nunique() == 1000
+        rates = results['scenarios']['interest_rate']
+        assert rates.max() <= 0.10 + 1e-9
 
     def test_martingale_equity_est_risque_neutre(self):
         """
@@ -1129,3 +1162,38 @@ def test_drift_immobilier_exact():
     assert empirical_covariance == pytest.approx(covariance[last], rel=0.05)
     # La covariance avec les taux n'est pas négligeable devant la convexité.
     assert abs(covariance[last]) > 0.1 * variance[last] / 2
+
+
+def test_correlation_taux_immobilier_lue_dans_les_hypotheses(monkeypatch):
+    """
+    Le chemin stochastique corrèle les chocs du taux court et de l'immobilier
+    avec la valeur sourcée de market_assumptions (Armel et Planchet 2018,
+    −3,9 %), et non plus avec le 0,35 par défaut d'Ahlgrim et al.
+    """
+    from investment_calculator.market_assumptions import load_market_assumptions
+    from investment_calculator.stochastic_models import CorrelatedRandomGenerator
+
+    rho = load_market_assumptions().real_estate_rate_correlation
+    assert rho == -0.039
+
+    used = []
+    original_generate = CorrelatedRandomGenerator.generate
+
+    def spy(self, *args, **kwargs):
+        result = original_generate(self, *args, **kwargs)
+        used.append(result)
+        return result
+
+    monkeypatch.setattr(CorrelatedRandomGenerator, 'generate', spy)
+    generator = scenario_generator.ScenarioGenerator(random_seed=3)
+    generator.generate({
+        'num_scenarios': 2_000, 'time_horizon': 10, 'timestep': 1.0,
+        'use_stochastic': True, 'currency': 'EUR', 'filter_explosive_rates': False,
+    })
+    (result,) = used
+    names = result['asset_names']
+    i, j = names.index('short_rate'), names.index('real_estate')
+    assert result['correlation_matrix'][i, j] == rho
+    shocks = result['shocks']
+    empirical = np.corrcoef(shocks[i].ravel(), shocks[j].ravel())[0, 1]
+    assert abs(empirical - rho) < 0.03

@@ -4,6 +4,8 @@ Chaîne GSE → GSE+ → GSE++ → Markowitz → patrimoine, au format du rappor
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -34,7 +36,9 @@ def test_resultats_au_format_du_rapport(scenarios: pd.DataFrame) -> None:
     )
     portfolio = results["optimal_portfolio"]
     weights = pd.Series(portfolio["weights"])
-    assert list(weights.index) == FR_2026.placement_ids
+    # Sans tranche marginale du foyer, la SCPI en direct est écartée, et l'écart dit pourquoi.
+    assert list(weights.index) == [p for p in FR_2026.placement_ids if p != "scpi_direct"]
+    assert list(results["excluded_placements"]) == ["scpi_direct"]
     assert weights.sum() == pytest.approx(1.0) and (weights >= 0).all()
     assert portfolio["sharpe_ratio"] == pytest.approx(
         (portfolio["expected_return"] - portfolio["risk_free_rate"])
@@ -49,6 +53,17 @@ def test_resultats_au_format_du_rapport(scenarios: pd.DataFrame) -> None:
     goal = results["goal_analysis"]
     assert goal["probability_of_achieving"] == pytest.approx((terminal >= 150_000.0).mean())
     assert not results["efficient_frontier"].empty
+
+
+def test_avec_la_tranche_marginale_la_scpi_en_direct_est_proposee(
+    scenarios: pd.DataFrame,
+) -> None:
+    results = plan_placements(
+        scenarios, FR_2026, _flows(), horizon=10, objective="mean_variance",
+        risk_aversion=5.0, frontier_points=3, marginal_income_tax_rate=0.30,
+    )
+    assert "scpi_direct" in results["optimal_portfolio"]["weights"]
+    assert "excluded_placements" not in results
 
 
 def test_sans_placement_de_reference_le_sharpe_n_est_pas_calcule(
@@ -73,3 +88,41 @@ def test_perte_maximale_d_un_portefeuille_fixe() -> None:
     weights = pd.Series({"x": 1.0})
     assert max_drawdown(gross, weights, 3) == pytest.approx(np.median([0.5, 0.0]))
     assert max_drawdown(gross, weights, 1) == 0.0
+
+
+def test_valeur_des_enveloppes_restituee(scenarios: pd.DataFrame) -> None:
+    results = plan_placements(
+        scenarios, FR_2026, _flows(), horizon=10, objective="mean_variance",
+        risk_aversion=5.0, frontier_points=3, reference_wrapper="cto",
+    )
+    envelope = results["optimal_portfolio"]["envelope_value"]
+    assert envelope["value"] == pytest.approx(
+        envelope["certainty_equivalent_all"] - envelope["certainty_equivalent_reference"]
+    )
+    # L'optimum de référence est un cas particulier de l'optimum : V_H ≥ 0.
+    assert envelope["value"] >= -1e-9
+    reference = pd.Series(envelope["reference_weights"])
+    assert reference.sum() == pytest.approx(1.0)
+    outside = [p for p in reference.index if FR_2026.placement(p)["wrapper"] != "cto"]
+    assert reference[outside].abs().max() < 1e-6
+    json.dumps(results["optimal_portfolio"])
+
+
+def test_valeur_des_enveloppes_declaree_absente_hors_moyenne_variance(
+    scenarios: pd.DataFrame,
+) -> None:
+    results = plan_placements(
+        scenarios, FR_2026, _flows(), horizon=5, objective="min_volatility",
+        frontier_points=3, reference_wrapper="cto",
+    )
+    envelope = results["optimal_portfolio"]["envelope_value"]
+    assert envelope["value"] is None
+    assert "mean_variance" in envelope["reason"]
+
+
+def test_sans_enveloppe_de_reference_pas_de_valeur(scenarios: pd.DataFrame) -> None:
+    results = plan_placements(
+        scenarios, FR_2026, _flows(), horizon=5, objective="mean_variance",
+        risk_aversion=5.0, frontier_points=3,
+    )
+    assert "envelope_value" not in results["optimal_portfolio"]

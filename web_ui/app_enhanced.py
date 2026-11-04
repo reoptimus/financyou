@@ -514,6 +514,18 @@ def display_results(results):
         f"Patrimoine net médian à {portfolio['horizon']} ans",
         f"{statistics['median_terminal_wealth']:,.0f} €",
     )
+    envelope = portfolio.get('envelope_value')
+    if envelope is not None and envelope['value'] is not None:
+        st.metric(
+            "Valeur des enveloppes",
+            f"{envelope['value'] * 1e4:+.0f} pb par an",
+            help=(
+                "Équivalent certain de l'allocation avec toutes les enveloppes, moins "
+                f"celui de la meilleure allocation limitée au {envelope['reference_wrapper']}."
+            ),
+        )
+    elif envelope is not None:
+        st.caption(f"Valeur des enveloppes non calculée : {envelope['reason']}")
     st.caption(
         f"Rendements nets de frais et d'impôts, annualisés sur {portfolio['horizon']} ans "
         f"(catalogue {portfolio['placement_catalog']}). Le patrimoine inclut l'épargne "
@@ -528,6 +540,9 @@ def display_results(results):
     })
     st.dataframe(weights.style.format({'Part': '{:.1%}'}), use_container_width=True)
     st.caption(optimization['constraints_explanation'])
+    for placement_id, reason in optimization.get('excluded_placements', {}).items():
+        st.info(f"{catalog.placement(placement_id)['label']} : {reason} "
+                "Saisissez le budget du foyer pour le proposer.")
 
     waterfall = optimization.get('wealth_waterfall')
     if waterfall is not None:

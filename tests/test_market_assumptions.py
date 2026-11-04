@@ -104,15 +104,76 @@ def test_les_hypotheses_economiques_de_l_etape_1_b_4_sont_exposees():
     assert assumptions.gdp_growth_volatility > 0
 
 
-def test_hull_white_est_marque_comme_un_placeholder_non_calibre():
-    """
-    L'étape 1.B.5 (calibration sur swaptions réels) est différée faute de
-    données de marché disponibles dans ce dépôt : le document doit le dire
-    explicitement plutôt que de laisser croire à une calibration réelle.
-    """
+@pytest.fixture(scope="module")
+def hull_white():
     path = PACKAGE_ASSUMPTIONS_DIR / "default-2026.json"
-    document = json.loads(path.read_text(encoding="utf-8"))
-    assert document["rates"]["hull_white"]["status"] == "placeholder"
+    return json.loads(path.read_text(encoding="utf-8"))["rates"]["hull_white"]
+
+
+class TestHullWhiteCalibre:
+    """
+    rates.hull_white n'est plus un placeholder : il doit se recalculer à partir
+    de la surface et de la courbe qu'il cite (étape 1.B.5). Un sigma modifié à
+    la main dans le JSON, ou une surface non validée, fait échouer ces tests.
+    """
+
+    def test_statut_calibre_avec_provenance(self, hull_white):
+        assert hull_white["status"] == "calibrated"
+        assert hull_white["calibration"]["validated_by"]
+
+    def test_la_surface_citee_est_reelle_et_validee(self, hull_white):
+        from investment_calculator.swaption_surface import load_swaption_surface
+
+        surface = load_swaption_surface(hull_white["calibration"]["swaption_surface_id"])
+        assert surface.synthetic is False
+        assert surface.status == "validated"
+
+    def test_la_courbe_citee_est_celle_du_chemin_stochastique(self, hull_white):
+        from investment_calculator.modules.scenario_generator import ScenarioGenerator
+
+        assert (
+            hull_white["calibration"]["yield_curve_id"]
+            == ScenarioGenerator.DEFAULT_YIELD_CURVE_ID
+        )
+
+    def test_sigma_se_recalcule_depuis_la_surface_et_la_courbe(self, hull_white):
+        from investment_calculator.stochastic_models.calibration import (
+            SwaptionCalibrator,
+            grid_curve_functions,
+        )
+        from investment_calculator.swaption_surface import load_swaption_surface
+        from investment_calculator.yield_curve import load_yield_curve
+
+        calibration = hull_white["calibration"]
+        dt = 0.025
+        curve = load_yield_curve(calibration["yield_curve_id"], dt=dt)
+        curve_p0, curve_f0 = grid_curve_functions(
+            curve.get_bond_prices(), curve.get_forward_curve(), dt
+        )
+        calibrator = SwaptionCalibrator(
+            load_swaption_surface(calibration["swaption_surface_id"]), curve_p0, curve_f0
+        )
+        wanted = {tuple(label.split("×")) for label in calibration["instruments"]}
+        band = [
+            inst for inst in calibrator.instruments
+            if (inst.expiry_label, inst.tenor_label) in wanted
+        ]
+        assert len(band) == len(wanted)
+
+        result = calibrator.calibrate(band, fixed_a=hull_white["mean_reversion_speed"])
+        assert hull_white["volatility"] == pytest.approx(result.sigma, abs=1e-6)
+        assert calibration["rmse_bp"] == pytest.approx(result.rmse_bp, abs=0.01)
+
+
+def test_un_hull_white_calibre_sans_provenance_est_refuse():
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = json.loads((PACKAGE_ASSUMPTIONS_DIR / "schema.json").read_text(encoding="utf-8"))
+    document = json.loads(
+        (PACKAGE_ASSUMPTIONS_DIR / "default-2026.json").read_text(encoding="utf-8")
+    )
+    del document["rates"]["hull_white"]["calibration"]
+    errors = list(jsonschema.Draft202012Validator(schema).iter_errors(document))
+    assert any("calibration" in error.message for error in errors)
 
 
 def test_correlations_a_la_forme_consommee_par_scenario_generator():

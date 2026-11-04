@@ -17,6 +17,7 @@
       "covers": [
         "av_fonds_euros.fees.annual_rate",
         "av_uc_actions.fees.annual_rate",
+        "av_scpi.fees.annual_rate",
         "av_fonds_euros.support.floor_rate"
       ]
     },
@@ -116,7 +117,7 @@
       "consulted_on": "2026-10-24",
       "covers": [
         "av_scpi.fees.entry_rate",
-        "av_scpi.fees.annual_rate"
+        "scpi_direct.fees.entry_rate"
       ]
     }
   ],
@@ -138,7 +139,9 @@
     "Livret A : le GSE n'a ni €STR ni inflation hors tabac. Le taux court (interest_rate) et l'inflation du GSE en tiennent lieu. Les dérogations du gouvernement à la formule ne sont pas modélisables.",
     "PEA : le GSE n'a qu'une série actions, sans distinction entre actions européennes (seules éligibles) et mondiales.",
     "Hors périmètre de ce premier catalogue : obligations en PEA, SCPI détenue en direct (fiscalité foncière à compléter dans le régime), PER (formule de sortie non sourcée).",
-    "SCPI en assurance-vie (av_scpi), ajoutée le 2026-10-24 : frais = frais moyens du contrat d'assurance-vie (0,57 % à l'entrée, 0,80 % par an, mêmes sources que les unités de compte) plus les coûts du DIC d'Epargne Fonciere (7,50 % à l'entrée, 1,53 % + 0,40 % par an), additionnés comme pour les unités de compte. Un assureur peut réduire ou supprimer les coûts d'entrée de la SCPI : la valeur retenue est celle du DIC. Le rendement est la série real_estate_return du GSE, calée sur l'immobilier résidentiel, alors que les SCPI détiennent surtout de l'immobilier d'entreprise : approximation choisie par Sébastien Gallet le 2026-10-24. Repère ASPIM/IEIF pour 2025 : taux de distribution 4,91 %, prix de part −3,45 %, performance globale +1,46 %."
+    "SCPI en assurance-vie (av_scpi), ajoutée le 2026-10-24 : frais = frais moyens du contrat d'assurance-vie (0,57 % à l'entrée, 0,80 % par an, mêmes sources que les unités de compte) plus les coûts du DIC d'Epargne Fonciere (7,50 % à l'entrée, 1,53 % + 0,40 % par an), additionnés comme pour les unités de compte. Depuis le 2026-10-30, les frais annuels du DIC ne sont plus retranchés (voir la décision sur les frais annuels des SCPI) : il reste 0,80 % par an, ceux du contrat. Un assureur peut réduire ou supprimer les coûts d'entrée de la SCPI : la valeur retenue est celle du DIC. Le rendement est la série real_estate_return du GSE, calée sur l'immobilier résidentiel, alors que les SCPI détiennent surtout de l'immobilier d'entreprise : approximation choisie par Sébastien Gallet le 2026-10-24. Repère ASPIM/IEIF pour 2025 : taux de distribution 4,91 %, prix de part −3,45 %, performance globale +1,46 %.",
+    "Frais annuels des SCPI (décision de Sébastien Gallet le 2026-10-30) : les frais de gestion et de transaction du DIC d'Epargne Fonciere (1,53 % + 0,40 % par an) ne sont PAS retranchés de la série real_estate_return. Elle est lue comme une performance de marché déjà nette de ces frais, comme le sont les distributions des SCPI et le TRI publié par l'IEIF (« 40 ans de performances comparées (1985-2025) », édition 2026 : 5,3 % par an sur 15 ans, 6,3 % sur 30 ans, cité par MeilleureSCPI, étude elle-même non relue). Sans ce choix, la série (4,50 % brut en moyenne) moins ces frais donnait 2,48 % par an, pour une distribution de 4,91 % : le prix des parts baissait d'environ 2,4 % par an. av_scpi ne garde donc que les frais annuels du contrat (0,80 %), scpi_direct aucun ; les frais d'entrée du DIC restent appliqués.",
+    "SCPI détenue en direct (scpi_direct), ajoutée le 2026-10-29 : frais d'entrée du DIC d'Epargne Fonciere (7,50 %), sans contrat. Enveloppe immobilier_direct : revenus distribués (real_estate_fund.distribution_rate des hypothèses de marché) imposés chaque année à la tranche marginale du foyer et aux prélèvements sociaux, revenus nets réinvestis avec frais d'entrée, cession lot par lot avec abattements et surtaxe. Le placement n'est proposé que si la tranche marginale du foyer est connue (budget du foyer saisi) ; sinon il est écarté et l'écart est signalé. Même approximation de rendement que av_scpi (série real_estate_return)."
   ],
   "placements": [
     {
@@ -258,7 +261,21 @@
       },
       "fees": {
         "entry_rate": 0.0807,
-        "annual_rate": 0.0273
+        "annual_rate": 0.008
+      }
+    },
+    {
+      "id": "scpi_direct",
+      "label": "SCPI détenue en direct",
+      "wrapper": "immobilier_direct",
+      "asset_class": "real_estate",
+      "support": {
+        "model": "gse_series",
+        "series": "real_estate_return"
+      },
+      "fees": {
+        "entry_rate": 0.075,
+        "annual_rate": 0.0
       }
     }
   ]

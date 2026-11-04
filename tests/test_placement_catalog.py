@@ -55,7 +55,7 @@ def test_fr_2026_valide_et_charge_par_defaut() -> None:
     assert catalog.regime.id == "fr-2026"
     assert catalog.placement_ids == [
         "cto_actions", "cto_obligations", "pea_actions",
-        "av_fonds_euros", "av_uc_actions", "livret_a", "av_scpi",
+        "av_fonds_euros", "av_uc_actions", "livret_a", "av_scpi", "scpi_direct",
     ]
     assert catalog.placement("pea_actions")["wrapper"] == "pea"
 
