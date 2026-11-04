@@ -211,10 +211,9 @@ class MarketAssumptions:
     @property
     def hull_white_mean_reversion_speed(self) -> float:
         """
-        Paramètre 'a' de Hull-White pour le chemin stochastique. PLACEHOLDER non
-        calibré tant que l'étape 1.B.5 (calibration sur swaptions réels) n'a pas
-        été menée — voir le champ 'status' du document et
-        docs/journal-1b-calibration.md.
+        Paramètre 'a' de Hull-White pour le chemin stochastique. Voir
+        rates.hull_white.status et rates.hull_white.calibration pour sa
+        provenance, et docs/journal-1b-calibration.md, point 8.
         """
         return float(self.document["rates"]["hull_white"]["mean_reversion_speed"])
 

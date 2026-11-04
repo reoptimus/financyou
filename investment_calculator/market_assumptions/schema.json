@@ -160,13 +160,34 @@
           "type": "object",
           "required": ["mean_reversion_speed", "volatility", "status"],
           "additionalProperties": false,
-          "description": "Paramètres a/sigma du modèle Hull-White utilisés par le chemin stochastique. PAS calibrés sur des prix de swaption réels (étape 1.B.5, différée faute de données de marché disponibles dans ce dépôt — voir docs/journal-1b-calibration.md) : ce sont les anciens littéraux de scenario_generator.py, portés ici tels quels en attendant cette calibration.",
+          "if": { "properties": { "status": { "const": "calibrated" } } },
+          "then": { "required": ["calibration"] },
+          "description": "Paramètres a/sigma du modèle Hull-White utilisés par le chemin stochastique. status=calibrated : issus d'une surface de swaptions validée (investment_calculator/swaption_surfaces/), avec la provenance dans calibration. Voir docs/journal-1b-calibration.md, point 8.",
           "properties": {
             "mean_reversion_speed": { "type": "number", "exclusiveMinimum": 0, "description": "Paramètre 'a' de Hull-White." },
             "volatility": { "type": "number", "exclusiveMinimum": 0, "description": "Paramètre 'sigma' de Hull-White." },
             "status": {
               "enum": ["placeholder", "calibrated"],
               "description": "placeholder : littéral non calibré. calibrated : issu d'une calibration sur swaptions réels (étape 1.B.5)."
+            },
+            "calibration": {
+              "type": "object",
+              "required": ["swaption_surface_id", "yield_curve_id", "instruments", "method", "validated_by"],
+              "additionalProperties": false,
+              "description": "Provenance d'une calibration : surface et courbe utilisées, swaptions retenues. Obligatoire si status=calibrated, pour que la calibration puisse être refaite et vérifiée.",
+              "properties": {
+                "swaption_surface_id": { "type": "string" },
+                "yield_curve_id": { "type": "string" },
+                "instruments": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Swaptions retenues, au format « échéance×ténor », par exemple « 9Y×2Y »."
+                },
+                "method": { "type": "string" },
+                "rmse_bp": { "type": "number", "minimum": 0 },
+                "validated_by": { "type": "string" },
+                "validated_on": { "type": "string", "format": "date" }
+              }
             }
           }
         }

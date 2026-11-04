@@ -134,7 +134,7 @@ class TestSurfaceBloomberg2018:
     def test_se_charge_sans_opt_in_car_elle_n_est_pas_synthetique(self):
         surface = load_swaption_surface(REAL_SURFACE_ID)
         assert surface.synthetic is False
-        assert surface.status == "draft"
+        assert surface.status == "validated"
         assert surface.vol_grid is None
 
     def test_les_neuf_cotations_du_csv_r_sont_reprises(self):
@@ -150,10 +150,12 @@ class TestSurfaceBloomberg2018:
         assert surface.expiries == ["3Y", "9Y", "10Y", "12Y", "15Y"]
         assert surface.tenors == ["2Y", "5Y", "7Y", "10Y"]
 
-    def test_la_date_inconnue_est_une_lacune_declaree(self):
+    def test_la_date_exacte_inconnue_est_remplacee_par_une_periode(self):
         surface = load_swaption_surface(REAL_SURFACE_ID)
         assert surface.observation_date is None
-        assert any("Date d'observation inconnue" in gap for gap in surface.document["known_gaps"])
+        assert surface.observation_period == "été 2018"
+        gaps = surface.document["known_gaps"]
+        assert any("Date d'observation exacte inconnue" in gap for gap in gaps)
 
     def test_une_cotation_absente_leve_key_error(self):
         surface = load_swaption_surface(REAL_SURFACE_ID)
@@ -162,10 +164,9 @@ class TestSurfaceBloomberg2018:
 
 
 class TestStatutValidated:
-    def test_validated_sans_date_est_refuse(self, tmp_path, monkeypatch):
+    def test_validated_sans_date_ni_periode_est_refuse(self, tmp_path, monkeypatch):
         def mutate(doc):
-            doc["status"] = "validated"
-            doc["validation"] = {"validated_by": "test", "validated_on": "2026-10-25"}
+            doc.pop("observation_period")
 
         _write_variant(tmp_path, monkeypatch, "sans-date", mutate)
         with pytest.raises(SwaptionSurfaceValidationError, match="observation_date"):
@@ -173,8 +174,7 @@ class TestStatutValidated:
 
     def test_validated_sans_relecteur_est_refuse(self, tmp_path, monkeypatch):
         def mutate(doc):
-            doc["status"] = "validated"
-            doc["observation_date"] = "2018-08-01"
+            doc["validation"] = {"validated_by": None, "validated_on": None}
 
         _write_variant(tmp_path, monkeypatch, "sans-relecteur", mutate)
         with pytest.raises(SwaptionSurfaceValidationError, match="validated_by"):

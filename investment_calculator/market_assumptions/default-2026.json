@@ -16,8 +16,8 @@
       "covers": ["equity.dividend_yield", "real_estate.rental_income_share", "real_estate.appreciation_share", "capital_gains_behavior.annual_realized_fraction"]
     },
     {
-      "label": "AUCUNE — extraction fidèle des littéraux 'US historical averages' qui figuraient en dur dans ScenarioGenerator.__init__ et GlobalScenarioEngine.__init__ (investment_calculator/modules/scenario_generator.py, investment_calculator/gse.py) avant l'étape 1.B.4. Aucune de ces valeurs n'a été vérifiée contre une source de marché réelle ; rates.hull_white n'est en outre pas calibré (voir known_gaps).",
-      "covers": ["equity.volatility", "real_estate.dynamics.volatility", "real_estate.dynamics.rental_yield", "real_estate.dynamics.inflation_adjustment", "rates.risk_free_proxy", "rates.hull_white", "bond", "inflation", "gdp_growth", "correlations"]
+      "label": "AUCUNE — extraction fidèle des littéraux 'US historical averages' qui figuraient en dur dans ScenarioGenerator.__init__ et GlobalScenarioEngine.__init__ (investment_calculator/modules/scenario_generator.py, investment_calculator/gse.py) avant l'étape 1.B.4. Aucune de ces valeurs n'a été vérifiée contre une source de marché réelle.",
+      "covers": ["equity.volatility", "real_estate.dynamics.volatility", "real_estate.dynamics.rental_yield", "real_estate.dynamics.inflation_adjustment", "rates.risk_free_proxy", "bond", "inflation", "gdp_growth", "correlations"]
     },
     {
       "label": "Damodaran (NYU Stern) — Country Default Spreads and Risk Premiums, prime de risque actions implicite France",
@@ -36,6 +36,10 @@
       "url": "https://www.meilleurescpi.com/conseils/quest-ce-que-la-prime-de-risque-en-immobilier/",
       "consulted_on": "2026-08-27",
       "covers": ["risk_premia.real_estate"]
+    },
+    {
+      "label": "Bloomberg, 9 swaptions EUR en volatilité normale, extraction de l'été 2018 (surface eur-bloomberg-2018, reprise de legacy/csv_files/Swaptions_V2.csv), et calibrage R de 2018 (a_sigma.Rda : a = 0,0058333). sigma recalculé par SwaptionCalibrator sur la courbe EIOPA d'avril 2018 : 68,44 bp, contre 68,75 bp pour le Monte-Carlo R (0,45 % d'écart). Validé par Sébastien Gallet le 2026-11-04.",
+      "covers": ["rates.hull_white"]
     },
     {
       "label": "INSEE, indice des prix des logements anciens, France métropolitaine, ensemble, base 100 en 2015, série CVS trimestrielle (idBank 010567059, mise à jour du 08/09/2026), market_data/insee/ipla_010567059_cvs.csv. Calage par les moments du modèle (calibrate_from_returns, pas 0,25 an) sur les 103 rendements logarithmiques de 2000-T1 à 2025-T4 : a sur l'autocorrélation d'ordre 1 (0,912), σ sur la variance. Script : examples/calibrate_real_estate_insee.py. Valeurs retenues par Sébastien Gallet le 2026-11-04 (choix « Mesure INSEE : 0,222 / 3,98 % »).",
@@ -66,7 +70,9 @@
     "risk_premia s'applique de façon identique quel que soit l'horizon de simulation ; la littérature distingue parfois prime court terme et prime long terme (30 ans), non modélisé ici.",
     "real_estate.dynamics (a = 0,222 ; σ = 3,98 %, vol long terme σ/a ≈ 18 %) est calé sur les seuls prix des logements anciens (indice INSEE CVS, nominal, hors loyers) alors que RealEstateModel en tire le rendement total, loyers compris. Le calage diffère de celui de l'article EAJ (a = 0,51 ; σ = 5,7 % ; vol long terme 11,1 %), annoncé sur l'indice INSEE 2000-2025 mais non reproduit sur cette série, ni en annuel, ni par AR(1) : la série ou la méthode de l'EAJ reste à identifier. Sur 104 trimestres, a est mal identifié (sur données simulées avec a = 0,51, le même estimateur donne 0,89). Une sensibilité à a et σ est recommandée avant publication.",
     "equity.volatility, real_estate.dynamics.volatility, rates.risk_free_proxy, bond, inflation, gdp_growth et correlations (étape 1.B.4) restent l'extraction fidèle de littéraux 'US historical averages' codés en dur dans scenario_generator.py et gse.py, jamais vérifiés contre une source de marché réelle ni adaptés au marché français.",
-    "rates.hull_white (a=0.1, sigma=0.01) est un PLACEHOLDER (status='placeholder'), pas une calibration : l'étape 1.B.5 (calibration Hull-White sur des prix de swaption réels, portage de legacy/R_scripts/Calib_Taux_Swaptions_V2.R) est différée faute de données de marché disponibles dans ce dépôt (le script R référence un fichier 'Prix_swaptions_bloomberg.Rda' introuvable ici). Tant qu'elle n'est pas menée, le chemin stochastique de ScenarioGenerator utilise une dynamique de taux non calibrée sur le marché. DÉFICIT À COMBLER : le 2026-10-25, Sébastien Gallet a décidé de conserver ces valeurs pour les premiers résultats du papier, en attendant une source de prix ou de volatilités de swaptions EUR.",
+    "rates.hull_white est calibré sur 9 swaptions EUR Bloomberg de l'été 2018 seulement (échéances de 3 à 15 ans), et sigma sur les 3 que pondérait le script R. Une seule volatilité constante sur tout l'horizon : elle laisse 3,4 bp d'écart quadratique moyen et jusqu'à 9,8 bp (3Y×7Y) sur les 9 cotations.",
+    "rates.hull_white.mean_reversion_speed (a = 0,0058333) n'est pas ajusté sur le marché : c'est la valeur fixée par le calibrage R de 2018 (a_sigma.Rda), retenue par Sébastien Gallet le 2026-11-04. Avec un a aussi faible, la variance du taux court croît presque linéairement avec l'horizon (écart-type d'environ 3,7 % à 30 ans).",
+    "rates.hull_white est calé sur la courbe EIOPA d'avril 2018 (yield_curve_id eiopa-fr-2018-04), la courbe par défaut du chemin stochastique. Une simulation sur une autre courbe garde ces paramètres sans recalibrage : il faudrait une surface de swaptions du même millésime que la courbe.",
     "bond.fund_maturity_years (8 ans) est une hypothèse de modélisation, pas une donnée de marché sourcée : maturité de l'obligation que le fonds obligataire du chemin stochastique achète au pair chaque année (HullWhiteModel.bond_fund_returns). Retenue par Sébastien Gallet le 2026-10-25 comme ordre de grandeur de la duration des actifs des fonds euros d'assurance vie (hors unités de compte), composés d'environ 80 % d'obligations. DÉFICIT À COMBLER : sourcer une duration précise (rapports ACPR ou FFA sur les placements des assureurs) ; une analyse de sensibilité est recommandée avant publication.",
     "real_estate_fund.distribution_rate (4,91 %) est la moyenne de place d'une seule année (2025, ASPIM/IEIF), appliquée chaque année de la projection et à toute SCPI. C'est une statistique de l'association professionnelle, pas une valeur de loi ni une moyenne longue.",
     "real_estate.dynamics.rate_correlation (−3,9 %) vient d'une étude publiée (Armel et Planchet 2018), pas d'une estimation propre au dépôt : elle porte sur l'Euribor 12 mois, et la même étude donne +3,9 % dans sa matrice LMM sans expliquer le changement de signe. Les autres coefficients de la matrice de CorrelatedRandomGenerator restent les valeurs par défaut d'Ahlgrim et al., non vérifiées pour la France.",
@@ -105,9 +111,18 @@
       "volatility": 0.02
     },
     "hull_white": {
-      "mean_reversion_speed": 0.1,
-      "volatility": 0.01,
-      "status": "placeholder"
+      "mean_reversion_speed": 0.0058333,
+      "volatility": 0.006844,
+      "status": "calibrated",
+      "calibration": {
+        "swaption_surface_id": "eur-bloomberg-2018",
+        "yield_curve_id": "eiopa-fr-2018-04",
+        "instruments": ["9Y×2Y", "9Y×5Y", "10Y×5Y"],
+        "method": "a fixé à la valeur du calibrage R (a_sigma.Rda) ; sigma ajusté aux volatilités normales ATM par pricer Hull-White fermé (Jamshidian), courbe au pas de 0,025 an. Recalculé par tests/test_market_assumptions.py.",
+        "rmse_bp": 0.33,
+        "validated_by": "Sébastien Gallet",
+        "validated_on": "2026-11-04"
+      }
     }
   },
 

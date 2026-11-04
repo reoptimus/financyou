@@ -441,6 +441,18 @@ def display_results(results):
         f"Patrimoine net médian à {portfolio['horizon']} ans",
         f"{statistics['median_terminal_wealth']:,.0f} €",
     )
+    envelope = portfolio.get('envelope_value')
+    if envelope is not None and envelope['value'] is not None:
+        st.metric(
+            "Valeur des enveloppes",
+            f"{envelope['value'] * 1e4:+.0f} pb par an",
+            help=(
+                "Équivalent certain de l'allocation avec toutes les enveloppes, moins "
+                f"celui de la meilleure allocation limitée au {envelope['reference_wrapper']}."
+            ),
+        )
+    elif envelope is not None:
+        st.caption(f"Valeur des enveloppes non calculée : {envelope['reason']}")
     st.caption(
         f"Rendements nets de frais et d'impôts, annualisés sur {portfolio['horizon']} ans "
         f"(catalogue {portfolio['placement_catalog']}). Le patrimoine inclut l'épargne "

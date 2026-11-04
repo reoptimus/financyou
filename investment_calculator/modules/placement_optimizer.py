@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -60,9 +60,11 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "OBJECTIVES",
+    "EnvelopeValue",
     "HorizonAllocation",
     "OptimizationError",
     "efficient_frontier",
+    "envelope_value",
     "optimize_by_horizon",
     "optimize_horizon",
     "optimize_horizon_resampled",
@@ -85,6 +87,30 @@ class HorizonAllocation:
     weights: pd.Series
     expected_return: float
     volatility: float
+
+
+@dataclass(frozen=True)
+class EnvelopeValue:
+    """
+    Valeur des enveloppes fiscales à l'horizon H, en équivalent certain.
+
+    ``value = certainty_equivalent_all − certainty_equivalent_reference`` : ce
+    que l'accès à toutes les enveloppes rapporte, par an, par rapport au seul
+    placement dans l'enveloppe de référence (le compte-titres en France).
+    L'équivalent certain est l'objectif moyenne-variance à l'optimum,
+    ``w·μ − (λ/2) w'Σw``, sur les rendements annualisés nets de GSE++.
+    """
+
+    horizon: int
+    reference_wrapper: str
+    risk_aversion: float
+    certainty_equivalent_all: float
+    certainty_equivalent_reference: float
+    reference_weights: pd.Series
+
+    @property
+    def value(self) -> float:
+        return self.certainty_equivalent_all - self.certainty_equivalent_reference
 
 
 def placement_constraints(
@@ -282,6 +308,70 @@ def _required_param(value: float | None, name: str, objective: str) -> float:
     if value is None:
         raise ValueError(f"L'objectif {objective!r} demande le paramètre {name}.")
     return float(value)
+
+
+def _certainty_equivalent(allocation: HorizonAllocation, risk_aversion: float) -> float:
+    return allocation.expected_return - 0.5 * risk_aversion * allocation.volatility**2
+
+
+def envelope_value(
+    net: NetReturns,
+    horizon: int,
+    constraints: WeightConstraints,
+    catalog: PlacementCatalog,
+    *,
+    reference_wrapper: str,
+    risk_aversion: float,
+) -> EnvelopeValue:
+    """
+    Valeur des enveloppes V_H : équivalent certain de l'optimum avec toutes les
+    enveloppes, moins celui de l'optimum restreint à ``reference_wrapper``.
+
+    Les deux optima sont calculés sous les mêmes contraintes (plafonds, profil) ;
+    l'optimum de référence interdit en plus tout placement hors de l'enveloppe
+    de référence. Quand tous les placements sont dans cette enveloppe, les deux
+    problèmes sont identiques et la valeur est nulle.
+
+    L'enveloppe de référence est un choix de l'appelant, pas du code : c'est
+    l'identifiant d'une enveloppe du régime (``"cto"`` pour fr-2026).
+
+    Raises:
+        ValueError: aucun placement de GSE++ n'est logé dans ``reference_wrapper``.
+        OptimizationError, InfeasibleConstraintsError: l'un des deux optima n'est
+            pas atteint (par exemple, une contrainte d'obligations du profil
+            qu'aucun placement de l'enveloppe de référence ne peut tenir).
+    """
+    wrappers = [str(catalog.placement(p)["wrapper"]) for p in net.placement_ids]
+    inside = np.array([w == reference_wrapper for w in wrappers])
+    if not inside.any():
+        raise ValueError(
+            f"Aucun placement de l'enveloppe {reference_wrapper!r} parmi "
+            f"{net.placement_ids} : la valeur des enveloppes se mesure contre une "
+            f"enveloppe présente. Enveloppes des placements : {sorted(set(wrappers))}."
+        )
+    restricted = replace(
+        constraints,
+        upper=np.where(inside, constraints.upper, 0.0),
+        explanation=(
+            f"Optimum de référence : seuls les placements de l'enveloppe "
+            f"{reference_wrapper} sont permis. {constraints.explanation}"
+        ),
+    )
+    best = optimize_horizon(net, horizon, constraints, risk_aversion=risk_aversion)
+    reference = optimize_horizon(net, horizon, restricted, risk_aversion=risk_aversion)
+    result = EnvelopeValue(
+        horizon=horizon,
+        reference_wrapper=reference_wrapper,
+        risk_aversion=float(risk_aversion),
+        certainty_equivalent_all=_certainty_equivalent(best, risk_aversion),
+        certainty_equivalent_reference=_certainty_equivalent(reference, risk_aversion),
+        reference_weights=reference.weights,
+    )
+    logger.info(
+        "Valeur des enveloppes (H=%d, référence %s) : %.5f par an", horizon,
+        reference_wrapper, result.value,
+    )
+    return result
 
 
 def optimize_horizon_resampled(

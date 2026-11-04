@@ -371,10 +371,21 @@ class HullWhiteModel:
         use_antithetic: bool,
         max_attempts: int = 10
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Generate replacement scenarios for filtered explosive paths."""
+        """
+        Régénérer des chemins de remplacement dans les bornes.
+
+        Chaque tentative tire ``n_needed`` chemins et garde ceux qui restent
+        dans les bornes ; les chemins retenus s'accumulent d'une tentative à
+        l'autre. Auparavant, une tentative devait fournir à elle seule les
+        ``n_needed`` chemins : dès qu'une fraction des chemins sortait des
+        bornes, aucune tentative n'y parvenait.
+        """
         # Arrondi au pair supérieur : arrondi vers le bas, un nombre impair de
         # scénarios à remplacer n'était jamais atteint, et il en manquait un.
         n_sim = (n_needed + 1) // 2 * 2 if use_antithetic else n_needed
+        kept_Rt: list[np.ndarray] = []
+        kept_rt: list[np.ndarray] = []
+        n_kept = 0
 
         for _attempt in range(max_attempts):
             rt_new = np.zeros((n_sim, self.n_steps))
@@ -423,8 +434,14 @@ class HullWhiteModel:
             low_mask = np.any(Rt_new < lim_low, axis=1)
             good_scenarios = ~(high_mask | low_mask)
 
-            if np.sum(good_scenarios) >= n_needed:
-                return Rt_new[good_scenarios][:n_needed], rt_new[good_scenarios][:n_needed]
+            kept_Rt.append(Rt_new[good_scenarios])
+            kept_rt.append(rt_new[good_scenarios])
+            n_kept += int(np.sum(good_scenarios))
+            if n_kept >= n_needed:
+                return (
+                    np.vstack(kept_Rt)[:n_needed],
+                    np.vstack(kept_rt)[:n_needed],
+                )
 
         raise RuntimeError(
             f"Impossible de régénérer {n_needed} chemin(s) de taux dans les bornes en "

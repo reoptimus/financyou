@@ -403,6 +403,44 @@ comme sur la surface synthétique.
 date d'observation (absente du fichier), la jambe fixe (le R la supposait
 semestrielle), et la valeur de a.
 
+### Mise à jour du 2026-11-04 — calibration branchée sur le GSE
+
+seb a tranché : extraction Bloomberg de l'été 2018, jambe fixe annuelle,
+a = 0,0058333 (valeur R). La surface `eur-bloomberg-2018` passe en
+`validated` (champ `observation_period`, la date exacte restant inconnue).
+`rates.hull_white` devient `calibrated` : a = 0,0058333, sigma = 0,006844
+(68,44 bp, sur les trois swaptions du R), avec sa provenance dans
+`rates.hull_white.calibration`. `tests/test_market_assumptions.py`
+recalcule sigma à partir de la surface et de la courbe.
+
+Effets mesurés (1 000 scénarios, 30 ans, pas annuel, graine 42, sans filtre) :
+
+| Horizon | Taux court, moyenne (avant → après) | Écart-type (avant → après) |
+|---|---|---|
+| 10 ans | 1,98 % → 1,99 % | 1,92 % → 1,95 % |
+| 20 ans | 2,54 % → 2,99 % | 2,16 % → 2,86 % |
+| 30 ans | 4,17 % → 5,54 % | 2,25 % → 3,50 % |
+
+La moyenne monte à long terme : sous la mesure risque-neutre, E[r(t)] vaut
+f(0,t) plus un terme de convexité σ²/(2a²)·(1 − e^(−at))², qui atteint
+environ 2 % à 30 ans quand a est presque nul (0,45 % avec l'ancien
+placeholder).
+
+Deux conséquences sur le code :
+- Chemins hors de [−5 %, 10 %] au pas annuel : 14 → 139 sur 1 000. La
+  régénération exigeait qu'une seule tentative fournisse tous les
+  remplacements et échouait systématiquement ; les chemins retenus
+  s'accumulent désormais d'une tentative à l'autre.
+- Le test de martingalité des taux (0,5 % à 30 ans, 10 000 scénarios)
+  mesure maintenant surtout le bruit : erreur type de 0,36 %, écart de
+  0,48 % à 0,68 % selon la graine, 0,33 % à 100 000 scénarios. Il compare
+  désormais l'écart à trois erreurs types, plafonné à 1 %.
+
+Reste ouvert : le filtre compare des taux par période à des bornes
+annuelles. Au pas de 0,25 an, il ne retire presque rien ; au pas annuel, il
+retire 14 % des chemins à 30 ans et tronque la queue haute de la
+distribution.
+
 ---
 
 *Dernière mise à jour : 2026-08-28, étape 1.B.4 (extraction des constantes
