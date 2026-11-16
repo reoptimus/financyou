@@ -298,8 +298,10 @@ def test_budget_saisi_dans_l_application() -> None:
         field.set_value(value)
     _click(app, 'Ajouter le crédit')
     assert app.session_state['loans'] == BUDGET['loans']
-    budget_fields = app.number_input[3:]
-    values = (40_000.0, 1.0, 12, 60.0, 25_000.0, 0.0, None, None, 0.0)
+    app.radio(key='home_status').set_value('tenant').run()
+    app.number_input(key='home_rent').set_value(0.0)
+    budget_fields = app.number_input[4:]
+    values = (40_000.0, 1.0, 12, 60.0, 25_000.0, 0.0, None, None)
     for field, value in zip(budget_fields, values, strict=True):
         field.set_value(value)
     app.text_input[1].set_value('5')

@@ -117,7 +117,9 @@ Par ordre de valeur pour l'utilisateur, une PR par ligne :
    dans le format projet existant (début, versement initial, versement annuel,
    durée, revente) ; aucune valeur n'est ajoutée.
 2. **Logement** : propriétaire ou locataire, crédit de la résidence
-   principale, valeur du bien dans le patrimoine.
+   principale, valeur du bien dans le patrimoine. La valeur nette (valeur
+   selon l'indice immobilier du GSE, moins capital restant dû) s'affiche à
+   part ; elle n'entre pas dans le patrimoine financier optimisé.
 3. **Âges des enfants** à la place des années à charge. Il faut l'âge de fin de
    charge, qui est une règle fiscale, à mettre dans le régime.
 4. **Projections avec et sans projets**, avec les bandes 5-95 % du patrimoine

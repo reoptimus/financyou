@@ -11,6 +11,7 @@ allocation optimale à l'horizon de chaque tranche, puis assemblage en euros.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -23,7 +24,7 @@ from investment_calculator.modules.capital_tranches import split_into_tranches
 from investment_calculator.modules.household_budget import KNOWN_GAPS as BUDGET_GAPS
 from investment_calculator.modules.household_budget import Earner, household_budget
 from investment_calculator.modules.household_cash_flow import Project, capital_curve
-from investment_calculator.modules.household_loans import Loan
+from investment_calculator.modules.household_loans import Loan, loan_schedule
 from investment_calculator.modules.household_tax import household_shares, marginal_rate
 from investment_calculator.modules.net_returns import (
     TaxProfile,
@@ -95,9 +96,11 @@ def build_budget(
     ``budget`` porte ``earners`` (``taxable_income``, ``annual_growth``,
     ``retirement_year``, ``replacement_rate``), ``rent``, ``loans`` (``name``,
     ``annual_payment``, ``rate``, ``years_left``), ``dependent_years``,
-    ``expenses_follow_income`` et ``properties`` (champs de
-    :class:`RentalProperty`). ``annual_savings_now`` est l'épargne actuelle
-    du profil, sur un an : elle fixe les dépenses courantes.
+    ``expenses_follow_income``, ``properties`` (champs de
+    :class:`RentalProperty`) et, facultatif, ``home`` (voir :func:`home_loan`) :
+    le crédit de la résidence principale s'ajoute aux crédits.
+    ``annual_savings_now`` est l'épargne actuelle du profil, sur un an : elle
+    fixe les dépenses courantes.
 
     Raises:
         ValueError: saisie refusée par :mod:`household_budget` ; le message dit
@@ -113,6 +116,9 @@ def build_budget(
         Loan(str(c['name']), float(c['annual_payment']), float(c['rate']), int(c['years_left']))
         for c in budget.get('loans', [])
     ]
+    residence = home_loan(budget.get('home'))
+    if residence is not None:
+        loans.append(residence)
     properties = [build_property(p) for p in budget.get('properties', [])]
     table = household_budget(
         catalog.regime, earners, horizon=horizon, current_savings=annual_savings_now,
@@ -122,6 +128,22 @@ def build_budget(
         properties=properties,
     )
     return table
+
+
+def _bands(equity: np.ndarray) -> pd.DataFrame:
+    """5e centile, médiane et 95e centile, année par année, sur les scénarios."""
+    return pd.DataFrame(
+        {'p5': np.percentile(equity, 5, axis=0), 'median': np.median(equity, axis=0),
+         'p95': np.percentile(equity, 95, axis=0)},
+        index=pd.RangeIndex(equity.shape[1], name='year'),
+    )
+
+
+def _real_estate_returns(scenarios: pd.DataFrame, horizon: int) -> np.ndarray:
+    returns: np.ndarray = scenarios.pivot(
+        index='scenario_id', columns='time_period', values='real_estate_return'
+    ).to_numpy()[:, :horizon]
+    return returns
 
 
 def property_equity_bands(
@@ -135,20 +157,104 @@ def property_equity_bands(
     (:func:`property_values`) ; on en retranche le capital restant dû. C'est
     une valeur avant frais et impôt de revente.
     """
-    returns = scenarios.pivot(
-        index='scenario_id', columns='time_period', values='real_estate_return'
-    ).to_numpy()[:, :horizon]
+    returns = _real_estate_returns(scenarios, horizon)
     rental_yield = load_market_assumptions().real_estate_rental_yield
     equity = np.zeros((returns.shape[0], horizon + 1))
     for row in budget.get('properties', []):
         prop = build_property(row)
         outstanding = property_flows(prop, horizon)['outstanding'].to_numpy()
         equity += property_values(prop, returns, rental_yield) - outstanding
-    return pd.DataFrame(
-        {'p5': np.percentile(equity, 5, axis=0), 'median': np.median(equity, axis=0),
-         'p95': np.percentile(equity, 95, axis=0)},
-        index=pd.RangeIndex(horizon + 1, name='year'),
-    )
+    return _bands(equity)
+
+
+def home_loan(home: Mapping[str, Any] | None) -> Loan | None:
+    """
+    Crédit de la résidence principale saisi sur la page Budget, ou ``None``.
+
+    ``home`` porte ``owner`` (propriétaire ou non), ``value`` (prix net vendeur
+    estimé) et ``loan`` (``annual_payment``, ``rate`` en fraction,
+    ``years_left``), ``None`` si le bien est payé.
+    """
+    if not home or not home.get('owner') or home.get('loan') is None:
+        return None
+    loan = home['loan']
+    return Loan("Résidence principale", float(loan['annual_payment']), float(loan['rate']),
+                int(loan['years_left']))
+
+
+def build_home(answers: Mapping[str, Any]) -> tuple[float, dict[str, Any]]:
+    """
+    Loyer annuel et résidence principale à partir des questions « Votre logement »,
+    reprises des prototypes R (écran Vous, bloc Logement).
+
+    ``answers`` porte ``status`` (``'tenant'`` ou ``'owner'``), puis pour un
+    locataire ``monthly_rent`` (charges comprises), pour un propriétaire
+    ``value`` (prix net vendeur estimé) et ``paid`` ; s'il n'a pas fini de
+    payer, ``monthly_payment``, ``rate`` (en %) et ``years_left``.
+
+    Returns:
+        Le loyer annuel versé et le logement au format de :func:`home_loan`.
+
+    Raises:
+        ValueError: une réponse manque ; le message la nomme.
+    """
+    def need(key: str, label: str) -> float:
+        value = answers.get(key)
+        if value is None:
+            raise ValueError(f"Logement : renseignez {label}.")
+        return float(value)
+
+    status = answers.get('status')
+    if status == 'tenant':
+        rent = 12 * need('monthly_rent', "le loyer mensuel, charges comprises")
+        return rent, {'owner': False, 'value': None, 'loan': None}
+    if status != 'owner':
+        raise ValueError("Logement : dites si vous êtes locataire ou propriétaire.")
+    value = need('value', "la valeur estimée du bien")
+    if answers.get('paid') is None:
+        raise ValueError("Logement : dites si vous avez fini de payer le bien.")
+    loan = None
+    if not answers['paid']:
+        loan = {
+            'annual_payment': 12 * need('monthly_payment', "la mensualité du crédit"),
+            'rate': need('rate', "le taux du crédit") / 100,
+            'years_left': int(need('years_left', "le nombre d'années restantes")),
+        }
+    return 0.0, {'owner': True, 'value': value, 'loan': loan}
+
+
+def home_equity_bands(
+    home: Mapping[str, Any], scenarios: pd.DataFrame, horizon: int
+) -> pd.DataFrame:
+    """
+    Valeur nette de la résidence principale en début d'année : 5e centile,
+    médiane et 95e centile sur les scénarios du GSE.
+
+    Comme pour un bien loué (:func:`property_values`), le prix suit le
+    rendement immobilier total du GSE diminué du rendement locatif du modèle :
+    le loyer que l'on ne paie pas n'est pas une plus-value. On retranche le
+    capital restant dû du crédit (prochaines annuités actualisées à son taux).
+    C'est une valeur avant frais de revente.
+
+    Raises:
+        ValueError: valeur du bien absente ou négative.
+    """
+    value = home.get('value')
+    if value is None or not math.isfinite(float(value)) or float(value) < 0:
+        raise ValueError(
+            f"Valeur de la résidence principale invalide ({value!r}) : saisissez "
+            "son prix net vendeur estimé, en euros."
+        )
+    returns = _real_estate_returns(scenarios, horizon)
+    rental_yield = load_market_assumptions().real_estate_rental_yield
+    growth = np.cumprod(1.0 + returns - rental_yield, axis=1)
+    values = np.empty((returns.shape[0], horizon + 1))
+    values[:, 0] = float(value)
+    values[:, 1:] = float(value) * growth
+    loan = home_loan(home)
+    if loan is not None:
+        values -= loan_schedule(loan, horizon)['outstanding'].to_numpy()
+    return _bands(values)
 
 
 def build_property(row: Mapping[str, Any]) -> RentalProperty:
@@ -392,6 +498,11 @@ def run_projection(
         if budget.get('properties'):
             budget_results['property_equity'] = property_equity_bands(
                 budget, scenario_results['scenarios'], horizon
+            )
+        home = budget.get('home')
+        if home and home.get('owner'):
+            budget_results['home_equity'] = home_equity_bands(
+                home, scenario_results['scenarios'], horizon
             )
         results['budget'] = budget_results
         savings = table['free_savings'].tolist()
