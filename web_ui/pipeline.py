@@ -24,7 +24,7 @@ from investment_calculator.modules.capital_tranches import Tranche, split_into_t
 from investment_calculator.modules.household_budget import KNOWN_GAPS as BUDGET_GAPS
 from investment_calculator.modules.household_budget import Earner, household_budget
 from investment_calculator.modules.household_cash_flow import Project, capital_curve
-from investment_calculator.modules.household_loans import Loan, loan_schedule
+from investment_calculator.modules.household_loans import Loan, debt_ratio, loan_schedule
 from investment_calculator.modules.household_tax import household_shares, marginal_rate
 from investment_calculator.modules.net_returns import (
     TaxProfile,
@@ -190,6 +190,62 @@ def dependent_years_from_ages(ages: Sequence[int], end_age: int | None) -> list[
         raise ValueError(f"Âges {list(ages)} et fin de charge à {end_age} ans : saisissez "
                          "des âges positifs.")
     return [max(int(end_age) - int(age), 0) for age in ages]
+
+
+def wealth_bands(wealth_paths: pd.DataFrame) -> pd.DataFrame:
+    """
+    Patrimoine par niveau de probabilité, année par année (prototypes R :
+    « Capital par niveau de probabilité »).
+
+    La ligne 10 % se lit : une chance sur dix d'être en dessous. Les
+    trajectoires sont celles de la simulation, avant impôt de sortie.
+
+    Args:
+        wealth_paths: une ligne par scénario, ``scenario_id`` puis une colonne
+            par année (``simulation_results['wealth_paths']``).
+    """
+    values = wealth_paths.drop(columns='scenario_id').to_numpy(dtype=float)
+    levels = (5, 10, 50, 90, 95)
+    return pd.DataFrame(
+        {f'p{q}': np.percentile(values, q, axis=0) for q in levels},
+        index=pd.RangeIndex(values.shape[1], name='year'),
+    )
+
+
+def budget_indicators(table: pd.DataFrame) -> dict[str, Any]:
+    """
+    Indicateurs du budget sur l'horizon, repris des prototypes R (écran Vos
+    projections) : impôts, taux d'endettement maximal, épargne libre minimale.
+
+    Le taux d'endettement n'est calculé que sans loyers perçus : avec des biens
+    loués, il dépend de la part des loyers que la banque retient, qui n'est pas
+    saisie. Il vaut alors ``None`` et ``debt_ratio_reason`` dit pourquoi.
+    """
+    income = (table['salaries'] + table['pensions']).to_numpy()
+    rents = table['rental_income'].to_numpy()
+    worst = int(table['free_savings'].idxmin())
+    indicators: dict[str, Any] = {
+        'total_income': float(income.sum() + rents.sum()),
+        'total_income_tax': float(table['income_tax'].sum() + table['rental_social_tax'].sum()),
+        'min_free_savings': float(table['free_savings'].min()),
+        'min_free_savings_year': worst,
+        'max_debt_ratio': None,
+        'debt_ratio_reason': None,
+    }
+    if rents.any():
+        indicators['debt_ratio_reason'] = (
+            "loyers perçus : la part retenue par la banque n'est pas saisie"
+        )
+        return indicators
+    try:
+        ratio = debt_ratio(income, rental_income=rents, rental_income_weight=0.0,
+                           rent_paid=table['rent'].to_numpy(),
+                           loan_payments=table['loan_payments'].to_numpy())
+    except ValueError as error:
+        indicators['debt_ratio_reason'] = str(error)
+        return indicators
+    indicators['max_debt_ratio'] = float(ratio.max())
+    return indicators
 
 
 def home_loan(home: Mapping[str, Any] | None) -> Loan | None:
@@ -521,8 +577,9 @@ def run_projection(
     plan par tranches.
 
     Returns:
-        ``scenarios``, ``profile``, ``catalog`` (identifiant) et ``optimization``
-        (sortie de :func:`plan_placements`) ; avec des projets, ``tranche_plan``
+        ``scenarios``, ``profile``, ``catalog`` (identifiant), ``optimization``
+        (sortie de :func:`plan_placements`) et ``wealth_bands`` (voir
+        :func:`wealth_bands`) ; avec des projets, ``tranche_plan``
         (sortie de :func:`plan_tranches`).
     """
     horizon = int(profile_config['user_profile']['investment_preferences']['time_horizon'])
@@ -556,6 +613,7 @@ def run_projection(
         reference_wrapper='cto',
     )
     results = {
+        'wealth_bands': wealth_bands(optimization['simulation_results']['wealth_paths']),
         'scenarios': scenario_results,
         'profile': profile_results,
         'catalog': catalog.id,
@@ -567,7 +625,8 @@ def run_projection(
         table = build_budget(budget, catalog=catalog, horizon=horizon,
                              annual_savings_now=float(flows[0]))
         gaps = BUDGET_GAPS + (RENTAL_GAPS if budget.get('properties') else [])
-        budget_results: dict[str, Any] = {'table': table, 'known_gaps': gaps}
+        budget_results: dict[str, Any] = {'table': table, 'known_gaps': gaps,
+                                          'indicators': budget_indicators(table)}
         if budget.get('properties'):
             budget_results['property_equity'] = property_equity_bands(
                 budget, scenario_results['scenarios'], horizon
