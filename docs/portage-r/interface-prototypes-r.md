@@ -120,8 +120,9 @@ Par ordre de valeur pour l'utilisateur, une PR par ligne :
    principale, valeur du bien dans le patrimoine. La valeur nette (valeur
    selon l'indice immobilier du GSE, moins capital restant dû) s'affiche à
    part ; elle n'entre pas dans le patrimoine financier optimisé.
-3. **Âges des enfants** à la place des années à charge. Il faut l'âge de fin de
-   charge, qui est une règle fiscale, à mettre dans le régime.
+3. **Âges des enfants** à la place des années à charge. L'âge de fin de
+   charge est saisi par l'utilisateur : il dépend du foyer (études,
+   rattachement au foyer fiscal), aucune valeur n'est supposée.
 4. **Projections avec et sans projets**, avec les bandes 5-95 % du patrimoine
    et les indicateurs du R qui existent déjà dans le budget (impôts, taux
    d'endettement, épargne libre minimale).

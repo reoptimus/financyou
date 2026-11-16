@@ -26,6 +26,7 @@ from web_ui.pipeline import (
     build_profile_config,
     build_projects,
     build_property,
+    dependent_years_from_ages,
     run_projection,
     tranche_label,
 )
@@ -405,8 +406,15 @@ def page_budget():
             earners.append({'taxable_income': income, 'annual_growth': _percent(growth),
                             'retirement_year': retire, 'replacement_rate': _percent(replacement)})
         st.markdown("### Foyer")
-        dependents = st.text_input(
-            "Personnes à charge : nombre d'années à charge de chacune, séparées par des virgules"
+        col1, col2 = st.columns(2)
+        children = col1.text_input(
+            "Âge de chaque enfant à charge, séparés par des virgules (vide si aucun)",
+            ", ".join(str(a) for a in saved.get('children_ages', [])),
+        )
+        end_age = col2.number_input(
+            "Âge auquel ils cesseront d'être à votre charge", 0, 40,
+            saved.get('children_end_age'), 1,
+            help="Il dépend de votre foyer : études, rattachement au foyer fiscal.",
         )
         follow = st.checkbox("Les dépenses suivent les revenus (sinon constantes)")
         submitted = st.form_submit_button("💾 Enregistrer le budget", type="primary")
@@ -420,12 +428,18 @@ def page_budget():
             st.error(str(error))
             return
         try:
-            years = [int(x) for x in dependents.replace(" ", "").split(",") if x]
+            ages = [int(x) for x in children.replace(" ", "").split(",") if x]
         except ValueError:
-            st.error("Années à charge : saisissez des nombres entiers séparés par des virgules.")
+            st.error("Âges des enfants : saisissez des nombres entiers séparés par des virgules.")
+            return
+        try:
+            years = dependent_years_from_ages(ages, end_age)
+        except ValueError as error:
+            st.error(str(error))
             return
         st.session_state.budget = {
             'earners': earners, 'rent': rent, 'home': home, 'dependent_years': years,
+            'children_ages': ages, 'children_end_age': end_age,
             'expenses_follow_income': follow,
         }
         st.session_state.results = None

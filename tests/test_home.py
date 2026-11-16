@@ -109,3 +109,4 @@ def test_logement_saisi_dans_l_application() -> None:
     next(b for b in app.button if 'Enregistrer le budget' in b.label).click().run()
     assert not app.exception and not app.error
     assert app.session_state['budget']['home'] == _budget(OWNER)['home']
+
