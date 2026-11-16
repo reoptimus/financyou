@@ -129,6 +129,8 @@ Par ordre de valeur pour l'utilisateur, une PR par ligne :
 5. **Sauvegarde de la saisie** dans un fichier à télécharger puis recharger,
    sans compte ni serveur.
 6. **Textes d'aide** de `table_info_boxplus.xlsx`, revus, sur chaque champ.
+   Le renvoi au barème d'Oxford (OCDE) du texte 15 n'est pas repris : les
+   unités de consommation ne sont pas portées.
 
 Restent hors de portée tant qu'une donnée validée manque : pension
 alimentaire, Pinel et crédits d'impôt travaux, projets qui changent les
