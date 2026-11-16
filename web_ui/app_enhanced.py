@@ -31,6 +31,7 @@ from web_ui.pipeline import (
     tranche_label,
 )
 from web_ui.project_templates import FIELD_KINDS, TEMPLATES, project_row
+from web_ui.saved_inputs import dump_inputs, load_inputs
 
 st.set_page_config(
     page_title="FinancYou",
@@ -100,6 +101,30 @@ def render_sidebar():
         st.session_state.num_scenarios = st.slider(
             "Nombre de scénarios", 10, 500, 100, 10, key="scenarios_slider"
         )
+        render_saved_inputs()
+
+
+def render_saved_inputs():
+    """Télécharger la saisie dans un fichier, ou la recharger."""
+    st.markdown("---")
+    st.markdown("### 💾 Votre saisie")
+    st.download_button(
+        "Télécharger ma saisie", dump_inputs(st.session_state),
+        file_name="financyou-saisie.json", mime="application/json",
+        use_container_width=True,
+    )
+    uploaded = st.file_uploader("Recharger une saisie", type="json", key="saved_upload")
+    if uploaded is not None and st.button("Remplacer ma saisie par ce fichier",
+                                          use_container_width=True):
+        try:
+            inputs = load_inputs(uploaded.getvalue())
+        except ValueError as error:
+            st.error(str(error))
+            return
+        st.session_state.update(inputs)
+        st.session_state.results = None
+        st.success("✅ Saisie rechargée.")
+    st.caption("Rien n'est conservé par FinancYou : gardez ce fichier pour reprendre plus tard.")
 
 
 def page_home():
