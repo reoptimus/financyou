@@ -21,6 +21,7 @@ from investment_calculator.placement_catalog import (
     load_placement_catalog,
 )
 from web_ui.pipeline import build_profile_config, build_projects, build_property, run_projection
+from web_ui.project_templates import FIELD_KINDS, TEMPLATES, project_row
 
 st.set_page_config(
     page_title="FinancYou",
@@ -289,25 +290,32 @@ def page_projects():
         st.session_state.available_savings = available
         st.session_state.results = None
 
+    st.markdown("### Ajouter un projet")
+    template_id = st.selectbox(
+        "Type de projet", list(TEMPLATES), format_func=lambda t: TEMPLATES[t].label,
+        key="project_template",
+    )
+    template = TEMPLATES[template_id]
+    st.caption(template.description)
+    st.caption("Pour un bien acheté pour être loué, utilisez la page Investissement locatif.")
     with st.form("add_project"):
-        st.markdown("### Ajouter un projet")
         name = st.text_input("Nom du projet")
-        col1, col2 = st.columns(2)
-        with col1:
-            start_year = st.number_input("Début, dans combien d'années", 0, 100, None, 1)
-            initial_payment = st.number_input("Versement initial (€)", 0.0, None, None, 1000.0)
-            annual_payment = st.number_input("Versement annuel (€)", 0.0, None, None, 500.0)
-        with col2:
-            duration_years = st.number_input("Durée des versements annuels (ans)", 0, 100, None, 1)
-            resale = st.number_input("Revente en fin de projet (€)", 0.0, None, None, 1000.0)
+        values = {}
+        columns = st.columns(2)
+        first_column = (len(template.fields) + 1) // 2
+        for k, field in enumerate(template.fields):
+            low, high, step, whole = FIELD_KINDS[field.kind]
+            with columns[0 if k < first_column else 1]:
+                values[field.key] = st.number_input(
+                    field.label,
+                    int(low) if whole else low,
+                    None if high is None else (int(high) if whole else high),
+                    None, int(step) if whole else step,
+                    key=f"project_{template_id}_{field.key}",
+                )
         if st.form_submit_button("➕ Ajouter le projet"):
-            row = {'name': name.strip(), 'start_year': start_year,
-                   'initial_payment': initial_payment, 'annual_payment': annual_payment,
-                   'duration_years': duration_years, 'resale': resale}
-            if not row['name'] or None in row.values():
-                st.error("Renseignez le nom et tous les montants (0 si sans objet).")
-                return
             try:
+                row = project_row(template_id, name, values)
                 build_projects([row])
             except ValueError as error:
                 st.error(str(error))
