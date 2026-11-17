@@ -121,6 +121,9 @@ def render_saved_inputs():
         except ValueError as error:
             st.error(str(error))
             return
+        # Les questions du logement gardent sinon la réponse de la saisie remplacée.
+        for key in [k for k in st.session_state if str(k).startswith('home_')]:
+            del st.session_state[key]
         st.session_state.update(inputs)
         st.session_state.results = None
         st.success("✅ Saisie rechargée.")
