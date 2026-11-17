@@ -571,8 +571,10 @@ def run_projection(
             holdings=profile_holdings(profile_results['validated_profile']),
             annual_savings=savings, marginal_income_tax_rate=marginal,
         )
-    flows_now = (contribution_flows(profile_results['investment_time_series'], horizon)
-                 if savings is None else savings)
+    flows_now: list[float] = (
+        contribution_flows(profile_results['investment_time_series'], horizon).tolist()
+        if savings is None else savings
+    )
     results['capital_timeline'] = capital_timeline(
         flows_now, projects=projects, available_savings=available_savings,
     )
