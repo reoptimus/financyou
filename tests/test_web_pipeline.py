@@ -6,6 +6,7 @@ allocation fiscale figée.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from investment_calculator.modules.household_tax import household_shares, marginal_rate
@@ -424,3 +425,37 @@ def test_annees_a_charge_depuis_l_age_des_enfants() -> None:
         dependent_years_from_ages([3], None)
     with pytest.raises(ValueError, match="âges positifs"):
         dependent_years_from_ages([-1], 18)
+
+
+# --- Indicateurs repris de l'écran « Vos projections » du R --------------------
+
+def test_patrimoine_par_niveau_de_probabilite() -> None:
+    from web_ui.pipeline import wealth_bands
+
+    paths = pd.DataFrame({'scenario_id': range(101), '0': 0.0,
+                          '1': np.arange(101, dtype=float)})
+    bands = wealth_bands(paths)
+    assert bands.loc[1].tolist() == [5.0, 10.0, 50.0, 90.0, 95.0]
+    assert (bands.loc[0] == 0.0).all()
+    results = run_projection(_profile(), num_scenarios=20, catalog_id='fr-2026',
+                             risk_aversion=5.0, risk_free_placement=None)
+    assert results['wealth_bands'].shape == (11, 5)
+
+
+def test_indicateurs_du_budget() -> None:
+    from web_ui.pipeline import budget_indicators
+
+    table = pd.DataFrame({
+        'salaries': [50_000.0, 50_000.0], 'pensions': [0.0, 0.0],
+        'income_tax': [5_000.0, 5_000.0], 'rental_social_tax': [0.0, 0.0],
+        'rental_income': [0.0, 0.0], 'rent': [0.0, 0.0],
+        'loan_payments': [15_000.0, 10_000.0], 'free_savings': [3_000.0, -1_000.0],
+    })
+    kpi = budget_indicators(table)
+    assert kpi['total_income'] == 100_000.0
+    assert kpi['total_income_tax'] == 10_000.0
+    assert kpi['max_debt_ratio'] == pytest.approx(0.3)
+    assert (kpi['min_free_savings'], kpi['min_free_savings_year']) == (-1_000.0, 1)
+    with_rents = budget_indicators(table.assign(rental_income=[0.0, 6_000.0]))
+    assert with_rents['max_debt_ratio'] is None
+    assert 'part retenue' in with_rents['debt_ratio_reason']

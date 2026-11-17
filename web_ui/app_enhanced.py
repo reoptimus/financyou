@@ -619,6 +619,18 @@ def display_results(results):
     if 'capital_timeline' in results:
         display_capital_timeline(results['capital_timeline'], st.session_state.available_savings)
 
+    st.markdown("### Patrimoine par niveau de probabilité, hors projets")
+    bands = results.get('wealth_bands')
+    if bands is not None:
+        st.line_chart(bands.rename(columns={
+            'p5': '5 %', 'p10': '10 %', 'p50': 'Médiane', 'p90': '90 %', 'p95': '95 %',
+        }))
+        st.caption(
+            "La courbe 10 % se lit : une chance sur dix d'être en dessous. Patrimoine "
+            "avant impôt de sortie, épargne existante comprise, sans vos projets ; "
+            "le plan avec projets n'est pas encore simulé scénario par scénario."
+        )
+
     st.markdown("### Répartition des nouveaux versements")
     catalog = load_placement_catalog(portfolio['placement_catalog'])
     weights = pd.DataFrame({
@@ -718,6 +730,20 @@ def display_budget(budget):
         'rental_social_tax': 'Prélèvements sociaux (loyers)', 'down_payments': 'Apports',
         'free_savings': 'Épargne libre',
     })
+    indicators = budget.get('indicators')
+    if indicators is not None:
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Revenus sur l'horizon", f"{indicators['total_income']:,.0f} €")
+        col2.metric("Impôts sur l'horizon", f"{indicators['total_income_tax']:,.0f} €",
+                    help="Impôt sur le revenu et prélèvements sociaux sur les loyers.")
+        if indicators['max_debt_ratio'] is not None:
+            col3.metric("Taux d'endettement maximal", f"{indicators['max_debt_ratio']:.1%}",
+                        help="Loyer et annuités rapportés aux revenus d'activité et pensions.")
+        else:
+            col3.caption(f"Taux d'endettement non calculé : {indicators['debt_ratio_reason']}.")
+        col4.metric("Épargne libre minimale", f"{indicators['min_free_savings']:,.0f} €",
+                    help=f"Atteinte l'année {indicators['min_free_savings_year']}. "
+                         "Négative, le foyer puise dans son capital.")
     st.line_chart(table['Épargne libre'])
     if 'property_equity' in budget:
         st.markdown("Valeur nette des biens loués selon les scénarios immobiliers : valeur "
@@ -752,6 +778,12 @@ def display_tranche_plan(plan, catalog):
         st.caption(
             f"{plan['unplaced'].max():,.0f} € n'arrivent qu'à l'horizon et ne sont pas placés."
         )
+    capital = plan['capital']
+    low = min(range(len(capital)), key=capital.__getitem__)
+    st.caption(
+        f"Épargne cumulée avec vos projets, hors rendement : au plus bas, "
+        f"{capital[low]:,.0f} € l'année {low}."
+    )
     st.markdown("Répartition optimale selon la durée de placement (années)")
     weights = plan['weights_by_horizon'].rename(index=labels)
     st.dataframe(weights.style.format('{:.1%}'), use_container_width=True)
