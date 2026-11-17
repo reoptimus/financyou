@@ -167,6 +167,31 @@ def property_equity_bands(
     return _bands(equity)
 
 
+def dependent_years_from_ages(ages: Sequence[int], end_age: int | None) -> list[int]:
+    """
+    Années à charge de chaque enfant, à partir de son âge et de l'âge auquel il
+    cessera d'être à charge, saisi par l'utilisateur (prototypes R : écran Vous,
+    bloc Foyer fiscal, âge de chaque enfant).
+
+    L'âge de fin de charge n'est pas supposé : il dépend de la situation de
+    chaque foyer (études, rattachement au foyer fiscal).
+
+    Raises:
+        ValueError: âge négatif, ou âges saisis sans âge de fin de charge.
+    """
+    if not ages:
+        return []
+    if end_age is None:
+        raise ValueError(
+            "Âges des enfants saisis sans âge de fin de charge : indiquez à quel âge "
+            "ils cesseront d'être à votre charge."
+        )
+    if any(age < 0 for age in ages) or end_age < 0:
+        raise ValueError(f"Âges {list(ages)} et fin de charge à {end_age} ans : saisissez "
+                         "des âges positifs.")
+    return [max(int(end_age) - int(age), 0) for age in ages]
+
+
 def home_loan(home: Mapping[str, Any] | None) -> Loan | None:
     """
     Crédit de la résidence principale saisi sur la page Budget, ou ``None``.

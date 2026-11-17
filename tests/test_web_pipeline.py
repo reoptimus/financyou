@@ -15,6 +15,7 @@ from web_ui.pipeline import (
     budget_marginal_rate,
     build_profile_config,
     build_projects,
+    dependent_years_from_ages,
     run_projection,
 )
 
@@ -301,13 +302,15 @@ def test_budget_saisi_dans_l_application() -> None:
     app.radio(key='home_status').set_value('tenant').run()
     app.number_input(key='home_rent').set_value(0.0)
     budget_fields = app.number_input[4:]
-    values = (40_000.0, 1.0, 12, 60.0, 25_000.0, 0.0, None, None)
+    values = (40_000.0, 1.0, 12, 60.0, 25_000.0, 0.0, None, None, 15)
     for field, value in zip(budget_fields, values, strict=True):
         field.set_value(value)
-    app.text_input[1].set_value('5')
+    app.text_input[1].set_value('10')
     _click(app, 'Enregistrer le budget')
     assert not app.error
     assert app.session_state['budget']['earners'][0]['replacement_rate'] == pytest.approx(0.6)
+    # Un enfant de 10 ans, à charge jusqu'à 15 ans : 5 années, comme BUDGET.
+    assert app.session_state['budget']['dependent_years'] == BUDGET['dependent_years']
     app.session_state['page'] = 'Projection'
     app.run()
     _click(app, 'Lancer')
@@ -412,3 +415,12 @@ def test_la_chronologie_est_la_courbe_du_plan_par_tranches() -> None:
                            risk_aversion=5.0, risk_free_placement=None)['capital_timeline']
     # Sans projet ni épargne disponible : 500 € par mois cumulés, de l'année 0 à 10.
     assert alone['capital'].tolist() == pytest.approx([6_000.0 * (k + 1) for k in range(11)])
+
+
+def test_annees_a_charge_depuis_l_age_des_enfants() -> None:
+    assert dependent_years_from_ages([3, 12, 24], 21) == [18, 9, 0]
+    assert dependent_years_from_ages([], None) == []
+    with pytest.raises(ValueError, match="âge de fin de charge"):
+        dependent_years_from_ages([3], None)
+    with pytest.raises(ValueError, match="âges positifs"):
+        dependent_years_from_ages([-1], 18)
