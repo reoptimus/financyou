@@ -13,6 +13,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from plotly.colors import sample_colorscale
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -26,6 +27,7 @@ from web_ui.pipeline import (
     build_projects,
     build_property,
     run_projection,
+    tranche_label,
 )
 from web_ui.project_templates import FIELD_KINDS, TEMPLATES, project_row
 
@@ -600,6 +602,9 @@ def display_results(results):
         "existante et est net de l'impôt de sortie."
     )
 
+    if 'capital_timeline' in results:
+        display_capital_timeline(results['capital_timeline'], st.session_state.available_savings)
+
     st.markdown("### Répartition des nouveaux versements")
     catalog = load_placement_catalog(portfolio['placement_catalog'])
     weights = pd.DataFrame({
@@ -646,6 +651,47 @@ def display_results(results):
 
     if 'tranche_plan' in results:
         display_tranche_plan(results['tranche_plan'], catalog)
+
+
+def display_capital_timeline(timeline, available_savings):
+    """
+    Chronologie du capital constitué : le stock d'euros que les flux certains
+    (épargne, projets) accumulent, découpé en tranches horizontales pour
+    l'optimisation. Sans rendement ni scénario économique.
+    """
+    st.markdown("### Chronologie du capital constitué")
+    capital = timeline['capital']
+    fig = go.Figure()
+    layers = timeline['layers']
+    if layers is not None:
+        longest = max(1, max(t.duration for t in timeline['tranches']))
+        shown = set()
+        for k, tranche in enumerate(timeline['tranches']):
+            # Une couleur par durée de placement : clair pour le court terme,
+            # foncé pour le long terme ; une entrée de légende par durée.
+            group = (f"Placée {tranche.duration} an(s)" if tranche.duration > 0
+                     else "Arrive à l'horizon, non placée")
+            color = sample_colorscale('Viridis', 1 - tranche.duration / longest)[0]
+            fig.add_bar(x=capital.index, y=layers[k], name=group, legendgroup=group,
+                        showlegend=group not in shown, marker_color=color,
+                        legendrank=longest - tranche.duration,
+                        hovertemplate="%{y:,.0f} €<extra>" + tranche_label(tranche) + "</extra>")
+            shown.add(group)
+    fig.add_scatter(x=capital.index, y=capital, mode='lines+markers', name="Capital constitué",
+                    line={'color': '#d62728', 'width': 3})
+    fig.update_layout(barmode='stack', bargap=0.05, xaxis_title="Année",
+                      yaxis_title="€", legend={'orientation': 'h', 'y': -0.25})
+    st.plotly_chart(fig, use_container_width=True)
+    start = ("l'épargne déjà disponible saisie" if available_savings is not None
+             else "0 € d'épargne déjà disponible (non saisie, page Projets)")
+    st.caption(
+        "Évolution certaine des flux, en euros : l'épargne versée chaque année s'ajoute, "
+        "les projets payés se retranchent, sans rendement ni scénario économique. Chaque "
+        "bande est une tranche de cette courbe, découpée horizontalement : elle est placée "
+        f"à l'horizon de sa durée. La courbe part de {start}."
+    )
+    if timeline['reason'] is not None:
+        st.warning(f"La courbe ne se découpe pas en tranches : {timeline['reason']}")
 
 
 def display_budget(budget):

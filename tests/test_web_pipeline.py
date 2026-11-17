@@ -385,3 +385,30 @@ def test_un_bien_incomplet_est_refuse_dans_l_application() -> None:
     _click(app, 'Ajouter le bien')
     assert app.error and "aucune hypothèse" in app.error[0].value
     assert app.session_state['properties'] == []
+
+
+# --- Chronologie du capital constitué ------------------------------------------
+
+def test_chronologie_du_capital_decoupee_en_tranches() -> None:
+    from web_ui.pipeline import capital_timeline, tranche_label
+
+    # Exemple du module capital_tranches : 10 000, 30 000, 12 000, 20 000.
+    timeline = capital_timeline([10_000.0, 20_000.0, -18_000.0, 8_000.0],
+                                projects=[], available_savings=None)
+    assert timeline['capital'].tolist() == [10_000.0, 30_000.0, 12_000.0, 20_000.0]
+    # Somme des bandes = courbe, chaque année.
+    assert timeline['layers'].sum(axis=1).tolist() == timeline['capital'].tolist()
+    labels = [tranche_label(t) for t in timeline['tranches']]
+    assert "Placée de l'année 1 à l'année 2 (1 ans)" in labels
+    negative = capital_timeline([0.0, -1_000.0], projects=[], available_savings=0.0)
+    assert negative['layers'] is None and 'Capital négatif' in negative['reason']
+
+
+def test_la_chronologie_est_la_courbe_du_plan_par_tranches() -> None:
+    results = _tranche_results()
+    timeline = results['capital_timeline']
+    assert timeline['capital'].tolist() == pytest.approx(results['tranche_plan']['capital'])
+    alone = run_projection(_profile(), num_scenarios=20, catalog_id='fr-2026',
+                           risk_aversion=5.0, risk_free_placement=None)['capital_timeline']
+    # Sans projet ni épargne disponible : 500 € par mois cumulés, de l'année 0 à 10.
+    assert alone['capital'].tolist() == pytest.approx([6_000.0 * (k + 1) for k in range(11)])
