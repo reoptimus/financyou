@@ -20,7 +20,7 @@ import pandas as pd
 
 from investment_calculator.market_assumptions import load_market_assumptions
 from investment_calculator.modules import scenario_generator, user_profile
-from investment_calculator.modules.capital_tranches import split_into_tranches
+from investment_calculator.modules.capital_tranches import Tranche, split_into_tranches
 from investment_calculator.modules.household_budget import KNOWN_GAPS as BUDGET_GAPS
 from investment_calculator.modules.household_budget import Earner, household_budget
 from investment_calculator.modules.household_cash_flow import Project, capital_curve
@@ -255,6 +255,54 @@ def home_equity_bands(
     if loan is not None:
         values -= loan_schedule(loan, horizon)['outstanding'].to_numpy()
     return _bands(values)
+
+
+def capital_timeline(
+    flows: Sequence[float], *, projects: Sequence[Project], available_savings: float | None,
+) -> dict[str, Any]:
+    """
+    Chronologie du capital constitué, en euros, années 0 à ``horizon``.
+
+    C'est la courbe certaine des flux (épargne versée, projets payés), sans
+    rendement ni scénario économique : celle que le plan par tranches découpe
+    horizontalement (:func:`split_into_tranches`). Le capital de l'année 0 est
+    l'épargne déjà disponible plus l'épargne de l'année 0, comme dans
+    :func:`plan_tranches`.
+
+    Args:
+        flows: épargne de chaque année 0 à ``horizon`` (versements du profil, ou
+            épargne libre du budget).
+        projects: projets du foyer, éventuellement aucun.
+        available_savings: épargne déjà disponible ; ``None`` si elle n'est pas
+            saisie, la courbe part alors de la seule épargne de l'année 0.
+
+    Returns:
+        ``capital`` (série par année), ``tranches`` (liste de :class:`Tranche`,
+        vide si la courbe ne se découpe pas), ``layers`` (montant de chaque
+        tranche présente, une colonne par tranche) et ``reason`` (pourquoi la
+        courbe ne se découpe pas, sinon ``None``).
+    """
+    values = np.asarray(flows, dtype=float)
+    horizon = values.size - 1
+    start = (available_savings or 0.0) + float(values[0])
+    curve = capital_curve(projects, horizon, start, values[1:].tolist())
+    capital = pd.Series(curve, index=pd.RangeIndex(horizon + 1, name='year'), name='capital')
+    try:
+        tranches = split_into_tranches(curve)
+    except ValueError as error:
+        return {'capital': capital, 'tranches': [], 'layers': None, 'reason': str(error)}
+    layers = pd.DataFrame(
+        {k: [t.amount if t.is_present(year) else 0.0 for year in capital.index]
+         for k, t in enumerate(tranches)},
+        index=capital.index,
+    )
+    return {'capital': capital, 'tranches': tranches, 'layers': layers, 'reason': None}
+
+
+def tranche_label(tranche: Tranche) -> str:
+    """Libellé d'une tranche : dates de placement et de retrait, durée."""
+    end = "l'horizon" if tranche.withdrawal_year is None else f"l'année {tranche.withdrawal_year}"
+    return f"Placée de l'année {tranche.start_year} à {end} ({tranche.duration} ans)"
 
 
 def build_property(row: Mapping[str, Any]) -> RentalProperty:
@@ -523,4 +571,9 @@ def run_projection(
             holdings=profile_holdings(profile_results['validated_profile']),
             annual_savings=savings, marginal_income_tax_rate=marginal,
         )
+    flows_now = (contribution_flows(profile_results['investment_time_series'], horizon)
+                 if savings is None else savings)
+    results['capital_timeline'] = capital_timeline(
+        flows_now, projects=projects, available_savings=available_savings,
+    )
     return results
