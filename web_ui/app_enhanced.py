@@ -20,7 +20,13 @@ from investment_calculator.placement_catalog import (
     list_placement_catalogs,
     load_placement_catalog,
 )
-from web_ui.pipeline import build_profile_config, build_projects, build_property, run_projection
+from web_ui.pipeline import (
+    build_home,
+    build_profile_config,
+    build_projects,
+    build_property,
+    run_projection,
+)
 from web_ui.project_templates import FIELD_KINDS, TEMPLATES, project_row
 
 st.set_page_config(
@@ -356,7 +362,8 @@ def page_budget():
             st.session_state.results = None
             st.rerun()
     with st.form("add_loan"):
-        st.markdown("### Crédit en cours")
+        st.markdown("### Autres crédits en cours")
+        st.caption("Le crédit de votre résidence principale se saisit dans « Votre logement ».")
         name = st.text_input("Nom du crédit")
         payment = st.number_input("Annuité (€)", 0.0, None, None, 500.0)
         rate = st.number_input("Taux annuel (%)", 0.0, 30.0, None, 0.1)
@@ -371,6 +378,7 @@ def page_budget():
                 st.rerun()
 
     saved = st.session_state.budget or {}
+    home_answers = render_home_questions(saved.get('home'), saved.get('rent'))
     adults = 2 if form['couple'] else 1
     with st.form("budget_form"):
         earners = []
@@ -395,17 +403,19 @@ def page_budget():
             earners.append({'taxable_income': income, 'annual_growth': _percent(growth),
                             'retirement_year': retire, 'replacement_rate': _percent(replacement)})
         st.markdown("### Foyer")
-        rent = st.number_input("Loyer annuel versé (€, 0 si propriétaire)", 0.0, None,
-                               saved.get('rent'), 500.0)
         dependents = st.text_input(
             "Personnes à charge : nombre d'années à charge de chacune, séparées par des virgules"
         )
         follow = st.checkbox("Les dépenses suivent les revenus (sinon constantes)")
         submitted = st.form_submit_button("💾 Enregistrer le budget", type="primary")
     if submitted:
-        if rent is None or any(e['taxable_income'] is None or e['annual_growth'] is None
-                               for e in earners):
-            st.error("Renseignez le revenu et son évolution pour chaque adulte, et le loyer.")
+        if any(e['taxable_income'] is None or e['annual_growth'] is None for e in earners):
+            st.error("Renseignez le revenu et son évolution pour chaque adulte.")
+            return
+        try:
+            rent, home = build_home(home_answers)
+        except ValueError as error:
+            st.error(str(error))
             return
         try:
             years = [int(x) for x in dependents.replace(" ", "").split(",") if x]
@@ -413,7 +423,7 @@ def page_budget():
             st.error("Années à charge : saisissez des nombres entiers séparés par des virgules.")
             return
         st.session_state.budget = {
-            'earners': earners, 'rent': rent, 'dependent_years': years,
+            'earners': earners, 'rent': rent, 'home': home, 'dependent_years': years,
             'expenses_follow_income': follow,
         }
         st.session_state.results = None
@@ -422,6 +432,56 @@ def page_budget():
         st.session_state.budget = None
         st.session_state.results = None
         st.rerun()
+
+
+def render_home_questions(home, rent):
+    """
+    Questions « Votre logement » des prototypes R : locataire ou propriétaire,
+    puis loyer, ou valeur du bien et crédit en cours. Hors du formulaire, pour
+    que les questions suivent la réponse précédente.
+    """
+    st.markdown("### Votre logement")
+    home = home or {}
+    statuses = {'tenant': "Locataire", 'owner': "Propriétaire"}
+    previous = None if not home else ('owner' if home.get('owner') else 'tenant')
+    status = st.radio(
+        "Êtes-vous propriétaire de votre logement ?", list(statuses),
+        index=None if previous is None else list(statuses).index(previous),
+        format_func=statuses.get, horizontal=True, key="home_status",
+    )
+    answers = {'status': status}
+    if status == 'tenant':
+        answers['monthly_rent'] = st.number_input(
+            "Loyer mensuel, charges comprises (€)", 0.0, None,
+            None if not rent else rent / 12, 10.0, key="home_rent",
+        )
+    elif status == 'owner':
+        loan = home.get('loan') or {}
+        answers['value'] = st.number_input(
+            "Valeur de votre bien : prix net vendeur estimé (€)", 0.0, None,
+            home.get('value'), 5000.0, key="home_value",
+            help="Votre patrimoine compte cette valeur, moins le capital restant dû.",
+        )
+        paid = st.radio(
+            "Avez-vous fini de le payer ?", [True, False],
+            index=None if not home.get('owner') else (0 if home.get('loan') is None else 1),
+            format_func=lambda v: "Oui" if v else "Non", horizontal=True, key="home_paid",
+        )
+        answers['paid'] = paid
+        if paid is False:
+            col1, col2, col3 = st.columns(3)
+            answers['monthly_payment'] = col1.number_input(
+                "Mensualité du crédit (€)", 0.0, None,
+                None if not loan else loan['annual_payment'] / 12, 10.0, key="home_payment",
+            )
+            answers['rate'] = col2.number_input(
+                "Taux du crédit (%)", 0.0, 30.0, _as_percent(loan.get('rate')), 0.1,
+                key="home_rate",
+            )
+            answers['years_left'] = col3.number_input(
+                "Années restantes", 0, 50, loan.get('years_left'), 1, key="home_years",
+            )
+    return answers
 
 
 def page_rentals():
@@ -603,6 +663,12 @@ def display_budget(budget):
         st.markdown("Valeur nette des biens loués selon les scénarios immobiliers : valeur "
                     "moins capital restant dû, avant frais et impôt de revente")
         st.line_chart(budget['property_equity'].rename(columns={
+            'p5': '5 % des scénarios', 'median': 'Médiane', 'p95': '95 % des scénarios',
+        }))
+    if 'home_equity' in budget:
+        st.markdown("Valeur nette de votre résidence principale selon les scénarios "
+                    "immobiliers : valeur moins capital restant dû, avant frais de revente")
+        st.line_chart(budget['home_equity'].rename(columns={
             'p5': '5 % des scénarios', 'median': 'Médiane', 'p95': '95 % des scénarios',
         }))
     st.dataframe(table.style.format('{:,.0f}'), use_container_width=True)
