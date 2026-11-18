@@ -59,6 +59,7 @@ import pandas as pd
 
 from investment_calculator.modules.household_loans import Loan, loans_total
 from investment_calculator.modules.household_tax import (
+    child_tax_advantages,
     income_tax_by_year,
     real_regime_rental_income,
     rental_social_tax,
@@ -218,6 +219,9 @@ def household_budget(
     dependent_years: Sequence[int] = (),
     future_children: Sequence[FutureChild] = (),
     consumption_units: Sequence[float] | None = None,
+    child_ages: Sequence[int] = (),
+    child_end_age: int | None = None,
+    childcare_cost: float = 0.0,
     expenses_follow_income: bool,
     properties: Sequence[RentalProperty] = (),
     rental_regime: str = "micro_foncier",
@@ -239,6 +243,11 @@ def household_budget(
             ``horizon`` (:func:`consumption_units.household_units`) ; les
             dépenses de l'année 0 sont ramenées à une unité, puis multipliées
             par les unités de chaque année. Constantes si omises.
+        child_ages, child_end_age, childcare_cost: âge de chaque enfant
+            aujourd'hui (négatif s'il est à venir), âge de fin de charge et
+            frais de garde annuels d'un jeune enfant : ils donnent les
+            avantages fiscaux liés à l'âge
+            (:func:`household_tax.child_tax_advantages`), déduits de l'impôt.
         expenses_follow_income: les dépenses suivent les revenus d'activité et
             de pension (sinon elles restent constantes).
         properties: biens achetés à crédit pour être loués nus.
@@ -284,7 +293,13 @@ def household_budget(
     declared_shares = shares_by_year(
         regime, adults=len(earners), dependent_years=dependent_years, horizon=0
     )
+    reduction, credit = child_tax_advantages(
+        regime, child_ages, end_age=child_end_age, horizon=horizon,
+        childcare_cost=childcare_cost,
+    )
     declared_tax_0 = income_tax_by_year(regime, [float(declared_taxable[0])], declared_shares)[0]
+    # Les enfants déjà nés ouvrent leurs avantages dès l'année 0.
+    declared_tax_0 = max(declared_tax_0 - reduction[0], 0.0) - credit[0]
     expenses_0 = (declared_taxable[0] - declared_tax_0 - rent_paid[0] - payments[0]
                   - current_savings)
     if expenses_0 < 0:
@@ -340,6 +355,8 @@ def household_budget(
         payments = payments + sum(
             (f["interest"].to_numpy() + f["principal"].to_numpy() for f in flows), zero
         )
+    # Une réduction ne fait qu'annuler l'impôt ; un crédit est restitué au-delà.
+    tax = np.maximum(tax - reduction, 0.0) - credit
     free = taxable - tax - rent_paid - payments - expenses + rental - charges - social - down
     if (free < 0).any():
         logger.warning(

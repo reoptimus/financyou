@@ -78,6 +78,12 @@
       "url": "https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/nouveautes.pdf",
       "consulted_on": "2026-08-27",
       "covers": ["social_contributions.investment_income.rate", "flat_tax.social_rate"]
+    },
+    {
+      "label": "economie.gouv.fr — Impôt : quelles sont les aides fiscales liées à la famille ? (crédit d'impôt frais de garde, réduction frais de scolarisation)",
+      "url": "https://www.economie.gouv.fr/particuliers/aides-fiscales-impot-famille",
+      "consulted_on": "2026-11-18",
+      "covers": ["income_tax.child_tax_advantages"]
     }
   ],
 
@@ -92,6 +98,7 @@
     "Revenus fonciers : rental_income_regimes porte les paramètres du micro-foncier et du régime réel, mais aucune méthode du moteur ne les consomme encore — la catégorie « revenu locatif récurrent » n'est pas intégrée au calcul. Le déficit foncier et les dispositifs de défiscalisation immobilière ne sont pas modélisés au-delà des plafonds portés ici.",
     "Prélèvement forfaitaire non libératoire acompte et sa régularisation non modélisés (sans effet sur un résultat annuel, mais sur la trésorerie oui).",
     "Correction hors règle du millésime (exception validée par SebG le 2026-10-25) : la surtaxe sur les plus-values immobilières élevées était décrite par tranches marginales (capital_gains.real_estate.surtax_brackets), ce que contredit le BOFiP (BOI-RFPI-TPVIE-20, § 70) : le taux s'applique au montant total de la plus-value, avec un lissage près de chaque seuil. Elle est désormais décrite par capital_gains.real_estate.surtax_schedule. Aucun calcul ne lisait l'ancien champ : aucune simulation archivée n'en dépend.",
+    "Ajout hors règle du millésime (exception approuvée par SebG le 2026-11-18 ; valeurs à valider par SebG) : income_tax.child_tax_advantages porte le crédit d'impôt pour frais de garde (CGI art. 200 quater B) et la réduction pour frais de scolarisation (CGI art. 199 quater F). Aucun calcul ne lisait ces champs avant cet ajout : aucune simulation archivée n'en dépend. Les âges d'entrée au collège, au lycée et dans le supérieur sont des âges usuels : la loi retient la scolarisation au 31 décembre. Le rattachement d'un enfant majeur (moins de 21 ans, ou moins de 25 ans s'il étudie) et la déduction d'une pension alimentaire versée à un enfant majeur ne sont pas modélisés.",
     "Barème de l'IFI à vérifier pour le millésime 2026 (non revu dans cette itération)."
   ],
 
@@ -120,6 +127,24 @@
       "shares_second_adult": 1.0,
       "shares_per_dependent": [0.5, 0.5, 1.0],
       "cap_per_half_share": 1807
+    },
+    "child_tax_advantages": {
+      "childcare_credit": {
+        "age_below": 6,
+        "rate": 0.5,
+        "expense_cap_per_child": 3500,
+        "refundable": true,
+        "reference": "CGI art. 200 quater B"
+      },
+      "schooling_reduction": {
+        "stages": [
+          { "label": "collège", "from_age": 11, "amount": 61 },
+          { "label": "lycée", "from_age": 15, "amount": 153 },
+          { "label": "enseignement supérieur", "from_age": 18, "amount": 183 }
+        ],
+        "refundable": false,
+        "reference": "CGI art. 199 quater F"
+      }
     },
     "surtaxes": [
       {

@@ -166,6 +166,10 @@ def build_budget(
             for c in budget.get('future_children', [])
         ],
         consumption_units=budget_units(budget, horizon),
+        child_ages=budget_child_ages(budget),
+        child_end_age=(None if budget.get('children_end_age') is None
+                       else int(budget['children_end_age'])),
+        childcare_cost=float(budget.get('childcare_cost') or 0.0),
         expenses_follow_income=bool(budget['expenses_follow_income']),
         properties=properties,
         rental_regime=str(budget.get('rental_regime', 'micro_foncier')),
@@ -259,14 +263,19 @@ def future_children(arrivals: Sequence[int], end_age: int | None) -> list[dict[s
     return [{'arrival_year': int(a), 'dependent_years': int(end_age)} for a in arrivals]
 
 
+def budget_child_ages(budget: Mapping[str, Any]) -> list[int]:
+    """Âge de chaque enfant aujourd'hui ; négatif pour une arrivée à venir."""
+    ages = [int(a) for a in budget.get('children_ages', [])]
+    return ages + [-int(c['arrival_year']) for c in budget.get('future_children', [])]
+
+
 def budget_units(budget: Mapping[str, Any], horizon: int) -> list[float]:
     """
     Unités de consommation du foyer, années 0 à ``horizon``, selon l'échelle de
     l'OCDE modifiée (:mod:`consumption_units`) : adultes, enfants à charge
     selon leur âge, enfants à venir dès leur arrivée.
     """
-    ages = [int(a) for a in budget.get('children_ages', [])]
-    ages += [-int(c['arrival_year']) for c in budget.get('future_children', [])]
+    ages = budget_child_ages(budget)
     end_age = budget.get('children_end_age')
     units = household_units(
         load_consumption_scale(), adults=len(budget['earners']), child_ages=ages,
