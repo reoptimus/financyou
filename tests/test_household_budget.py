@@ -12,6 +12,7 @@ import pytest
 
 from investment_calculator.modules.household_budget import (
     Earner,
+    WorkChange,
     earner_income,
     household_budget,
 )
@@ -108,3 +109,35 @@ def test_household_size_is_checked() -> None:
     with pytest.raises(ValueError, match="1 ou 2"):
         household_budget(FR, [], horizon=3, current_savings=0.0, rent=0.0,
                          expenses_follow_income=False)
+
+
+def test_part_time_by_hand() -> None:
+    change = WorkChange(start_year=1, years=2, worked_share=0.8)
+    salary, pension = earner_income(Earner(40_000.0, 0.0, 4, 0.5, (change,)), 4)
+    np.testing.assert_allclose(salary, [40_000.0, 32_000.0, 32_000.0, 40_000.0, 0.0])
+    # La pension reste calculée à temps plein (voir KNOWN_GAPS).
+    np.testing.assert_allclose(pension, [0.0, 0.0, 0.0, 0.0, 20_000.0])
+
+
+def test_leave_lowers_free_savings_but_not_expenses() -> None:
+    leave = WorkChange(start_year=2, years=1, worked_share=0.0)
+    base = household_budget(FR, _couple(), horizon=4, current_savings=5_000.0, rent=0.0,
+                            expenses_follow_income=False)
+    earners = [_couple()[0], Earner(30_000.0, 0.01, 15, 0.6, (leave,))]
+    ours = household_budget(FR, earners, horizon=4, current_savings=5_000.0, rent=0.0,
+                            expenses_follow_income=False)
+    # Les dépenses viennent de la situation déclarée, inchangée.
+    np.testing.assert_allclose(ours["expenses"], base["expenses"])
+    lost = base["salaries"].iloc[2] - ours["salaries"].iloc[2]
+    assert lost == pytest.approx(30_000.0 * 1.01**2)
+    saved_tax = base["income_tax"].iloc[2] - ours["income_tax"].iloc[2]
+    assert ours["free_savings"].iloc[2] == pytest.approx(
+        base["free_savings"].iloc[2] - lost + saved_tax
+    )
+    np.testing.assert_allclose(ours["free_savings"].drop(2), base["free_savings"].drop(2))
+
+
+@pytest.mark.parametrize("args", [(-1, 1, 0.5), (0, 0, 0.5), (0, 1, 1.2), (0, 1, -0.1)])
+def test_invalid_work_change_is_refused(args: tuple[int, int, float]) -> None:
+    with pytest.raises(ValueError, match="saisissez|donnez"):
+        WorkChange(*args)

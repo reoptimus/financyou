@@ -29,6 +29,7 @@ from web_ui.pipeline import (
     dependent_years_from_ages,
     run_projection,
     tranche_label,
+    work_changes_by_earner,
 )
 from web_ui.project_templates import FIELD_KINDS, TEMPLATES, project_row
 from web_ui.saved_inputs import dump_inputs, load_inputs
@@ -63,7 +64,7 @@ def init_session_state():
     """Initialiser l'état de session."""
     defaults = {
         'form': None, 'holdings': [], 'projects': [], 'available_savings': None,
-        'budget': None, 'loans': [], 'properties': [],
+        'budget': None, 'loans': [], 'properties': [], 'work_changes': [],
         'results': None, 'page': 'Home',
     }
     for key, value in defaults.items():
@@ -329,6 +330,8 @@ def page_projects():
         st.session_state.available_savings = available
         st.session_state.results = None
 
+    render_work_changes()
+
     st.markdown("### Ajouter un projet")
     template_id = st.selectbox(
         "Type de projet", list(TEMPLATES), format_func=lambda t: TEMPLATES[t].label,
@@ -360,6 +363,60 @@ def page_projects():
                 st.error(str(error))
                 return
             projects.append(row)
+            st.session_state.results = None
+            st.rerun()
+
+
+def render_work_changes():
+    """Temps partiels et congés : ils réduisent le salaire d'un adulte dans le budget."""
+    st.markdown("### Temps partiel ou congé")
+    st.caption(
+        "Le salaire de l'adulte est multiplié par la part travaillée pendant la "
+        "période. La pension de retraite et les allocations (congé parental, "
+        "chômage) ne sont pas modifiées."
+    )
+    changes = st.session_state.work_changes
+    if changes:
+        st.dataframe(pd.DataFrame(changes).assign(
+            earner=lambda t: t['earner'] + 1, worked_share=lambda t: t['worked_share'] * 100,
+        ).rename(columns={
+            'name': 'Projet', 'earner': 'Adulte', 'start_year': 'Début (dans n ans)',
+            'years': 'Durée (ans)', 'worked_share': 'Part travaillée (%)',
+        }), use_container_width=True)
+        if st.button("🗑️ Retirer le dernier temps partiel ou congé"):
+            changes.pop()
+            st.session_state.results = None
+            st.rerun()
+    if st.session_state.budget is None:
+        st.info("Un temps partiel ou un congé agit sur les revenus : remplissez d'abord "
+                "la page Budget du foyer.")
+        return
+    adults = len(st.session_state.budget['earners'])
+    with st.form("add_work_change"):
+        name = st.text_input("Nom (temps partiel, congé parental, année sabbatique…)",
+                             key="work_name")
+        col1, col2 = st.columns(2)
+        earner = col1.selectbox("Adulte concerné", range(adults),
+                                format_func=lambda k: f"Adulte {k + 1}", key="work_earner")
+        start = col1.number_input("Début, dans combien d'années", 0, 100, None, 1,
+                                  key="work_start")
+        years = col2.number_input("Durée (ans)", 1, 100, None, 1, key="work_years")
+        share = col2.number_input(
+            "Part travaillée (%)", 0.0, 100.0, None, 10.0, key="work_share",
+            help="80 pour un temps partiel à 80 %, 0 pour un congé sans solde.",
+        )
+        if st.form_submit_button("➕ Ajouter le temps partiel ou le congé"):
+            if not name.strip() or None in (start, years, share):
+                st.error("Renseignez le nom, le début, la durée et la part travaillée.")
+                return
+            row = {'name': name.strip(), 'earner': int(earner), 'start_year': int(start),
+                   'years': int(years), 'worked_share': share / 100}
+            try:
+                work_changes_by_earner([row], adults)
+            except ValueError as error:
+                st.error(str(error))
+                return
+            changes.append(row)
             st.session_state.results = None
             st.rerun()
 
@@ -847,7 +904,8 @@ def _budget_with_loans():
     if budget is None:
         return None
     return {**budget, 'loans': st.session_state.loans,
-            'properties': st.session_state.properties}
+            'properties': st.session_state.properties,
+            'work_changes': st.session_state.work_changes}
 
 
 def run_analysis(form):

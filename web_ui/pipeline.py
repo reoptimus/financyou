@@ -22,7 +22,7 @@ from investment_calculator.market_assumptions import load_market_assumptions
 from investment_calculator.modules import scenario_generator, user_profile
 from investment_calculator.modules.capital_tranches import Tranche, split_into_tranches
 from investment_calculator.modules.household_budget import KNOWN_GAPS as BUDGET_GAPS
-from investment_calculator.modules.household_budget import Earner, household_budget
+from investment_calculator.modules.household_budget import Earner, WorkChange, household_budget
 from investment_calculator.modules.household_cash_flow import Project, capital_curve
 from investment_calculator.modules.household_loans import Loan, debt_ratio, loan_schedule
 from investment_calculator.modules.household_tax import household_shares, marginal_rate
@@ -86,6 +86,29 @@ def build_projects(rows: Sequence[Mapping[str, Any]]) -> list[Project]:
     return projects
 
 
+def work_changes_by_earner(
+    rows: Sequence[Mapping[str, Any]], adults: int
+) -> list[tuple[WorkChange, ...]]:
+    """
+    Temps partiels et congés de chaque adulte, à partir des lignes de la page
+    Projets : ``earner`` (0 ou 1), ``start_year``, ``years``, ``worked_share``.
+
+    Raises:
+        ValueError: adulte absent du foyer, ou période invalide.
+    """
+    changes: list[list[WorkChange]] = [[] for _ in range(adults)]
+    for row in rows:
+        k = int(row['earner'])
+        if not 0 <= k < adults:
+            raise ValueError(
+                f"Temps partiel « {row.get('name', '')} » de l'adulte {k + 1} : le foyer "
+                f"compte {adults} adulte(s). Retirez ce projet ou corrigez le foyer."
+            )
+        changes[k].append(WorkChange(int(row['start_year']), int(row['years']),
+                                     float(row['worked_share'])))
+    return [tuple(c) for c in changes]
+
+
 def build_budget(
     budget: Mapping[str, Any], *, catalog: PlacementCatalog, horizon: int,
     annual_savings_now: float,
@@ -96,7 +119,8 @@ def build_budget(
     ``budget`` porte ``earners`` (``taxable_income``, ``annual_growth``,
     ``retirement_year``, ``replacement_rate``), ``rent``, ``loans`` (``name``,
     ``annual_payment``, ``rate``, ``years_left``), ``dependent_years``,
-    ``expenses_follow_income``, ``properties`` (champs de
+    ``expenses_follow_income``, ``work_changes`` (voir
+    :func:`work_changes_by_earner`), ``properties`` (champs de
     :class:`RentalProperty`) et, facultatif, ``home`` (voir :func:`home_loan`) :
     le crédit de la résidence principale s'ajoute aux crédits.
     ``annual_savings_now`` est l'épargne actuelle du profil, sur un an : elle
@@ -106,11 +130,13 @@ def build_budget(
         ValueError: saisie refusée par :mod:`household_budget` ; le message dit
             quoi corriger.
     """
+    changes = work_changes_by_earner(budget.get('work_changes', []), len(budget['earners']))
     earners = [
         Earner(float(e['taxable_income']), float(e['annual_growth']),
                None if e.get('retirement_year') is None else int(e['retirement_year']),
-               None if e.get('replacement_rate') is None else float(e['replacement_rate']))
-        for e in budget['earners']
+               None if e.get('replacement_rate') is None else float(e['replacement_rate']),
+               changes[k])
+        for k, e in enumerate(budget['earners'])
     ]
     loans = [
         Loan(str(c['name']), float(c['annual_payment']), float(c['rate']), int(c['years_left']))

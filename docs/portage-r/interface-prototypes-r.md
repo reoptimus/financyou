@@ -66,7 +66,7 @@ propres questions (`table_projets.xlsx`, feuille `tab2`) :
 | famille | études supérieures | période, montant annuel | idem |
 | | agrandir la famille | date | Non : dépend des unités de consommation, non sourcées |
 | équipement | chauffage basse consommation, travaux BBC ou non, panneaux solaires | date, coût, économie annuelle, durée de vie | Formulaire générique seulement ; crédits d'impôt non portés |
-| travail, loisir | temps partiel, arrêt d'un conjoint, congé sans solde | période, part travaillée, quel conjoint | Non : touche les revenus du budget |
+| travail, loisir | temps partiel, arrêt d'un conjoint, congé sans solde | période, part travaillée, quel conjoint | Oui (page Projets, section « Temps partiel ou congé ») : réduit le salaire dans le budget ; pension et allocations inchangées, lacune déclarée |
 | immo | investissement locatif, Pinel, résidence secondaire | date, prix, loyer, taux, durée, apport | Page Investissement locatif ; Pinel non porté |
 
 Deux graphiques accompagnent la saisie : la chronologie des flux des projets et
@@ -133,8 +133,7 @@ Par ordre de valeur pour l'utilisateur, une PR par ligne :
    unités de consommation ne sont pas portées.
 
 Restent hors de portée tant qu'une donnée validée manque : pension
-alimentaire, Pinel et crédits d'impôt travaux, projets qui changent les
-revenus (temps partiel, congé), agrandissement de la famille (unités de
+alimentaire, Pinel et crédits d'impôt travaux, agrandissement de la famille (unités de
 consommation), « Et si… » (scénarios historiques à calibrer).
 
 ## 4. Écarts volontaires avec le R, pour les modèles de projets
