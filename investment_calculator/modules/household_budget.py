@@ -31,9 +31,15 @@ charges, leurs annuités, leur apport et leur impôt (barème et prélèvements
 sociaux sur le revenu foncier). Les dépenses courantes restent celles de la
 situation actuelle, sans ces biens.
 
+Un temps partiel ou un congé (:class:`WorkChange`, projets « travail » des
+prototypes R) réduit le salaire d'un adulte pendant une période, à la part
+travaillée saisie par l'utilisateur. Les dépenses courantes restent déduites
+de la situation déclarée, sans ces changements.
+
 Limites déclarées (``KNOWN_GAPS``) : les dépenses ne suivent pas la
 composition du foyer, car les unités de consommation du R ne sont pas
-sourcées. Les pensions alimentaires ne sont pas portées.
+sourcées. Les pensions alimentaires ne sont pas portées. Un temps partiel ou
+un congé ne change ni la pension de retraite ni les allocations.
 """
 
 from __future__ import annotations
@@ -58,13 +64,45 @@ from investment_calculator.tax_regime import TaxRegime
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["KNOWN_GAPS", "Earner", "earner_income", "household_budget"]
+__all__ = ["KNOWN_GAPS", "Earner", "WorkChange", "earner_income", "household_budget"]
 
 KNOWN_GAPS = [
     "Les dépenses courantes ne suivent pas la composition du foyer : les unités de "
     "consommation (naissance, départ d'un enfant) ne sont pas encore sourcées.",
     "Les pensions alimentaires versées ou reçues ne sont pas portées.",
+    "Un temps partiel ou un congé réduit le salaire seulement : la pension de retraite "
+    "reste calculée sur un salaire à temps plein, et les allocations (congé parental, "
+    "chômage) ne sont pas comptées.",
 ]
+
+
+@dataclass(frozen=True)
+class WorkChange:
+    """
+    Temps partiel ou congé d'un adulte.
+
+    Attributes:
+        start_year: première année concernée (0 = cette année).
+        years: nombre d'années concernées.
+        worked_share: part du salaire perçue, saisie par l'utilisateur (0,8 pour
+            un temps partiel à 80 %, 0 pour un congé sans solde).
+    """
+
+    start_year: int
+    years: int
+    worked_share: float
+
+    def __post_init__(self) -> None:
+        if self.start_year < 0 or self.years < 1:
+            raise ValueError(
+                f"Temps partiel ou congé à l'année {self.start_year} sur {self.years} an(s) : "
+                "donnez une année à venir (0 = cette année) et au moins un an."
+            )
+        if not math.isfinite(self.worked_share) or not 0 <= self.worked_share <= 1:
+            raise ValueError(
+                f"Part travaillée de {self.worked_share} : saisissez une part entre 0 "
+                "(congé sans solde) et 1 (temps plein), 0,8 pour 80 %."
+            )
 
 
 @dataclass(frozen=True)
@@ -79,12 +117,14 @@ class Earner:
             ``None`` s'il n'a pas lieu avant l'horizon.
         replacement_rate: pension / dernier revenu d'activité, saisi par
             l'utilisateur. Requis si ``retirement_year`` est donné.
+        work_changes: temps partiels et congés à venir.
     """
 
     taxable_income: float
     annual_growth: float
     retirement_year: int | None = None
     replacement_rate: float | None = None
+    work_changes: tuple[WorkChange, ...] = ()
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.taxable_income) or self.taxable_income < 0:
@@ -110,12 +150,16 @@ class Earner:
                 )
 
 
-def earner_income(earner: Earner, horizon: int) -> tuple[np.ndarray, np.ndarray]:
+def earner_income(
+    earner: Earner, horizon: int, *, with_changes: bool = True
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Revenus d'activité et pensions d'un adulte, années 0 à ``horizon``.
 
     La pension est fixée à la retraite : taux de remplacement × revenu
-    d'activité qu'aurait eu l'adulte cette année-là, puis constante.
+    d'activité qu'aurait eu l'adulte cette année-là à temps plein, puis
+    constante. Avec ``with_changes``, le salaire de chaque année de temps
+    partiel ou de congé est multiplié par la part travaillée.
     """
     years = np.arange(horizon + 1)
     salary = earner.taxable_income * (1 + earner.annual_growth) ** years
@@ -125,6 +169,9 @@ def earner_income(earner: Earner, horizon: int) -> tuple[np.ndarray, np.ndarray]
         assert earner.replacement_rate is not None
         pension[retire:] = salary[retire] * earner.replacement_rate
         salary[retire:] = 0.0
+    if with_changes:
+        for change in earner.work_changes:
+            salary[change.start_year:change.start_year + change.years] *= change.worked_share
     return salary, pension
 
 
@@ -173,6 +220,9 @@ def household_budget(
     salaries = sum(s for s, _ in incomes)
     pensions = sum(p for _, p in incomes)
     taxable = np.asarray(salaries + pensions, dtype=float)
+    # Situation déclarée, sans temps partiel ni congé : elle fixe les dépenses.
+    declared = [earner_income(e, horizon, with_changes=False) for e in earners]
+    declared_taxable = np.asarray(sum(s + p for s, p in declared), dtype=float)
     shares = shares_by_year(
         regime, adults=len(earners), dependent_years=dependent_years, horizon=horizon
     )
@@ -181,21 +231,25 @@ def household_budget(
     payments = (schedule["interest"] + schedule["principal"]).to_numpy()
     rent_paid = np.full(horizon + 1, float(rent))
 
-    # Les dépenses viennent de la situation déclarée, sans les biens à acheter.
-    expenses_0 = taxable[0] - tax[0] - rent_paid[0] - payments[0] - current_savings
+    # Les dépenses viennent de la situation déclarée, sans les biens à acheter
+    # ni les temps partiels et congés à venir.
+    declared_tax_0 = income_tax_by_year(regime, [float(declared_taxable[0])], shares[:1])[0]
+    expenses_0 = (declared_taxable[0] - declared_tax_0 - rent_paid[0] - payments[0]
+                  - current_savings)
     if expenses_0 < 0:
         raise ValueError(
-            f"Épargne de {current_savings:,.0f} € par an pour {taxable[0] - tax[0]:,.0f} € de "
+            f"Épargne de {current_savings:,.0f} € par an pour "
+            f"{declared_taxable[0] - declared_tax_0:,.0f} € de "
             f"revenus après impôt, {rent_paid[0] + payments[0]:,.0f} € de loyer et "
             "d'annuités : les dépenses seraient négatives. Vérifiez l'épargne et les revenus."
         )
     if expenses_follow_income:
-        if taxable[0] <= 0:
+        if declared_taxable[0] <= 0:
             raise ValueError(
                 "Aucun revenu à l'année 0 : les dépenses ne peuvent pas suivre les revenus. "
                 "Choisissez des dépenses constantes."
             )
-        expenses = expenses_0 * taxable / taxable[0]
+        expenses = expenses_0 * taxable / declared_taxable[0]
     else:
         expenses = np.full(horizon + 1, expenses_0)
     flows = [property_flows(p, horizon) for p in properties]

@@ -14,10 +14,12 @@ from investment_calculator.modules.rental_property import KNOWN_GAPS as RENTAL_G
 from investment_calculator.placement_catalog import load_placement_catalog
 from web_ui.pipeline import (
     budget_marginal_rate,
+    build_budget,
     build_profile_config,
     build_projects,
     dependent_years_from_ages,
     run_projection,
+    work_changes_by_earner,
 )
 
 
@@ -317,6 +319,46 @@ def test_budget_saisi_dans_l_application() -> None:
     _click(app, 'Lancer')
     assert not app.exception and not app.error
     assert any('Budget du foyer' in m.value for m in app.markdown)
+
+
+def test_un_conge_reduit_l_epargne_libre_du_budget() -> None:
+    leave = {'name': 'congé parental', 'earner': 1, 'start_year': 2, 'years': 1,
+             'worked_share': 0.0}
+    catalog = load_placement_catalog('fr-2026')
+    base = build_budget(BUDGET, catalog=catalog, horizon=15, annual_savings_now=3_600.0)
+    ours = build_budget({**BUDGET, 'work_changes': [leave]}, catalog=catalog, horizon=15,
+                        annual_savings_now=3_600.0)
+    assert ours['salaries'].iloc[2] == pytest.approx(base['salaries'].iloc[2] - 25_000.0)
+    assert ours['free_savings'].iloc[2] < base['free_savings'].iloc[2]
+    np.testing.assert_allclose(ours['free_savings'].drop(2), base['free_savings'].drop(2))
+
+
+def test_un_conge_d_un_adulte_absent_est_refuse() -> None:
+    with pytest.raises(ValueError, match="le foyer compte 1 adulte"):
+        work_changes_by_earner([{'name': 'congé', 'earner': 1, 'start_year': 0, 'years': 1,
+                                 'worked_share': 0.0}], 1)
+
+
+def test_temps_partiel_saisi_dans_l_application() -> None:
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file('../web_ui/app_enhanced.py', default_timeout=60).run()
+    app.session_state['form'] = {**{k: v for k, v in FORM.items() if k != 'holdings'},
+                                 'retirement_age': 55}
+    app.session_state['budget'] = {k: v for k, v in BUDGET.items() if k != 'loans'}
+    app.session_state['page'] = 'Projects'
+    app.run()
+    assert not app.exception
+    app.text_input(key='work_name').set_value('temps partiel')
+    app.number_input(key='work_start').set_value(1)
+    app.number_input(key='work_years').set_value(3)
+    app.number_input(key='work_share').set_value(80.0)
+    _click(app, 'Ajouter le temps partiel')
+    assert not app.error
+    assert app.session_state['work_changes'] == [
+        {'name': 'temps partiel', 'earner': 0, 'start_year': 1, 'years': 3,
+         'worked_share': 0.8}
+    ]
 
 
 # --- Investissement locatif -----------------------------------------------------

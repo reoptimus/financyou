@@ -8,8 +8,10 @@ l'arithmétique sur les montants saisis : il n'ajoute aucune hypothèse, aucun
 taux, aucune valeur par défaut.
 
 Les modèles du R qui demandent une donnée absente du moteur ne sont pas
-repris (voir ``docs/portage-r/interface-prototypes-r.md``) : temps partiel et
-congés (revenus du budget), agrandissement de la famille (unités de
+repris ici (voir ``docs/portage-r/interface-prototypes-r.md``). Le temps
+partiel et les congés touchent les revenus : ils se saisissent à part, dans la
+page Projets, et agissent sur le budget. Restent hors de portée :
+agrandissement de la famille (unités de
 consommation), Pinel et crédits d'impôt travaux (régime fiscal),
 investissement locatif (page dédiée).
 """

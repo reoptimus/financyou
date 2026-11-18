@@ -26,6 +26,7 @@ SAVED_KEYS: dict[str, tuple[type, ...]] = {
     'budget': (dict, type(None)),
     'loans': (list,),
     'properties': (list,),
+    'work_changes': (list,),
 }
 
 
@@ -59,7 +60,7 @@ def load_inputs(text: str | bytes) -> dict[str, Any]:
     inputs = {}
     for key, types in SAVED_KEYS.items():
         value = payload.get(key)
-        if value is None and key in ('holdings', 'projects', 'loans', 'properties'):
+        if value is None and key in ('holdings', 'projects', 'loans', 'properties', 'work_changes'):
             value = []
         if not isinstance(value, types) or isinstance(value, bool):
             raise ValueError(
