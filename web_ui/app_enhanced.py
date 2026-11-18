@@ -181,7 +181,9 @@ def page_profile():
         col1, col2 = st.columns(2)
         with col1:
             monthly_amount = st.number_input(
-                "Épargne mensuelle (€)", 0.0, None, saved.get('monthly_amount'), 50.0
+                "Épargne mensuelle (€)", 0.0, None, saved.get('monthly_amount'), 50.0,
+                help="Somme que vous épargnez en moyenne chaque mois, hors remboursement "
+                     "de crédits immobiliers.",
             )
         with col2:
             increase = saved.get('annual_increase')
@@ -426,10 +428,13 @@ def page_budget():
             with col2:
                 retire = st.number_input("Retraite dans (années), vide si après l'horizon",
                                          0, 60, prev.get('retirement_year'), 1,
-                                         key=f"ret{k}")
+                                         key=f"ret{k}",
+                                         help="Nombre d'années avant la retraite à taux plein.")
                 replacement = st.number_input(
                     "Taux de remplacement (%)", 0.0, 150.0,
                     _as_percent(prev.get('replacement_rate')), 5.0, key=f"rep{k}",
+                    help="Pension de retraite rapportée au dernier revenu d'activité. "
+                         "Votre relevé de carrière (info-retraite.fr) permet de l'estimer.",
                 )
             earners.append({'taxable_income': income, 'annual_growth': _percent(growth),
                             'retirement_year': retire, 'replacement_rate': _percent(replacement)})
@@ -438,13 +443,19 @@ def page_budget():
         children = col1.text_input(
             "Âge de chaque enfant à charge, séparés par des virgules (vide si aucun)",
             ", ".join(str(a) for a in saved.get('children_ages', [])),
+            help="Les enfants à charge au titre de votre impôt : ils donnent les parts "
+                 "du quotient familial.",
         )
         end_age = col2.number_input(
             "Âge auquel ils cesseront d'être à votre charge", 0, 40,
             saved.get('children_end_age'), 1,
             help="Il dépend de votre foyer : études, rattachement au foyer fiscal.",
         )
-        follow = st.checkbox("Les dépenses suivent les revenus (sinon constantes)")
+        follow = st.checkbox(
+            "Les dépenses suivent les revenus (sinon constantes)",
+            help="Votre niveau de vie, donc votre consommation, suivra-t-il l'évolution "
+                 "de vos revenus ?",
+        )
         submitted = st.form_submit_button("💾 Enregistrer le budget", type="primary")
     if submitted:
         if any(e['taxable_income'] is None or e['annual_growth'] is None for e in earners):
@@ -498,6 +509,7 @@ def render_home_questions(home, rent):
         answers['monthly_rent'] = st.number_input(
             "Loyer mensuel, charges comprises (€)", 0.0, None,
             None if not rent else rent / 12, 10.0, key="home_rent",
+            help="Montant mensuel de votre loyer, toutes charges comprises.",
         )
     elif status == 'owner':
         loan = home.get('loan') or {}
@@ -513,6 +525,10 @@ def render_home_questions(home, rent):
         )
         answers['paid'] = paid
         if paid is False:
+            st.caption(
+                "Le détail du crédit permet d'estimer le patrimoine réellement possédé "
+                "aujourd'hui, net du capital encore dû, et vos engagements à venir."
+            )
             col1, col2, col3 = st.columns(3)
             answers['monthly_payment'] = col1.number_input(
                 "Mensualité du crédit (€)", 0.0, None,
@@ -773,6 +789,12 @@ def display_budget(budget):
                     help=f"Atteinte l'année {indicators['min_free_savings_year']}. "
                          "Négative, le foyer puise dans son capital.")
     st.line_chart(table['Épargne libre'])
+    st.caption(
+        "L'épargne libre est la part de vos revenus que vous mettez de côté chaque "
+        "année, une fois payés l'impôt, le loyer, les crédits et les dépenses courantes. "
+        "Négative, vos revenus ne couvrent pas vos dépenses : elle est prise sur votre "
+        "épargne."
+    )
     if 'property_equity' in budget:
         st.markdown("Valeur nette des biens loués selon les scénarios immobiliers : valeur "
                     "moins capital restant dû, avant frais et impôt de revente")
