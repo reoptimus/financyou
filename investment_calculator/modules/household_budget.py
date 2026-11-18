@@ -31,6 +31,10 @@ charges, leurs annuités, leur apport et leur impôt (barème et prélèvements
 sociaux sur le revenu foncier). Les dépenses courantes restent celles de la
 situation actuelle, sans ces biens.
 
+Une naissance ou une adoption à venir (:class:`FutureChild`) ajoute une part
+fiscale et le coût annuel de l'enfant saisi par l'utilisateur, pendant ses
+années à charge.
+
 Un temps partiel ou un congé (:class:`WorkChange`, projets « travail » des
 prototypes R) réduit le salaire d'un adulte pendant une période, à la part
 travaillée saisie par l'utilisateur. Les dépenses courantes restent déduites
@@ -64,11 +68,15 @@ from investment_calculator.tax_regime import TaxRegime
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["KNOWN_GAPS", "Earner", "WorkChange", "earner_income", "household_budget"]
+__all__ = ["KNOWN_GAPS", "Earner", "FutureChild", "WorkChange", "earner_income",
+           "household_budget"]
 
 KNOWN_GAPS = [
     "Les dépenses courantes ne suivent pas la composition du foyer : les unités de "
-    "consommation (naissance, départ d'un enfant) ne sont pas encore sourcées.",
+    "consommation ne sont pas encore sourcées. Seul le coût annuel d'un enfant à "
+    "venir, saisi par l'utilisateur, s'ajoute ; le départ d'un enfant ne réduit pas "
+    "les dépenses.",
+    "Les prestations familiales (allocations, aides à la garde) ne sont pas comptées.",
     "Les pensions alimentaires versées ou reçues ne sont pas portées.",
     "Un temps partiel ou un congé réduit le salaire seulement : la pension de retraite "
     "reste calculée sur un salaire à temps plein, et les allocations (congé parental, "
@@ -102,6 +110,35 @@ class WorkChange:
             raise ValueError(
                 f"Part travaillée de {self.worked_share} : saisissez une part entre 0 "
                 "(congé sans solde) et 1 (temps plein), 0,8 pour 80 %."
+            )
+
+
+@dataclass(frozen=True)
+class FutureChild:
+    """
+    Naissance ou adoption à venir (« agrandir la famille » des prototypes R).
+
+    Attributes:
+        arrival_year: année de l'arrivée (0 = cette année).
+        dependent_years: nombre d'années à charge, à partir de l'arrivée.
+        annual_cost: coût annuel de l'enfant pendant ces années, saisi par
+            l'utilisateur, constant ; il s'ajoute aux dépenses courantes.
+    """
+
+    arrival_year: int
+    dependent_years: int
+    annual_cost: float
+
+    def __post_init__(self) -> None:
+        if self.arrival_year < 0 or self.dependent_years < 1:
+            raise ValueError(
+                f"Enfant à venir à l'année {self.arrival_year}, à charge {self.dependent_years} "
+                "an(s) : donnez une année à venir (0 = cette année) et au moins un an à charge."
+            )
+        if not math.isfinite(self.annual_cost) or self.annual_cost < 0:
+            raise ValueError(
+                f"Coût annuel de l'enfant invalide ({self.annual_cost}) : saisissez un "
+                "montant positif ou nul."
             )
 
 
@@ -184,6 +221,7 @@ def household_budget(
     rent: float,
     loans: Sequence[Loan] = (),
     dependent_years: Sequence[int] = (),
+    future_children: Sequence[FutureChild] = (),
     expenses_follow_income: bool,
     properties: Sequence[RentalProperty] = (),
 ) -> pd.DataFrame:
@@ -198,6 +236,8 @@ def household_budget(
         rent: loyer annuel versé, constant.
         loans: crédits en cours.
         dependent_years: pour chaque personne à charge, nombre d'années à charge.
+        future_children: naissances ou adoptions à venir : une part fiscale de
+            plus et leur coût annuel, pendant leurs années à charge.
         expenses_follow_income: les dépenses suivent les revenus d'activité et
             de pension (sinon elles restent constantes).
         properties: biens achetés à crédit pour être loués nus.
@@ -224,16 +264,22 @@ def household_budget(
     declared = [earner_income(e, horizon, with_changes=False) for e in earners]
     declared_taxable = np.asarray(sum(s + p for s, p in declared), dtype=float)
     shares = shares_by_year(
-        regime, adults=len(earners), dependent_years=dependent_years, horizon=horizon
+        regime, adults=len(earners),
+        dependent_years=[*dependent_years, *(c.dependent_years for c in future_children)],
+        dependent_from=[0] * len(dependent_years) + [c.arrival_year for c in future_children],
+        horizon=horizon,
     )
     tax = income_tax_by_year(regime, taxable.tolist(), shares)
     schedule = loans_total(loans, horizon)
     payments = (schedule["interest"] + schedule["principal"]).to_numpy()
     rent_paid = np.full(horizon + 1, float(rent))
 
-    # Les dépenses viennent de la situation déclarée, sans les biens à acheter
-    # ni les temps partiels et congés à venir.
-    declared_tax_0 = income_tax_by_year(regime, [float(declared_taxable[0])], shares[:1])[0]
+    # Les dépenses viennent de la situation déclarée, sans les biens à acheter,
+    # les temps partiels et congés, ni les enfants à venir.
+    declared_shares = shares_by_year(
+        regime, adults=len(earners), dependent_years=dependent_years, horizon=0
+    )
+    declared_tax_0 = income_tax_by_year(regime, [float(declared_taxable[0])], declared_shares)[0]
     expenses_0 = (declared_taxable[0] - declared_tax_0 - rent_paid[0] - payments[0]
                   - current_savings)
     if expenses_0 < 0:
@@ -252,6 +298,9 @@ def household_budget(
         expenses = expenses_0 * taxable / declared_taxable[0]
     else:
         expenses = np.full(horizon + 1, expenses_0)
+    for child in future_children:
+        end = child.arrival_year + child.dependent_years
+        expenses[child.arrival_year:end] = expenses[child.arrival_year:end] + child.annual_cost
     flows = [property_flows(p, horizon) for p in properties]
     zero = np.zeros(horizon + 1)
     rental = sum((f["collected_rent"].to_numpy() for f in flows), zero)

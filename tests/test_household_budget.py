@@ -12,6 +12,7 @@ import pytest
 
 from investment_calculator.modules.household_budget import (
     Earner,
+    FutureChild,
     WorkChange,
     earner_income,
     household_budget,
@@ -141,3 +142,27 @@ def test_leave_lowers_free_savings_but_not_expenses() -> None:
 def test_invalid_work_change_is_refused(args: tuple[int, int, float]) -> None:
     with pytest.raises(ValueError, match="saisissez|donnez"):
         WorkChange(*args)
+
+
+def test_future_child_adds_a_share_and_its_cost() -> None:
+    child = FutureChild(arrival_year=2, dependent_years=3, annual_cost=6_000.0)
+    base = household_budget(FR, _couple(), horizon=6, current_savings=5_000.0, rent=0.0,
+                            expenses_follow_income=False)
+    ours = household_budget(FR, _couple(), horizon=6, current_savings=5_000.0, rent=0.0,
+                            future_children=[child], expenses_follow_income=False)
+    extra = np.array([0, 0, 6_000.0, 6_000.0, 6_000.0, 0, 0])
+    np.testing.assert_allclose(ours["expenses"], base["expenses"] + extra)
+    for year in (2, 3, 4):
+        tax = FR.income_tax_due(ours["salaries"].iloc[year], shares=2.5, dependent_shares=0.5)
+        assert ours["income_tax"].iloc[year] == pytest.approx(tax)
+    np.testing.assert_allclose(ours["income_tax"].drop([2, 3, 4]),
+                               base["income_tax"].drop([2, 3, 4]))
+    # L'année 0 reste celle déclarée.
+    assert ours["free_savings"].iloc[0] == pytest.approx(5_000.0)
+
+
+def test_invalid_future_child_is_refused() -> None:
+    with pytest.raises(ValueError, match="au moins un an à charge"):
+        FutureChild(arrival_year=1, dependent_years=0, annual_cost=0.0)
+    with pytest.raises(ValueError, match="montant positif"):
+        FutureChild(arrival_year=1, dependent_years=18, annual_cost=-1.0)

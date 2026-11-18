@@ -22,7 +22,12 @@ from investment_calculator.market_assumptions import load_market_assumptions
 from investment_calculator.modules import scenario_generator, user_profile
 from investment_calculator.modules.capital_tranches import Tranche, split_into_tranches
 from investment_calculator.modules.household_budget import KNOWN_GAPS as BUDGET_GAPS
-from investment_calculator.modules.household_budget import Earner, WorkChange, household_budget
+from investment_calculator.modules.household_budget import (
+    Earner,
+    FutureChild,
+    WorkChange,
+    household_budget,
+)
 from investment_calculator.modules.household_cash_flow import Project, capital_curve
 from investment_calculator.modules.household_loans import Loan, debt_ratio, loan_schedule
 from investment_calculator.modules.household_tax import household_shares, marginal_rate
@@ -119,6 +124,7 @@ def build_budget(
     ``budget`` porte ``earners`` (``taxable_income``, ``annual_growth``,
     ``retirement_year``, ``replacement_rate``), ``rent``, ``loans`` (``name``,
     ``annual_payment``, ``rate``, ``years_left``), ``dependent_years``,
+    ``future_children`` (voir :func:`future_children`),
     ``expenses_follow_income``, ``work_changes`` (voir
     :func:`work_changes_by_earner`), ``properties`` (champs de
     :class:`RentalProperty`) et, facultatif, ``home`` (voir :func:`home_loan`) :
@@ -150,6 +156,11 @@ def build_budget(
         catalog.regime, earners, horizon=horizon, current_savings=annual_savings_now,
         rent=float(budget['rent']), loans=loans,
         dependent_years=[int(n) for n in budget.get('dependent_years', [])],
+        future_children=[
+            FutureChild(int(c['arrival_year']), int(c['dependent_years']),
+                        float(c['annual_cost']))
+            for c in budget.get('future_children', [])
+        ],
         expenses_follow_income=bool(budget['expenses_follow_income']),
         properties=properties,
     )
@@ -216,6 +227,32 @@ def dependent_years_from_ages(ages: Sequence[int], end_age: int | None) -> list[
         raise ValueError(f"Âges {list(ages)} et fin de charge à {end_age} ans : saisissez "
                          "des âges positifs.")
     return [max(int(end_age) - int(age), 0) for age in ages]
+
+
+def future_children(
+    arrivals: Sequence[int], end_age: int | None, annual_cost: float | None
+) -> list[dict[str, float]]:
+    """
+    Enfants à venir (prototypes R : projet « agrandir la famille »), à partir
+    de l'année d'arrivée de chacun, de l'âge de fin de charge et du coût annuel
+    d'un enfant, tous deux saisis par l'utilisateur.
+
+    Raises:
+        ValueError: arrivées saisies sans âge de fin de charge ou sans coût
+            annuel, ou arrivée dans le passé.
+    """
+    if not arrivals:
+        return []
+    if end_age is None or annual_cost is None:
+        raise ValueError(
+            "Enfants à venir saisis sans âge de fin de charge ou sans coût annuel : "
+            "indiquez les deux (0 € si vous ne voulez pas compter de coût)."
+        )
+    if any(a < 0 for a in arrivals) or end_age < 1:
+        raise ValueError(f"Arrivées {list(arrivals)} et fin de charge à {end_age} ans : "
+                         "saisissez des années à venir et une fin de charge d'au moins 1 an.")
+    return [{'arrival_year': int(a), 'dependent_years': int(end_age),
+             'annual_cost': float(annual_cost)} for a in arrivals]
 
 
 def wealth_bands(wealth_paths: pd.DataFrame) -> pd.DataFrame:

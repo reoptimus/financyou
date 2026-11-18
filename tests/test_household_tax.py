@@ -98,3 +98,10 @@ def test_lengths_are_checked() -> None:
         income_tax_by_year(FR, [1.0, 2.0], [household_shares(FR, adults=1, dependents=0)])
     with pytest.raises(ValueError, match="positif"):
         shares_by_year(FR, adults=1, dependent_years=[-1], horizon=3)
+
+
+def test_a_dependent_can_arrive_later() -> None:
+    shares = shares_by_year(FR, adults=2, dependent_years=[2], dependent_from=[3], horizon=6)
+    assert [s.dependents for s in shares] == [0, 0, 0, 0.5, 0.5, 0, 0]
+    with pytest.raises(ValueError, match="une année d'arrivée par personne"):
+        shares_by_year(FR, adults=2, dependent_years=[2], dependent_from=[], horizon=3)

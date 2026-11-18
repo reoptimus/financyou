@@ -18,6 +18,7 @@ from web_ui.pipeline import (
     build_profile_config,
     build_projects,
     dependent_years_from_ages,
+    future_children,
     run_projection,
     work_changes_by_earner,
 )
@@ -305,12 +306,17 @@ def test_budget_saisi_dans_l_application() -> None:
     app.radio(key='home_status').set_value('tenant').run()
     app.number_input(key='home_rent').set_value(0.0)
     budget_fields = app.number_input[4:]
-    values = (40_000.0, 1.0, 12, 60.0, 25_000.0, 0.0, None, None, 15)
+    values = (40_000.0, 1.0, 12, 60.0, 25_000.0, 0.0, None, None, 15, 6_000.0)
     for field, value in zip(budget_fields, values, strict=True):
         field.set_value(value)
     app.text_input[1].set_value('10')
+    app.text_input[2].set_value('3')
     _click(app, 'Enregistrer le budget')
     assert not app.error
+    # Une naissance dans 3 ans, à charge jusqu'à 15 ans, pour 6 000 € par an.
+    assert app.session_state['budget']['future_children'] == [
+        {'arrival_year': 3, 'dependent_years': 15, 'annual_cost': 6_000.0}
+    ]
     assert app.session_state['budget']['earners'][0]['replacement_rate'] == pytest.approx(0.6)
     # Un enfant de 10 ans, à charge jusqu'à 15 ans : 5 années, comme BUDGET.
     assert app.session_state['budget']['dependent_years'] == BUDGET['dependent_years']
@@ -359,6 +365,12 @@ def test_temps_partiel_saisi_dans_l_application() -> None:
         {'name': 'temps partiel', 'earner': 0, 'start_year': 1, 'years': 3,
          'worked_share': 0.8}
     ]
+
+
+def test_enfants_a_venir_sans_cout_refuses() -> None:
+    with pytest.raises(ValueError, match="sans âge de fin de charge ou sans coût"):
+        future_children([2], 18, None)
+    assert future_children([], None, None) == []
 
 
 # --- Investissement locatif -----------------------------------------------------

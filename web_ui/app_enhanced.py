@@ -27,6 +27,7 @@ from web_ui.pipeline import (
     build_projects,
     build_property,
     dependent_years_from_ages,
+    future_children,
     run_projection,
     tranche_label,
     work_changes_by_earner,
@@ -508,6 +509,21 @@ def page_budget():
             saved.get('children_end_age'), 1,
             help="Il dépend de votre foyer : études, rattachement au foyer fiscal.",
         )
+        col1, col2 = st.columns(2)
+        arrivals = col1.text_input(
+            "Naissances ou adoptions à venir : dans combien d'années, séparées par des "
+            "virgules (vide si aucune)",
+            ", ".join(str(c['arrival_year']) for c in saved.get('future_children', [])),
+            help="Chaque enfant à venir compte une part fiscale de plus, de son arrivée "
+                 "jusqu'à l'âge de fin de charge ci-dessus.",
+        )
+        known_cost = saved.get('future_children') or [{}]
+        child_cost = col2.number_input(
+            "Coût annuel de chaque enfant à venir (€)", 0.0, None,
+            known_cost[0].get('annual_cost'), 500.0,
+            help="Ce que l'enfant ajoutera chaque année à vos dépenses courantes, montant "
+                 "constant. Les allocations et aides à la garde ne sont pas comptées.",
+        )
         follow = st.checkbox(
             "Les dépenses suivent les revenus (sinon constantes)",
             help="Votre niveau de vie, donc votre consommation, suivra-t-il l'évolution "
@@ -530,13 +546,19 @@ def page_budget():
             return
         try:
             years = dependent_years_from_ages(ages, end_age)
+            try:
+                arrival_years = [int(x) for x in arrivals.replace(" ", "").split(",") if x]
+            except ValueError:
+                raise ValueError("Enfants à venir : saisissez des nombres d'années entiers "
+                                 "séparés par des virgules.") from None
+            coming = future_children(arrival_years, end_age, child_cost)
         except ValueError as error:
             st.error(str(error))
             return
         st.session_state.budget = {
             'earners': earners, 'rent': rent, 'home': home, 'dependent_years': years,
             'children_ages': ages, 'children_end_age': end_age,
-            'expenses_follow_income': follow,
+            'future_children': coming, 'expenses_follow_income': follow,
         }
         st.session_state.results = None
         st.success("✅ Budget enregistré.")
