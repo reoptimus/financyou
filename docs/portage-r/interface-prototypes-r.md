@@ -64,7 +64,7 @@ propres questions (`table_projets.xlsx`, feuille `tab2`) :
 | | dépense via crédit | date, montant, durée, taux | idem |
 | | investissement avec gains annuels | période, mise, recette annuelle | idem |
 | famille | études supérieures | période, montant annuel | idem |
-| | agrandir la famille | date | Oui (page Budget, « naissances ou adoptions à venir ») : une part fiscale de plus et un coût annuel saisi par l'utilisateur, à la place des unités de consommation non sourcées |
+| | agrandir la famille | date | Oui (page Budget, « naissances ou adoptions à venir ») : une part fiscale de plus, et des dépenses qui suivent les unités de consommation selon l'âge (échelle OCDE modifiée de l'Insee, à la place de l'échelle d'Oxford du R, non sourcée) |
 | équipement | chauffage basse consommation, travaux BBC ou non, panneaux solaires | date, coût, économie annuelle, durée de vie | Formulaire générique seulement ; crédits d'impôt non portés |
 | travail, loisir | temps partiel, arrêt d'un conjoint, congé sans solde | période, part travaillée, quel conjoint | Oui (page Projets, section « Temps partiel ou congé ») : réduit le salaire dans le budget ; pension et allocations inchangées, lacune déclarée |
 | immo | investissement locatif, Pinel, résidence secondaire | date, prix, loyer, taux, durée, apport | Page Investissement locatif ; Pinel non porté |

@@ -31,18 +31,19 @@ charges, leurs annuités, leur apport et leur impôt (barème et prélèvements
 sociaux sur le revenu foncier). Les dépenses courantes restent celles de la
 situation actuelle, sans ces biens.
 
-Une naissance ou une adoption à venir (:class:`FutureChild`) ajoute une part
-fiscale et le coût annuel de l'enfant saisi par l'utilisateur, pendant ses
-années à charge.
+Les dépenses suivent la composition du foyer par les unités de consommation
+(:mod:`consumption_units`), comme dans le R : un enfant qui naît, passe
+14 ans ou quitte la charge du foyer les fait varier. Une naissance ou une
+adoption à venir (:class:`FutureChild`) ajoute aussi une part fiscale pendant
+ses années à charge.
 
 Un temps partiel ou un congé (:class:`WorkChange`, projets « travail » des
 prototypes R) réduit le salaire d'un adulte pendant une période, à la part
 travaillée saisie par l'utilisateur. Les dépenses courantes restent déduites
 de la situation déclarée, sans ces changements.
 
-Limites déclarées (``KNOWN_GAPS``) : les dépenses ne suivent pas la
-composition du foyer, car les unités de consommation du R ne sont pas
-sourcées. Les pensions alimentaires ne sont pas portées. Un temps partiel ou
+Limites déclarées (``KNOWN_GAPS``) : les prestations familiales ne sont pas
+comptées. Les pensions alimentaires ne sont pas portées. Un temps partiel ou
 un congé ne change ni la pension de retraite ni les allocations.
 """
 
@@ -72,10 +73,6 @@ __all__ = ["KNOWN_GAPS", "Earner", "FutureChild", "WorkChange", "earner_income",
            "household_budget"]
 
 KNOWN_GAPS = [
-    "Les dépenses courantes ne suivent pas la composition du foyer : les unités de "
-    "consommation ne sont pas encore sourcées. Seul le coût annuel d'un enfant à "
-    "venir, saisi par l'utilisateur, s'ajoute ; le départ d'un enfant ne réduit pas "
-    "les dépenses.",
     "Les prestations familiales (allocations, aides à la garde) ne sont pas comptées.",
     "Les pensions alimentaires versées ou reçues ne sont pas portées.",
     "Un temps partiel ou un congé réduit le salaire seulement : la pension de retraite "
@@ -118,27 +115,24 @@ class FutureChild:
     """
     Naissance ou adoption à venir (« agrandir la famille » des prototypes R).
 
+    Son coût ne se saisit pas : il vient des unités de consommation du foyer
+    (``consumption_units`` de :func:`household_budget`), qui suivent son âge.
+
     Attributes:
-        arrival_year: année de l'arrivée (0 = cette année).
+        arrival_year: année de l'arrivée, 1 au plus tôt ; un enfant déjà né se
+            saisit par son âge.
         dependent_years: nombre d'années à charge, à partir de l'arrivée.
-        annual_cost: coût annuel de l'enfant pendant ces années, saisi par
-            l'utilisateur, constant ; il s'ajoute aux dépenses courantes.
     """
 
     arrival_year: int
     dependent_years: int
-    annual_cost: float
 
     def __post_init__(self) -> None:
-        if self.arrival_year < 0 or self.dependent_years < 1:
+        if self.arrival_year < 1 or self.dependent_years < 1:
             raise ValueError(
                 f"Enfant à venir à l'année {self.arrival_year}, à charge {self.dependent_years} "
-                "an(s) : donnez une année à venir (0 = cette année) et au moins un an à charge."
-            )
-        if not math.isfinite(self.annual_cost) or self.annual_cost < 0:
-            raise ValueError(
-                f"Coût annuel de l'enfant invalide ({self.annual_cost}) : saisissez un "
-                "montant positif ou nul."
+                "an(s) : donnez une arrivée dans un an au moins (un enfant déjà né se saisit "
+                "par son âge) et au moins un an à charge."
             )
 
 
@@ -222,6 +216,7 @@ def household_budget(
     loans: Sequence[Loan] = (),
     dependent_years: Sequence[int] = (),
     future_children: Sequence[FutureChild] = (),
+    consumption_units: Sequence[float] | None = None,
     expenses_follow_income: bool,
     properties: Sequence[RentalProperty] = (),
 ) -> pd.DataFrame:
@@ -237,7 +232,11 @@ def household_budget(
         loans: crédits en cours.
         dependent_years: pour chaque personne à charge, nombre d'années à charge.
         future_children: naissances ou adoptions à venir : une part fiscale de
-            plus et leur coût annuel, pendant leurs années à charge.
+            plus pendant leurs années à charge.
+        consumption_units: unités de consommation du foyer, années 0 à
+            ``horizon`` (:func:`consumption_units.household_units`) ; les
+            dépenses de l'année 0 sont ramenées à une unité, puis multipliées
+            par les unités de chaque année. Constantes si omises.
         expenses_follow_income: les dépenses suivent les revenus d'activité et
             de pension (sinon elles restent constantes).
         properties: biens achetés à crédit pour être loués nus.
@@ -298,9 +297,14 @@ def household_budget(
         expenses = expenses_0 * taxable / declared_taxable[0]
     else:
         expenses = np.full(horizon + 1, expenses_0)
-    for child in future_children:
-        end = child.arrival_year + child.dependent_years
-        expenses[child.arrival_year:end] = expenses[child.arrival_year:end] + child.annual_cost
+    if consumption_units is not None:
+        units = np.asarray(consumption_units, dtype=float)
+        if units.shape != (horizon + 1,) or not (units > 0).all():
+            raise ValueError(
+                f"{units.size} unités de consommation pour {horizon + 1} années : donnez "
+                "une valeur positive par année, de 0 à l'horizon."
+            )
+        expenses = expenses * units / units[0]
     flows = [property_flows(p, horizon) for p in properties]
     zero = np.zeros(horizon + 1)
     rental = sum((f["collected_rent"].to_numpy() for f in flows), zero)

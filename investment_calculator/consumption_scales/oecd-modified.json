@@ -1,0 +1,17 @@
+{
+  "id": "oecd-modified",
+  "label": "Échelle d'équivalence de l'OCDE modifiée, retenue par l'Insee",
+  "first_adult": 1.0,
+  "other_person_from_threshold": 0.5,
+  "child_below_threshold": 0.3,
+  "age_threshold": 14,
+  "sources": [
+    "Insee, définition « Unité de consommation » : 1 UC pour le premier adulte du ménage, 0,5 UC pour les autres personnes de 14 ans ou plus, 0,3 UC pour les enfants de moins de 14 ans. https://www.insee.fr/fr/metadonnees/definition/c1802",
+    "HCF (Haut Conseil de la famille), « Le coût de l'enfant », rapport adopté le 9 juillet 2015 : aucune échelle ne s'impose ; l'échelle usuelle reste plausible et sert de référence commune. https://hcfea.gouv.fr/sites/hcfea/files/2025-12/rapport_cout_de_l_enfant_def_0.pdf",
+    "DREES, Les Dossiers n° 108, mars 2023, « Comment mieux prendre en compte la diversité des familles dans les échelles d'équivalence ? » : pas de seuil d'âge net ; l'échelle sous-estime le coût de l'enfant des familles monoparentales (+0,5 UC environ). https://drees.solidarites-sante.gouv.fr/sites/default/files/2023-03/DD108MAJ.pdf"
+  ],
+  "known_gaps": [
+    "Le surcoût des familles monoparentales (environ +0,5 UC selon la DREES, 2023) n'est pas porté : l'échelle usuelle le sous-estime.",
+    "Les budgets de référence de l'ONPES (HCF, 2015) donnent un coût de l'enfant plus élevé que l'échelle, qui croît avec l'âge (pour un couple, premier enfant : +29 % de 0 à 2 ans, +36 % de 3 à 10 ans, +33 % de 11 à 13 ans, +39 % de 14 à 17 ans). Ils ne sont pas retenus ici."
+  ]
+}
