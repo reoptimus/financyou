@@ -84,6 +84,18 @@
       "url": "https://www.economie.gouv.fr/particuliers/aides-fiscales-impot-famille",
       "consulted_on": "2026-11-18",
       "covers": ["income_tax.child_tax_advantages"]
+    },
+    {
+      "label": "Meilleurtaux Placement — Loi de finances 2026 : focus sur le nouveau statut du bailleur privé (source secondaire)",
+      "url": "https://placement.meilleurtaux.com/scpi/actualites/2026-fevrier/loi-de-finances-2026-focus-sur-le-nouveau-statut-du-bailleur-prive.html",
+      "consulted_on": "2026-11-18",
+      "covers": ["rental_income_regimes.private_landlord_amortization"]
+    },
+    {
+      "label": "Kohen Avocats — Statut du bailleur privé et loi de finances 2026 (source secondaire, cite CGI art. 31, I, 1°, i et l'art. 47 de la loi)",
+      "url": "https://kohenavocats.fr/2026/09/23/statut-bailleur-prive-loi-finances-2026-acheter-louer-deduire-paris/",
+      "consulted_on": "2026-11-18",
+      "covers": ["rental_income_regimes.private_landlord_amortization"]
     }
   ],
 
@@ -99,6 +111,7 @@
     "Prélèvement forfaitaire non libératoire acompte et sa régularisation non modélisés (sans effet sur un résultat annuel, mais sur la trésorerie oui).",
     "Correction hors règle du millésime (exception validée par SebG le 2026-10-25) : la surtaxe sur les plus-values immobilières élevées était décrite par tranches marginales (capital_gains.real_estate.surtax_brackets), ce que contredit le BOFiP (BOI-RFPI-TPVIE-20, § 70) : le taux s'applique au montant total de la plus-value, avec un lissage près de chaque seuil. Elle est désormais décrite par capital_gains.real_estate.surtax_schedule. Aucun calcul ne lisait l'ancien champ : aucune simulation archivée n'en dépend.",
     "Ajout hors règle du millésime (exception approuvée par SebG le 2026-11-18 ; valeurs à valider par SebG) : income_tax.child_tax_advantages porte le crédit d'impôt pour frais de garde (CGI art. 200 quater B) et la réduction pour frais de scolarisation (CGI art. 199 quater F). Aucun calcul ne lisait ces champs avant cet ajout : aucune simulation archivée n'en dépend. Les âges d'entrée au collège, au lycée et dans le supérieur sont des âges usuels : la loi retient la scolarisation au 31 décembre. Le rattachement d'un enfant majeur (moins de 21 ans, ou moins de 25 ans s'il étudie) et la déduction d'une pension alimentaire versée à un enfant majeur ne sont pas modélisés.",
+    "Ajout hors règle du millésime (exception approuvée par SebG le 2026-11-18 ; valeurs à valider par SebG) : rental_income_regimes.private_landlord_amortization porte le statut du bailleur privé (dispositif Jeanbrun). Ses valeurs viennent de sources secondaires concordantes, pas du texte de la loi, qui n'a pas pu être consulté. Trois points restent incertains : l'imputation sur le revenu global d'un déficit créé par l'amortissement (deficit_on_global_income vaut false, le choix le moins favorable), la base d'un logement ancien (travaux compris ou non), et la réintégration des amortissements à la revente (non modélisée, la revente ne l'est pas). Les plafonds de loyers et de ressources des locataires ne sont pas vérifiés. Aucun calcul ne lisait ce champ avant cet ajout.",
     "Barème de l'IFI à vérifier pour le millésime 2026 (non revu dans cette itération)."
   ],
 
@@ -394,6 +407,21 @@
       "deficit_cap_energy_renovation": 21400,
       "deficit_carry_forward_years": 10,
       "option_commitment_years": 3
+    },
+    "private_landlord_amortization": {
+      "reference": "CGI art. 31, I, 1°, i (loi n° 2026-103 du 19 février 2026 de finances pour 2026, art. 47)",
+      "land_share": 0.2,
+      "rates": {
+        "new": { "intermediate": 0.035, "social": 0.045, "very_social": 0.055 },
+        "renovated_old": { "intermediate": 0.03, "social": 0.035, "very_social": 0.04 }
+      },
+      "renovated_old_min_works_share": 0.3,
+      "annual_cap": 8000,
+      "cap_increase": { "social": 2000, "very_social": 4000 },
+      "cap_increase_min_rent_share": 0.5,
+      "commitment_years": 9,
+      "eligible_purchase_until": 2028,
+      "deficit_on_global_income": false
     }
   }
 }

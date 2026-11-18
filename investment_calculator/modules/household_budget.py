@@ -61,6 +61,7 @@ from investment_calculator.modules.household_loans import Loan, loans_total
 from investment_calculator.modules.household_tax import (
     child_tax_advantages,
     income_tax_by_year,
+    private_landlord_amortization,
     real_regime_rental_income,
     rental_social_tax,
     rental_taxable_income,
@@ -333,6 +334,11 @@ def household_budget(
     down = sum((f["down_payment"].to_numpy() for f in flows), zero)
     social = zero
     if flows:
+        if rental_regime == "micro_foncier" and any(p.landlord_status for p in properties):
+            raise ValueError(
+                "Statut du bailleur privé au micro-foncier : l'amortissement ne se déduit "
+                "qu'au régime réel. Choisissez le régime réel, ou retirez le statut du bien."
+            )
         if rental_regime == "micro_foncier":
             rental_taxable = rental_taxable_income(
                 regime, [f["collected_rent"].tolist() for f in flows]
@@ -340,8 +346,12 @@ def household_budget(
             rental_social_base = rental_taxable
         elif rental_regime == "real_regime":
             interest = sum((f["interest"].to_numpy() for f in flows), zero)
+            amortization = private_landlord_amortization(
+                regime, properties, [f["collected_rent"].tolist() for f in flows]
+            )
             rental_taxable, rental_social_base = real_regime_rental_income(
-                regime, rental.tolist(), charges.tolist(), interest.tolist()
+                regime, rental.tolist(), charges.tolist(), interest.tolist(),
+                amortization.tolist(),
             )
         else:
             raise ValueError(

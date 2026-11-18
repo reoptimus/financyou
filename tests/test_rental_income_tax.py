@@ -13,6 +13,7 @@ import pytest
 
 from investment_calculator.modules.household_budget import Earner, household_budget
 from investment_calculator.modules.household_tax import (
+    private_landlord_amortization,
     rental_social_tax,
     rental_taxable_income,
 )
@@ -114,3 +115,62 @@ def test_real_regime_in_the_budget() -> None:
     assert (real["income_tax"] < micro["income_tax"]).all()
     with pytest.raises(ValueError, match="micro_foncier ou real_regime"):
         household_budget(FR, earners, rental_regime="lmnp", **kwargs)
+
+
+LANDLORD = FR.document["rental_income_regimes"]["private_landlord_amortization"]
+
+
+def _landlord_flat(status: str | None = "intermediate", purchase_year: int = 0,
+                   value: float = 150_000.0) -> RentalProperty:
+    return RentalProperty(
+        name="neuf", price=value * 1.08, down_payment=value * 1.08, loan_rate=0.0,
+        loan_years=0, gross_yield=0.04, collected_share=1.0, annual_charges=0.0,
+        rent_growth=0.0, purchase_year=purchase_year, market_value=value,
+        landlord_status=status, housing_type="new",
+    )
+
+
+def test_private_landlord_amortization_by_hand() -> None:
+    prop = _landlord_flat()
+    rents = [property_flows(prop, 3)["collected_rent"].tolist()]
+    deduction = private_landlord_amortization(FR, [prop], rents)
+    # 150 000 € × 80 % × 3,5 % = 4 200 € par an, sous le plafond de 8 000 €.
+    expected = 150_000.0 * (1 - LANDLORD["land_share"]) * LANDLORD["rates"]["new"]["intermediate"]
+    np.testing.assert_allclose(deduction, [expected] * 4)
+    assert expected == pytest.approx(4_200.0)
+
+
+def test_private_landlord_cap_and_its_increase() -> None:
+    big = _landlord_flat(value=400_000.0)  # 11 200 € par an, plafonné à 8 000 €
+    rents = [property_flows(big, 1)["collected_rent"].tolist()]
+    np.testing.assert_allclose(private_landlord_amortization(FR, [big], rents),
+                               [LANDLORD["annual_cap"]] * 2)
+    very = _landlord_flat("very_social", value=400_000.0)  # 17 600 €, plafond 12 000 €
+    rents = [property_flows(very, 1)["collected_rent"].tolist()]
+    cap = LANDLORD["annual_cap"] + LANDLORD["cap_increase"]["very_social"]
+    np.testing.assert_allclose(private_landlord_amortization(FR, [very], rents), [cap] * 2)
+
+
+def test_private_landlord_requires_an_eligible_year_and_the_real_regime() -> None:
+    late = _landlord_flat(purchase_year=LANDLORD["eligible_purchase_until"] - FR.fiscal_year + 1)
+    with pytest.raises(ValueError, match="couvre les achats jusqu'en"):
+        private_landlord_amortization(FR, [late], [[0.0, 0.0, 0.0, 0.0]])
+    earners = [Earner(50_000.0, 0.0)]
+    with pytest.raises(ValueError, match="qu'au régime réel"):
+        household_budget(FR, earners, horizon=2, current_savings=0.0, rent=0.0,
+                         expenses_follow_income=False, properties=[_landlord_flat()])
+
+
+def test_private_landlord_lowers_the_tax_in_the_budget() -> None:
+    earners = [Earner(50_000.0, 0.0)]
+    kwargs = dict(horizon=2, current_savings=0.0, rent=0.0, expenses_follow_income=False,
+                  rental_regime="real_regime")
+    plain = household_budget(FR, earners, properties=[_landlord_flat(None)], **kwargs)
+    status = household_budget(FR, earners, properties=[_landlord_flat()], **kwargs)
+    # 6 480 € de loyers (4 % de 162 000 €), 4 200 € d'amortissement : 2 280 €
+    # imposés au lieu de 6 480 €.
+    rent = status["rental_income"].iloc[1]
+    assert rent == pytest.approx(6_480.0)
+    assert status["income_tax"].iloc[1] == pytest.approx(FR.income_tax_due(50_000.0 + 2_280.0))
+    assert plain["income_tax"].iloc[1] == pytest.approx(FR.income_tax_due(50_000.0 + rent))
+    assert status["rental_social_tax"].iloc[1] == pytest.approx(2_280.0 * FR.social_rate)

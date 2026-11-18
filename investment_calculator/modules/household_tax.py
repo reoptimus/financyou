@@ -48,6 +48,7 @@ from typing import Any
 
 import numpy as np
 
+from investment_calculator.modules.rental_property import RentalProperty
 from investment_calculator.tax_regime import TaxRegime
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ __all__ = [
     "household_shares",
     "income_tax_by_year",
     "marginal_rate",
+    "private_landlord_amortization",
     "real_regime_rental_income",
     "rental_social_tax",
     "rental_taxable_income",
@@ -300,9 +302,78 @@ def child_tax_advantages(
     return reduction, credit
 
 
+def private_landlord_amortization(
+    regime: TaxRegime, properties: Sequence[RentalProperty], rents: Sequence[Sequence[float]],
+) -> np.ndarray:
+    """
+    Déduction au titre de l'amortissement du statut du bailleur privé, tous
+    biens confondus, année par année (``rental_income_regimes.
+    private_landlord_amortization`` du régime).
+
+    Chaque bien sous ce statut s'amortit à partir de son année d'achat :
+    valeur hors frais × (1 − part du terrain) × taux de son type et de son
+    niveau de loyer, jusqu'à ce que la base soit épuisée. Le total du foyer
+    est plafonné chaque année ; le plafond est majoré quand la moitié au moins
+    des loyers bruts des biens amortis vient d'une location sociale (les
+    locations très sociales comptent comme sociales) ou très sociale.
+
+    Args:
+        rents: loyers encaissés de chaque bien, alignés sur ``properties``.
+
+    Raises:
+        NotImplementedError: le régime ne décrit pas ce statut.
+        ValueError: bien acheté après la dernière année éligible.
+    """
+    horizon = len(rents[0]) if rents else 0
+    deduction = np.zeros(horizon)
+    statuses = [p for p in properties if p.landlord_status is not None]
+    if not statuses:
+        return deduction
+    rules = regime.document.get("rental_income_regimes", {}).get(
+        "private_landlord_amortization"
+    )
+    if not rules:
+        raise NotImplementedError(
+            f"Le régime {regime.id} ne décrit pas le statut du bailleur privé. Ajoutez "
+            "rental_income_regimes.private_landlord_amortization au régime, ou retirez "
+            "le statut du bien."
+        )
+    level_rents = {level: np.zeros(horizon) for level in ("intermediate", "social", "very_social")}
+    for prop, rent in zip(properties, rents, strict=True):
+        if prop.landlord_status is None:
+            continue
+        last = int(rules["eligible_purchase_until"])
+        if regime.fiscal_year + prop.purchase_year > last:
+            raise ValueError(
+                f"Bien « {prop.name} » acheté en {regime.fiscal_year + prop.purchase_year} : "
+                f"le statut du bailleur privé couvre les achats jusqu'en {last}. Avancez "
+                "l'achat ou retirez le statut."
+            )
+        base = prop.market_value * (1 - float(rules["land_share"]))
+        yearly = base * float(rules["rates"][prop.housing_type][prop.landlord_status])
+        left = base
+        for year in range(prop.purchase_year, horizon):
+            step = min(yearly, left)
+            deduction[year] += step
+            left -= step
+        level_rents[prop.landlord_status] += np.asarray(rent, dtype=float)
+    total = sum(level_rents.values(), np.zeros(horizon))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        very_social = np.where(total > 0, level_rents["very_social"] / total, 0.0)
+        social = np.where(total > 0, (level_rents["social"] + level_rents["very_social"]) / total,
+                          0.0)
+    threshold = float(rules["cap_increase_min_rent_share"])
+    increase = rules["cap_increase"]
+    cap = np.full(horizon, float(rules["annual_cap"]))
+    cap += np.where(very_social >= threshold, float(increase["very_social"]),
+                    np.where(social >= threshold, float(increase["social"]), 0.0))
+    capped: np.ndarray = np.minimum(deduction, cap)
+    return capped
+
+
 def real_regime_rental_income(
     regime: TaxRegime, rents: Sequence[float], charges: Sequence[float],
-    interest: Sequence[float],
+    interest: Sequence[float], amortization: Sequence[float] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Revenu foncier au régime réel, tous biens loués nus confondus, année par
@@ -325,6 +396,10 @@ def real_regime_rental_income(
         charges: charges déductibles hors intérêts (taxe foncière, assurance,
             gestion, entretien), saisies par l'utilisateur.
         interest: intérêts d'emprunt de chaque année.
+        amortization: déduction du statut du bailleur privé
+            (:func:`private_landlord_amortization`). Le déficit qu'elle crée
+            s'impute sur le revenu global ou, comme celui des intérêts, sur les
+            seuls revenus fonciers, selon ``deficit_on_global_income``.
 
     Returns:
         ``(income_tax_base, social_base)`` : ce qui s'ajoute au revenu
@@ -345,14 +420,20 @@ def real_regime_rental_income(
     cap = float(real["deficit_cap_against_global_income"])
     keep = int(real["deficit_carry_forward_years"])
     r, c, i = (np.asarray(x, dtype=float) for x in (rents, charges, interest))
-    if not r.shape == c.shape == i.shape:
-        raise ValueError("Donnez loyers, charges et intérêts sur les mêmes années.")
+    a = np.zeros(r.size) if amortization is None else np.asarray(amortization, dtype=float)
+    if not r.shape == c.shape == i.shape == a.shape:
+        raise ValueError("Donnez loyers, charges, intérêts et amortissement sur les mêmes années.")
+    if a.any():
+        landlord = regime.document["rental_income_regimes"]["private_landlord_amortization"]
+        on_global = bool(landlord["deficit_on_global_income"])
+    else:
+        on_global = True
     base = np.zeros(r.size)
     social = np.zeros(r.size)
     carried: list[list[float]] = []  # [montant restant, année de création]
     for year in range(r.size):
         carried = [d for d in carried if year - d[1] <= keep and d[0] > 0]
-        net = r[year] - c[year] - i[year]
+        net = r[year] - c[year] - i[year] - a[year]
         if net >= 0:
             for deficit in carried:
                 used = min(deficit[0], net)
@@ -360,7 +441,10 @@ def real_regime_rental_income(
                 net -= used
             base[year] = social[year] = net
             continue
-        interest_part = max(i[year] - r[year], 0.0)
+        # Part qui ne s'impute que sur les revenus fonciers : les intérêts, et
+        # l'amortissement si le régime l'exclut du revenu global.
+        local = i[year] + (0.0 if on_global else a[year])
+        interest_part = max(local - r[year], 0.0)
         other_part = -net - interest_part
         to_global = min(other_part, cap)
         base[year] = -to_global

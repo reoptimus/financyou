@@ -398,6 +398,28 @@
               "description": "Durée d'engagement lorsque le régime réel est choisi par option en-deçà du seuil du micro-foncier."
             }
           }
+        },
+        "private_landlord_amortization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["land_share", "rates", "annual_cap", "cap_increase", "cap_increase_min_rent_share", "eligible_purchase_until", "deficit_on_global_income"],
+          "description": "Déduction au titre de l'amortissement d'un logement loué nu à loyer encadré (statut du bailleur privé), au régime réel.",
+          "properties": {
+            "reference": { "type": "string" },
+            "land_share": { "$ref": "#/$defs/rate", "description": "Part forfaitaire du terrain, non amortissable, dans le prix net de frais." },
+            "rates": {
+              "type": "object",
+              "description": "Taux annuel par type de logement (new, renovated_old), puis par niveau de loyer (intermediate, social, very_social).",
+              "additionalProperties": { "type": "object", "additionalProperties": { "$ref": "#/$defs/rate" } }
+            },
+            "renovated_old_min_works_share": { "$ref": "#/$defs/rate", "description": "Part minimale des travaux dans le prix d'acquisition, pour un logement ancien." },
+            "annual_cap": { "type": "number", "minimum": 0, "description": "Plafond annuel de la déduction, par foyer fiscal." },
+            "cap_increase": { "type": "object", "additionalProperties": { "type": "number", "minimum": 0 }, "description": "Majoration du plafond par niveau de loyer." },
+            "cap_increase_min_rent_share": { "$ref": "#/$defs/rate", "description": "Part minimale des loyers bruts des logements amortis, issue de ce niveau de loyer, pour ouvrir la majoration." },
+            "commitment_years": { "type": "integer", "minimum": 0 },
+            "eligible_purchase_until": { "type": "integer", "description": "Dernière année civile d'acquisition éligible." },
+            "deficit_on_global_income": { "type": "boolean", "description": "Le déficit créé par l'amortissement s'impute-t-il sur le revenu global (sinon, sur les seuls revenus fonciers des années suivantes)." }
+          }
         }
       }
     },

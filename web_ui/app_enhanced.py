@@ -57,7 +57,8 @@ RENTAL_LABELS = {
     'loan_rate': 'Taux', 'loan_years': 'Durée', 'gross_yield': 'Rendement brut',
     'collected_share': 'Part encaissée', 'annual_charges': 'Charges (€)',
     'rent_growth': 'Évolution du loyer', 'purchase_year': 'Achat (année)',
-    'market_value': 'Valeur hors frais (€)',
+    'market_value': 'Valeur hors frais (€)', 'landlord_status': 'Bailleur privé',
+    'housing_type': 'Logement',
 }
 
 
@@ -682,6 +683,19 @@ def page_rentals():
                                       None, 100.0)
             rent_growth = st.number_input("Évolution du loyer et des charges (%/an)",
                                           -20.0, 20.0, None, 0.1)
+        statuses = {None: "Aucun", 'intermediate': "Loyer intermédiaire",
+                    'social': "Loyer social", 'very_social': "Loyer très social"}
+        status = col1.selectbox(
+            "Statut du bailleur privé (dispositif Jeanbrun)", list(statuses),
+            format_func=statuses.get, key="landlord_status",
+            help="Location nue à loyer encadré, 9 ans, achat jusqu'en 2028 : une part du "
+                 "prix s'amortit chaque année, au régime réel. Les plafonds de loyers et de "
+                 "ressources des locataires ne sont pas vérifiés ici.",
+        )
+        housing = col2.selectbox(
+            "Type de logement", ['new', 'renovated_old'], key="housing_type",
+            format_func={'new': "Neuf", 'renovated_old': "Ancien rénové (travaux ≥ 30 %)"}.get,
+        )
         submitted = st.form_submit_button("➕ Ajouter le bien")
     if submitted:
         values = (price, market_value, down, rate, years, purchase, gross_yield, collected,
@@ -695,6 +709,7 @@ def page_rentals():
             'gross_yield': gross_yield / 100, 'collected_share': collected / 100,
             'annual_charges': charges, 'rent_growth': rent_growth / 100,
             'purchase_year': int(purchase), 'market_value': market_value,
+            'landlord_status': status, 'housing_type': housing,
         }
         try:
             build_property(row)

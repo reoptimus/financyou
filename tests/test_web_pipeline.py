@@ -441,7 +441,8 @@ def test_bien_saisi_dans_l_application() -> None:
     _click(app, 'Ajouter le bien')
     assert not app.error
     saved = app.session_state['properties'][0]
-    assert saved.keys() == FLAT.keys()
+    assert saved.keys() == {*FLAT, 'landlord_status', 'housing_type'}
+    assert saved['landlord_status'] is None and saved['housing_type'] == 'new'
     for key, value in FLAT.items():
         assert saved[key] == (value if isinstance(value, str) else pytest.approx(value))
     app.session_state['page'] = 'Projection'
@@ -449,6 +450,26 @@ def test_bien_saisi_dans_l_application() -> None:
     _click(app, 'Lancer')
     assert not app.exception and not app.error
     assert any('Valeur nette des biens' in m.value for m in app.markdown)
+
+
+def test_bailleur_prive_au_reel_dans_l_application() -> None:
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file('../web_ui/app_enhanced.py', default_timeout=60).run()
+    app.session_state['form'] = {**{k: v for k, v in FORM.items() if k != 'holdings'},
+                                 'retirement_age': 55}
+    app.session_state['budget'] = {k: v for k, v in BUDGET.items() if k != 'loans'}
+    app.session_state['properties'] = [{**FLAT, 'purchase_year': 1,
+                                        'landlord_status': 'intermediate',
+                                        'housing_type': 'new'}]
+    app.session_state['page'] = 'Rentals'
+    app.run()
+    app.radio[0].set_value('real_regime').run()
+    assert app.session_state['rental_regime'] == 'real_regime'
+    app.session_state['page'] = 'Projection'
+    app.run()
+    _click(app, 'Lancer')
+    assert not app.exception and not app.error
 
 
 def test_un_bien_incomplet_est_refuse_dans_l_application() -> None:

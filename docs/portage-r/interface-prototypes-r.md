@@ -67,7 +67,7 @@ propres questions (`table_projets.xlsx`, feuille `tab2`) :
 | | agrandir la famille | date | Oui (page Budget, « naissances ou adoptions à venir ») : une part fiscale de plus, et des dépenses qui suivent les unités de consommation selon l'âge (échelle OCDE modifiée de l'Insee, à la place de l'échelle d'Oxford du R, non sourcée) |
 | équipement | chauffage basse consommation, travaux BBC ou non, panneaux solaires | date, coût, économie annuelle, durée de vie | Formulaire générique seulement ; crédits d'impôt non portés |
 | travail, loisir | temps partiel, arrêt d'un conjoint, congé sans solde | période, part travaillée, quel conjoint | Oui (page Projets, section « Temps partiel ou congé ») : réduit le salaire dans le budget ; pension et allocations inchangées, lacune déclarée |
-| immo | investissement locatif, Pinel, résidence secondaire | date, prix, loyer, taux, durée, apport | Page Investissement locatif ; Pinel non porté |
+| immo | investissement locatif, Pinel, résidence secondaire | date, prix, loyer, taux, durée, apport | Page Investissement locatif, micro-foncier ou régime réel. Pinel, fermé fin 2024, remplacé par le statut du bailleur privé (Jeanbrun, LF 2026) |
 
 Deux graphiques accompagnent la saisie : la chronologie des flux des projets et
 la répartition du budget année par année.
@@ -133,7 +133,7 @@ Par ordre de valeur pour l'utilisateur, une PR par ligne :
    unités de consommation ne sont pas portées.
 
 Restent hors de portée tant qu'une donnée validée manque : pension
-alimentaire, Pinel et crédits d'impôt travaux, « Et si… » (scénarios historiques à calibrer).
+alimentaire, crédits d'impôt travaux, Denormandie et Loc'Avantages, « Et si… » (scénarios historiques à calibrer).
 
 ## 4. Écarts volontaires avec le R, pour les modèles de projets
 
