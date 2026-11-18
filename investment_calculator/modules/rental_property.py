@@ -10,7 +10,8 @@ marché n'a de valeur par défaut.
 L'année d'achat, l'apport sort de l'épargne et le crédit commence : sa
 première annuité est payée cette année-là. Les loyers sont encaissés dès
 cette année et suivent l'évolution saisie, comme les charges. Leur imposition
-est celle de :func:`household_tax.rental_taxable_income`, et
+est celle du micro-foncier (:func:`household_tax.rental_taxable_income`) ou du
+régime réel (:func:`household_tax.real_regime_rental_income`), au choix, et
 :func:`household_budget.household_budget` ajoute ces flux au budget du foyer.
 
 Équivalent R : ``fct_recalcul_revenu.R`` (loyer d'un bien loué), le calcul de
@@ -57,6 +58,10 @@ KNOWN_GAPS = [
     "Les réductions d'impôt (Pinel, Malraux, Denormandie) ne sont pas portées : "
     "aucun millésime validé ne les décrit.",
     "La location meublée (LMNP) n'est pas portée : seule la location nue l'est.",
+    "Régime réel : les charges déductibles sont celles saisies ; le plafond majoré du "
+    "déficit pour rénovation énergétique n'est pas appliqué, et l'engagement de louer "
+    "trois ans après un déficit imputé n'est pas vérifié. Un déficit qui dépasse le "
+    "revenu global de l'année est perdu au lieu d'être reporté.",
     "L'achat de la résidence principale (fin du loyer versé) n'est pas encore porté.",
 ]
 

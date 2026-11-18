@@ -58,6 +58,7 @@ __all__ = [
     "household_shares",
     "income_tax_by_year",
     "marginal_rate",
+    "real_regime_rental_income",
     "rental_social_tax",
     "rental_taxable_income",
     "shares_by_year",
@@ -212,8 +213,8 @@ def rental_taxable_income(
 
     Raises:
         NotImplementedError: le régime ne décrit pas le micro-foncier, ou les
-            loyers d'une année dépassent son seuil. Le régime réel n'est pas
-            porté : réduisez les loyers saisis ou attendez son portage.
+            loyers d'une année dépassent son seuil : choisissez alors le régime
+            réel (:func:`real_regime_rental_income`).
     """
     micro = regime.document.get("rental_income_regimes", {}).get("micro_foncier")
     if not micro:
@@ -231,11 +232,80 @@ def rental_taxable_income(
     if years:
         raise NotImplementedError(
             f"Loyers au-dessus du seuil du micro-foncier ({micro['revenue_threshold']:,.0f} €) "
-            f"aux années {[int(y) for y in years]} : seul le micro-foncier est porté, pas le "
-            "régime réel. Réduisez les loyers saisis."
+            f"aux années {[int(y) for y in years]} : le micro-foncier ne s'applique pas. "
+            "Choisissez le régime réel."
         )
     taxable: np.ndarray = rents.sum(axis=0) * (1 - float(micro["allowance_rate"]))
     return taxable
+
+
+def real_regime_rental_income(
+    regime: TaxRegime, rents: Sequence[float], charges: Sequence[float],
+    interest: Sequence[float],
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Revenu foncier au régime réel, tous biens loués nus confondus, année par
+    année (CGI art. 28, 31 et 156-I-3°).
+
+    Le revenu net est loyers − charges − intérêts d'emprunt. Négatif, c'est
+    un déficit foncier :
+
+    - la part due aux intérêts ne s'impute que sur les revenus fonciers des
+      années suivantes ;
+    - le reste s'impute sur le revenu global, dans la limite de
+      ``real_regime.deficit_cap_against_global_income`` par an ; l'excédent
+      se reporte sur les revenus fonciers ;
+    - un déficit reporté s'impute sur les revenus fonciers des
+      ``deficit_carry_forward_years`` années suivantes, le plus ancien
+      d'abord, puis il est perdu.
+
+    Args:
+        rents: loyers encaissés de chaque année.
+        charges: charges déductibles hors intérêts (taxe foncière, assurance,
+            gestion, entretien), saisies par l'utilisateur.
+        interest: intérêts d'emprunt de chaque année.
+
+    Returns:
+        ``(income_tax_base, social_base)`` : ce qui s'ajoute au revenu
+        imposable au barème (négatif l'année d'un déficit imputé sur le revenu
+        global), et l'assiette des prélèvements sociaux (revenu foncier net
+        positif, après les déficits reportés).
+
+    Raises:
+        NotImplementedError: le régime ne décrit pas le régime réel.
+    """
+    real = regime.document.get("rental_income_regimes", {}).get("real_regime")
+    if not real:
+        raise NotImplementedError(
+            f"Le régime {regime.id} ne décrit pas le régime réel des revenus fonciers. "
+            "Ajoutez rental_income_regimes.real_regime au régime, ou choisissez le "
+            "micro-foncier."
+        )
+    cap = float(real["deficit_cap_against_global_income"])
+    keep = int(real["deficit_carry_forward_years"])
+    r, c, i = (np.asarray(x, dtype=float) for x in (rents, charges, interest))
+    if not r.shape == c.shape == i.shape:
+        raise ValueError("Donnez loyers, charges et intérêts sur les mêmes années.")
+    base = np.zeros(r.size)
+    social = np.zeros(r.size)
+    carried: list[list[float]] = []  # [montant restant, année de création]
+    for year in range(r.size):
+        carried = [d for d in carried if year - d[1] <= keep and d[0] > 0]
+        net = r[year] - c[year] - i[year]
+        if net >= 0:
+            for deficit in carried:
+                used = min(deficit[0], net)
+                deficit[0] -= used
+                net -= used
+            base[year] = social[year] = net
+            continue
+        interest_part = max(i[year] - r[year], 0.0)
+        other_part = -net - interest_part
+        to_global = min(other_part, cap)
+        base[year] = -to_global
+        if interest_part + other_part - to_global > 0:
+            carried.append([interest_part + other_part - to_global, float(year)])
+    return base, social
 
 
 def rental_social_tax(regime: TaxRegime, taxable_rent: Sequence[float]) -> np.ndarray:

@@ -168,6 +168,7 @@ def build_budget(
         consumption_units=budget_units(budget, horizon),
         expenses_follow_income=bool(budget['expenses_follow_income']),
         properties=properties,
+        rental_regime=str(budget.get('rental_regime', 'micro_foncier')),
     )
     return table
 
