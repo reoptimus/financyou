@@ -57,6 +57,10 @@ KNOWN_GAPS = [
     "valeur nette affichée est avant impôt.",
     "Les réductions d'impôt (Pinel, Malraux, Denormandie) ne sont pas portées : "
     "aucun millésime validé ne les décrit.",
+    "Statut du bailleur privé : les plafonds de loyers et de ressources des "
+    "locataires ne sont pas vérifiés, la réintégration des amortissements à la "
+    "revente n'est pas portée, et la part de déduction au-delà du plafond annuel est "
+    "perdue.",
     "La location meublée (LMNP) n'est pas portée : seule la location nue l'est.",
     "Régime réel : les charges déductibles sont celles saisies ; le plafond majoré du "
     "déficit pour rénovation énergétique n'est pas appliqué, et l'engagement de louer "
@@ -86,6 +90,11 @@ class RentalProperty:
         purchase_year: année de l'achat (0 = cette année).
         market_value: valeur du bien à l'achat, hors frais, en euros. Elle
             évolue ensuite selon les scénarios immobiliers (:func:`property_values`).
+        landlord_status: niveau de loyer choisi au titre du statut du bailleur
+            privé (``"intermediate"``, ``"social"``, ``"very_social"``), ou
+            ``None`` hors de ce statut. Il ouvre une déduction pour amortissement
+            au régime réel (:func:`household_tax.private_landlord_amortization`).
+        housing_type: ``"new"`` (neuf) ou ``"renovated_old"`` (ancien rénové).
     """
 
     name: str
@@ -99,6 +108,8 @@ class RentalProperty:
     rent_growth: float
     purchase_year: int
     market_value: float
+    landlord_status: str | None = None
+    housing_type: str = "new"
 
     def __post_init__(self) -> None:
         def fail(what: str, fix: str) -> None:
@@ -111,6 +122,12 @@ class RentalProperty:
                 fail(f"{field} invalide ({value})", "Saisissez un montant positif.")
         if self.price <= 0:
             fail("prix nul", "Saisissez le coût total de l'achat.")
+        if self.landlord_status not in (None, "intermediate", "social", "very_social"):
+            fail(f"niveau de loyer « {self.landlord_status} » inconnu",
+                 "Choisissez intermediate, social ou very_social, ou aucun statut.")
+        if self.housing_type not in ("new", "renovated_old"):
+            fail(f"type de logement « {self.housing_type} » inconnu",
+                 "Choisissez new (neuf) ou renovated_old (ancien rénové).")
         if self.down_payment > self.price:
             fail(f"apport de {self.down_payment:,.0f} € pour un prix de {self.price:,.0f} €",
                  "L'apport ne peut pas dépasser le prix.")

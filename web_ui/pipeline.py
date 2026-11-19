@@ -487,6 +487,8 @@ def build_property(row: Mapping[str, Any]) -> RentalProperty:
         collected_share=float(row['collected_share']),
         annual_charges=float(row['annual_charges']), rent_growth=float(row['rent_growth']),
         purchase_year=int(row['purchase_year']), market_value=float(row['market_value']),
+        landlord_status=row.get('landlord_status'),
+        housing_type=str(row.get('housing_type') or 'new'),
     )
 
 
