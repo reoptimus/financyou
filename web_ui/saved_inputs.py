@@ -27,6 +27,7 @@ SAVED_KEYS: dict[str, tuple[type, ...]] = {
     'loans': (list,),
     'properties': (list,),
     'work_changes': (list,),
+    'rental_regime': (str,),
 }
 
 
@@ -62,6 +63,8 @@ def load_inputs(text: str | bytes) -> dict[str, Any]:
         value = payload.get(key)
         if value is None and key in ('holdings', 'projects', 'loans', 'properties', 'work_changes'):
             value = []
+        if value is None and key == 'rental_regime':
+            value = 'micro_foncier'
         if not isinstance(value, types) or isinstance(value, bool):
             raise ValueError(
                 f"Rubrique « {key} » invalide dans le fichier de saisie : "

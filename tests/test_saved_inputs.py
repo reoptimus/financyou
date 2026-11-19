@@ -17,6 +17,7 @@ STATE = {
     'projects': [{'name': 'études', 'start_year': 6, 'initial_payment': 2_000.0,
                   'annual_payment': 4_000.0, 'duration_years': 3, 'resale': 0.0}],
     'available_savings': 20_000.0, 'budget': None, 'loans': [], 'properties': [],
+    'rental_regime': 'real_regime',
     'work_changes': [{'name': 'congé', 'earner': 0, 'start_year': 1, 'years': 1,
                       'worked_share': 0.0}],
     'results': {'non': 'sauvegardé'}, 'page': 'Projection',

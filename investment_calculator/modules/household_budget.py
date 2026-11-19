@@ -60,6 +60,7 @@ import pandas as pd
 from investment_calculator.modules.household_loans import Loan, loans_total
 from investment_calculator.modules.household_tax import (
     income_tax_by_year,
+    real_regime_rental_income,
     rental_social_tax,
     rental_taxable_income,
     shares_by_year,
@@ -219,6 +220,7 @@ def household_budget(
     consumption_units: Sequence[float] | None = None,
     expenses_follow_income: bool,
     properties: Sequence[RentalProperty] = (),
+    rental_regime: str = "micro_foncier",
 ) -> pd.DataFrame:
     """
     Budget du foyer, une ligne par année de 0 à ``horizon``.
@@ -240,6 +242,10 @@ def household_budget(
         expenses_follow_income: les dépenses suivent les revenus d'activité et
             de pension (sinon elles restent constantes).
         properties: biens achetés à crédit pour être loués nus.
+        rental_regime: imposition de leurs loyers, ``"micro_foncier"``
+            (:func:`household_tax.rental_taxable_income`) ou ``"real_regime"``
+            (:func:`household_tax.real_regime_rental_income`, déficit foncier
+            compris), au choix de l'utilisateur.
 
     Returns:
         Colonnes ``salaries``, ``pensions``, ``income_tax`` (loyers compris),
@@ -312,11 +318,25 @@ def household_budget(
     down = sum((f["down_payment"].to_numpy() for f in flows), zero)
     social = zero
     if flows:
-        rental_taxable = rental_taxable_income(
-            regime, [f["collected_rent"].tolist() for f in flows]
-        )
-        tax = income_tax_by_year(regime, (taxable + rental_taxable).tolist(), shares)
-        social = rental_social_tax(regime, rental_taxable.tolist())
+        if rental_regime == "micro_foncier":
+            rental_taxable = rental_taxable_income(
+                regime, [f["collected_rent"].tolist() for f in flows]
+            )
+            rental_social_base = rental_taxable
+        elif rental_regime == "real_regime":
+            interest = sum((f["interest"].to_numpy() for f in flows), zero)
+            rental_taxable, rental_social_base = real_regime_rental_income(
+                regime, rental.tolist(), charges.tolist(), interest.tolist()
+            )
+        else:
+            raise ValueError(
+                f"Régime des loyers « {rental_regime} » inconnu : choisissez "
+                "micro_foncier ou real_regime."
+            )
+        # Un déficit foncier ne rend pas le revenu imposable négatif.
+        base = np.maximum(taxable + rental_taxable, 0.0)
+        tax = income_tax_by_year(regime, base.tolist(), shares)
+        social = rental_social_tax(regime, rental_social_base.tolist())
         payments = payments + sum(
             (f["interest"].to_numpy() + f["principal"].to_numpy() for f in flows), zero
         )

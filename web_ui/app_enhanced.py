@@ -66,7 +66,7 @@ def init_session_state():
     defaults = {
         'form': None, 'holdings': [], 'projects': [], 'available_savings': None,
         'budget': None, 'loans': [], 'properties': [], 'work_changes': [],
-        'results': None, 'page': 'Home',
+        'rental_regime': 'micro_foncier', 'results': None, 'page': 'Home',
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -628,12 +628,24 @@ def page_rentals():
     st.markdown("# 🏢 Investissement locatif")
     st.markdown(
         "Un bien acheté à crédit et loué nu : l'apport, les annuités, les loyers, les "
-        "charges et l'impôt (micro-foncier) entrent dans le budget du foyer. Les "
+        "charges et l'impôt entrent dans le budget du foyer. Les "
         "hypothèses du bien sont les vôtres, sans valeur par défaut ; sa valeur suit "
         "ensuite les scénarios immobiliers du GSE."
     )
     if st.session_state.budget is None:
         st.info("Ces biens ne comptent qu'avec un budget du foyer enregistré.")
+    regimes = {'micro_foncier': "Micro-foncier (abattement forfaitaire)",
+               'real_regime': "Régime réel (charges et intérêts déduits, déficit foncier)"}
+    chosen = st.radio(
+        "Imposition des loyers", list(regimes), format_func=regimes.get,
+        index=list(regimes).index(st.session_state.rental_regime), horizontal=True,
+        help="Au micro-foncier, un abattement forfaitaire remplace les charges, sous un "
+             "plafond de loyers. Au régime réel, charges et intérêts se déduisent ; un "
+             "déficit s'impute en partie sur le revenu global.",
+    )
+    if chosen != st.session_state.rental_regime:
+        st.session_state.rental_regime = chosen
+        st.session_state.results = None
     properties = st.session_state.properties
     if properties:
         st.dataframe(pd.DataFrame(properties).rename(columns=RENTAL_LABELS),
@@ -927,7 +939,8 @@ def _budget_with_loans():
         return None
     return {**budget, 'loans': st.session_state.loans,
             'properties': st.session_state.properties,
-            'work_changes': st.session_state.work_changes}
+            'work_changes': st.session_state.work_changes,
+            'rental_regime': st.session_state.rental_regime}
 
 
 def run_analysis(form):

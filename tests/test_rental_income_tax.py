@@ -47,9 +47,9 @@ def test_micro_foncier_from_the_regime() -> None:
 
 
 def test_rents_above_the_micro_foncier_threshold_are_refused() -> None:
-    """Le régime réel n'est pas porté : on refuse plutôt que de mal imposer."""
+    """Au-dessus du seuil, le micro-foncier est refusé : le message renvoie au réel."""
     half = MICRO["revenue_threshold"] / 2 + 1
-    with pytest.raises(NotImplementedError, match="micro-foncier"):
+    with pytest.raises(NotImplementedError, match="Choisissez le régime réel"):
         rental_taxable_income(FR, [[half], [half]])  # seuil apprécié pour le foyer
 
 
@@ -86,3 +86,31 @@ def test_budget_without_property_is_unchanged() -> None:
                            expenses_follow_income=True)
     for column in ("rental_income", "property_charges", "rental_social_tax", "down_payments"):
         assert not out[column].any()
+
+
+def test_real_regime_in_the_budget() -> None:
+    """Au réel, charges et intérêts se déduisent ; le déficit baisse l'impôt."""
+    prop = RentalProperty(
+        name="studio", price=160_000.0, down_payment=10_000.0, loan_rate=0.04,
+        loan_years=20, gross_yield=0.04, collected_share=0.9, annual_charges=3_000.0,
+        rent_growth=0.0, purchase_year=0, market_value=150_000.0,
+    )
+    earners = [Earner(50_000.0, 0.0)]
+    kwargs = dict(horizon=3, current_savings=3_000.0, rent=0.0, expenses_follow_income=False,
+                  properties=[prop])
+    micro = household_budget(FR, earners, **kwargs)
+    real = household_budget(FR, earners, rental_regime="real_regime", **kwargs)
+    flows = property_flows(prop, 3)
+    net = flows["collected_rent"] - flows["charges"] - flows["interest"]
+    assert (net < 0).all()  # 5 760 € de loyers, 3 000 € de charges, ~6 000 € d'intérêts
+    # La part du déficit due aux intérêts non couverts par les loyers est
+    # reportée ; le reste (sous le plafond) s'impute sur le revenu global. Pas
+    # de prélèvements sociaux sur un déficit.
+    uncovered = (flows["interest"] - flows["collected_rent"]).clip(lower=0)
+    to_global = -net - uncovered
+    assert (real["rental_social_tax"] == 0).all()
+    expected = [FR.income_tax_due(50_000.0 - d) for d in to_global]
+    np.testing.assert_allclose(real["income_tax"], expected)
+    assert (real["income_tax"] < micro["income_tax"]).all()
+    with pytest.raises(ValueError, match="micro_foncier ou real_regime"):
+        household_budget(FR, earners, rental_regime="lmnp", **kwargs)

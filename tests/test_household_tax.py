@@ -14,6 +14,7 @@ from investment_calculator.modules.household_tax import (
     household_shares,
     income_tax_by_year,
     marginal_rate,
+    real_regime_rental_income,
     shares_by_year,
 )
 from investment_calculator.tax_regime import load_regime
@@ -105,3 +106,30 @@ def test_a_dependent_can_arrive_later() -> None:
     assert [s.dependents for s in shares] == [0, 0, 0, 0.5, 0.5, 0, 0]
     with pytest.raises(ValueError, match="une année d'arrivée par personne"):
         shares_by_year(FR, adults=2, dependent_years=[2], dependent_from=[], horizon=3)
+
+
+def test_real_regime_by_hand() -> None:
+    # Année 0 : bénéfice. Année 1 : déficit de 4 000 € hors intérêts, imputé sur le
+    # revenu global. Année 2 : 2 000 € d'intérêts non couverts par les loyers
+    # (reportés) et 15 000 € de travaux, dont 10 700 € sur le revenu global et
+    # 4 300 € reportés : 6 300 € de report. Année 3 : bénéfice de 5 000 €, effacé
+    # par le report. Année 4 : le reste du report (1 300 €) est imputé, 3 700 €
+    # imposés.
+    rents = [10_000.0, 10_000.0, 3_000.0, 10_000.0, 10_000.0]
+    charges = [2_000.0, 12_000.0, 15_000.0, 2_000.0, 2_000.0]
+    interest = [3_000.0, 2_000.0, 5_000.0, 3_000.0, 3_000.0]
+    base, social = real_regime_rental_income(FR, rents, charges, interest)
+    np.testing.assert_allclose(base, [5_000.0, -4_000.0, -10_700.0, 0.0, 3_700.0])
+    np.testing.assert_allclose(social, [5_000.0, 0.0, 0.0, 0.0, 3_700.0])
+
+
+def test_a_carried_deficit_expires() -> None:
+    keep = int(FR.document["rental_income_regimes"]["real_regime"]["deficit_carry_forward_years"])
+    # Déficit dû aux seuls intérêts à l'année 0, puis bénéfice après expiration.
+    rents = [0.0] + [0.0] * keep + [1_000.0]
+    interest = [500.0] + [0.0] * (keep + 1)
+    base, _ = real_regime_rental_income(FR, rents, [0.0] * len(rents), interest)
+    assert base[-1] == pytest.approx(1_000.0)
+    base, _ = real_regime_rental_income(FR, rents[:-2] + [1_000.0], [0.0] * keep + [0.0],
+                                        interest[:-1])
+    assert base[-1] == pytest.approx(500.0)
