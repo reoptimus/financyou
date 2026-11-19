@@ -126,24 +126,35 @@ def household_shares(regime: TaxRegime, *, adults: int, dependents: int) -> Hous
 
 
 def shares_by_year(
-    regime: TaxRegime, *, adults: int, dependent_years: Sequence[int], horizon: int
+    regime: TaxRegime, *, adults: int, dependent_years: Sequence[int], horizon: int,
+    dependent_from: Sequence[int] | None = None,
 ) -> list[HouseholdShares]:
     """
     Parts du foyer pour les années 0 à ``horizon``.
 
     Args:
         dependent_years: pour chaque personne à charge, le nombre d'années
-            pendant lesquelles elle le reste : elle compte les années 0 à
-            ``n − 1``.
+            pendant lesquelles elle le reste : elle compte les années
+            ``d`` à ``d + n − 1``.
+        dependent_from: pour chaque personne à charge, l'année ``d`` où elle
+            le devient (naissance ou adoption à venir) ; 0 pour toutes si omis.
     """
-    if any(n < 0 for n in dependent_years):
+    starts = [0] * len(dependent_years) if dependent_from is None else list(dependent_from)
+    if len(starts) != len(dependent_years):
         raise ValueError(
-            f"Durées à charge {list(dependent_years)} : chaque durée est un nombre "
-            "d'années positif."
+            f"{len(starts)} années d'arrivée pour {len(dependent_years)} personnes à charge : "
+            "donnez une année d'arrivée par personne."
+        )
+    if any(n < 0 for n in dependent_years) or any(d < 0 for d in starts):
+        raise ValueError(
+            f"Durées à charge {list(dependent_years)}, arrivées {starts} : chaque durée et "
+            "chaque année d'arrivée est un nombre d'années positif."
         )
     return [
         household_shares(
-            regime, adults=adults, dependents=sum(1 for n in dependent_years if year < n)
+            regime, adults=adults,
+            dependents=sum(1 for d, n in zip(starts, dependent_years, strict=True)
+                           if d <= year < d + n),
         )
         for year in range(horizon + 1)
     ]

@@ -10,8 +10,13 @@ import logging
 import numpy as np
 import pytest
 
+from investment_calculator.modules.consumption_units import (
+    household_units,
+    load_consumption_scale,
+)
 from investment_calculator.modules.household_budget import (
     Earner,
+    FutureChild,
     WorkChange,
     earner_income,
     household_budget,
@@ -141,3 +146,56 @@ def test_leave_lowers_free_savings_but_not_expenses() -> None:
 def test_invalid_work_change_is_refused(args: tuple[int, int, float]) -> None:
     with pytest.raises(ValueError, match="saisissez|donnez"):
         WorkChange(*args)
+
+
+def test_future_child_adds_a_share_and_its_consumption_units() -> None:
+    scale = load_consumption_scale()
+    units = household_units(scale, adults=2, child_ages=[-2], end_age=3, horizon=6)
+    np.testing.assert_allclose(units, [1.5, 1.5, 1.8, 1.8, 1.8, 1.5, 1.5])
+    child = FutureChild(arrival_year=2, dependent_years=3)
+    base = household_budget(FR, _couple(), horizon=6, current_savings=5_000.0, rent=0.0,
+                            expenses_follow_income=False)
+    ours = household_budget(FR, _couple(), horizon=6, current_savings=5_000.0, rent=0.0,
+                            future_children=[child], consumption_units=units,
+                            expenses_follow_income=False)
+    # Dépenses par unité de consommation : celles de l'année 0, pour 1,5 UC.
+    np.testing.assert_allclose(ours["expenses"], base["expenses"] * units / 1.5)
+    for year in (2, 3, 4):
+        tax = FR.income_tax_due(ours["salaries"].iloc[year], shares=2.5, dependent_shares=0.5)
+        assert ours["income_tax"].iloc[year] == pytest.approx(tax)
+    np.testing.assert_allclose(ours["income_tax"].drop([2, 3, 4]),
+                               base["income_tax"].drop([2, 3, 4]))
+    assert ours["free_savings"].iloc[0] == pytest.approx(5_000.0)
+
+
+def test_a_child_costs_more_from_14_and_nothing_once_independent() -> None:
+    units = household_units(load_consumption_scale(), adults=1, child_ages=[12], end_age=16,
+                            horizon=5)
+    np.testing.assert_allclose(units, [1.3, 1.3, 1.5, 1.5, 1.0, 1.0])
+
+
+@pytest.mark.parametrize("follow", [False, True])
+def test_expenses_follow_consumption_units_as_in_r(follow: bool) -> None:
+    # Mêmes unités de consommation passées au R et au portage : enfant de 12 ans
+    # à charge jusqu'à 20 ans (le R comptait à part l'échelle d'Oxford).
+    units = household_units(load_consumption_scale(), adults=2, child_ages=[12], end_age=20,
+                            horizon=HORIZON)
+    ours = household_budget(FR, _couple(), horizon=HORIZON, current_savings=9_000.0,
+                            rent=0.0, consumption_units=units, expenses_follow_income=follow)
+    sal = r_salary(42_000.0, 0.015, 20, 12, 0.55) + r_salary(30_000.0, 0.01, 20, 15, 0.6)
+    tax = ours["income_tax"].to_numpy()
+    expenses = r_expenses(sal, tax, 0.0, np.zeros(20), 9_000.0, units, 0 if follow else 1)
+    np.testing.assert_allclose(ours["expenses"], expenses)
+
+
+def test_invalid_future_child_is_refused() -> None:
+    with pytest.raises(ValueError, match="au moins un an à charge"):
+        FutureChild(arrival_year=1, dependent_years=0)
+    with pytest.raises(ValueError, match="dans un an au moins"):
+        FutureChild(arrival_year=0, dependent_years=18)
+
+
+def test_units_of_the_wrong_length_are_refused() -> None:
+    with pytest.raises(ValueError, match="une valeur positive par année"):
+        household_budget(FR, _couple(), horizon=3, current_savings=0.0, rent=0.0,
+                         consumption_units=[1.5, 1.5], expenses_follow_income=False)

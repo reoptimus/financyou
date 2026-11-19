@@ -14,10 +14,12 @@ from investment_calculator.modules.rental_property import KNOWN_GAPS as RENTAL_G
 from investment_calculator.placement_catalog import load_placement_catalog
 from web_ui.pipeline import (
     budget_marginal_rate,
+    budget_units,
     build_budget,
     build_profile_config,
     build_projects,
     dependent_years_from_ages,
+    future_children,
     run_projection,
     work_changes_by_earner,
 )
@@ -309,8 +311,13 @@ def test_budget_saisi_dans_l_application() -> None:
     for field, value in zip(budget_fields, values, strict=True):
         field.set_value(value)
     app.text_input[1].set_value('10')
+    app.text_input[2].set_value('3')
     _click(app, 'Enregistrer le budget')
     assert not app.error
+    # Une naissance dans 3 ans, à charge jusqu'à 15 ans.
+    assert app.session_state['budget']['future_children'] == [
+        {'arrival_year': 3, 'dependent_years': 15}
+    ]
     assert app.session_state['budget']['earners'][0]['replacement_rate'] == pytest.approx(0.6)
     # Un enfant de 10 ans, à charge jusqu'à 15 ans : 5 années, comme BUDGET.
     assert app.session_state['budget']['dependent_years'] == BUDGET['dependent_years']
@@ -359,6 +366,28 @@ def test_temps_partiel_saisi_dans_l_application() -> None:
         {'name': 'temps partiel', 'earner': 0, 'start_year': 1, 'years': 3,
          'worked_share': 0.8}
     ]
+
+
+def test_enfants_a_venir_sans_fin_de_charge_refuses() -> None:
+    with pytest.raises(ValueError, match="sans âge de fin de charge"):
+        future_children([2], None)
+    with pytest.raises(ValueError, match="dans un an au moins"):
+        future_children([0], 18)
+    assert future_children([], None) == []
+
+
+def test_les_depenses_suivent_l_age_des_enfants() -> None:
+    budget = {**BUDGET, 'children_ages': [12], 'children_end_age': 17,
+              'future_children': future_children([3], 17)}
+    units = budget_units(budget, 15)
+    # Couple 1,5 ; enfant de 12 ans 0,3 puis 0,5 à 14 ans, sorti à 17 ans ;
+    # naissance à l'année 3 : 0,3.
+    assert units[:7] == pytest.approx([1.8, 1.8, 2.0, 2.3, 2.3, 1.8, 1.8])
+    catalog = load_placement_catalog('fr-2026')
+    table = build_budget({**budget, 'dependent_years': [5]}, catalog=catalog, horizon=15,
+                         annual_savings_now=3_600.0)
+    np.testing.assert_allclose(table['expenses'] / table['expenses'].iloc[0],
+                               np.array(units) / 1.8)
 
 
 # --- Investissement locatif -----------------------------------------------------
