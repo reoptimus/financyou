@@ -132,8 +132,43 @@ Par ordre de valeur pour l'utilisateur, une PR par ligne :
    Le renvoi au barème d'Oxford (OCDE) du texte 15 n'est pas repris : les
    unités de consommation ne sont pas portées.
 
-Restent hors de portée tant qu'une donnée validée manque : pension
-alimentaire, crédits d'impôt travaux, Denormandie et Loc'Avantages, « Et si… » (scénarios historiques à calibrer).
+### Suivi
+
+Les six étapes ci-dessus sont livrées (#86 à #92). Ont suivi, à la demande de
+seb :
+
+| Étape | PR | État |
+|---|---|---|
+| Temps partiel ou congé comme projet | #93 | fusionnée |
+| Agrandir la famille ; coût de l'enfant par les unités de consommation (Insee) | #94 | fusionnée |
+| Revenus fonciers au régime réel, déficit foncier | #95 | fusionnée |
+| Avantages fiscaux selon l'âge de l'enfant (garde, scolarité) | #96 | fusionnée |
+| Statut du bailleur privé (dispositif Jeanbrun) | #97 | à valider par seb |
+
+### Choix ouverts, à trancher par seb
+
+| Choix | Valeur retenue en attendant | Où |
+|---|---|---|
+| Un déficit foncier créé par l'amortissement Jeanbrun s'impute-t-il sur le revenu global ? | non, le choix le moins favorable | `fr-2026.json`, `private_landlord_amortization.deficit_on_global_income` |
+| Valeurs Jeanbrun (taux, plafonds, part du terrain), tirées de sources secondaires | celles de #97 | `fr-2026.json`, à confronter à la loi n° 2026-103, art. 47 |
+| Base d'amortissement d'un logement ancien : travaux compris ou non | valeur hors frais saisie | `private_landlord_amortization.land_share` |
+| Majoration du plafond Jeanbrun : une location très sociale compte-t-elle aussi pour la part sociale ? | oui | `household_tax.private_landlord_amortization` |
+| Âges d'entrée au collège, au lycée, dans le supérieur | 11, 15 et 18 ans (âges usuels) | `fr-2026.json`, `schooling_reduction.stages` |
+| Échelle de consommation : OCDE modifiée, ou budgets de référence de l'ONPES (plus élevés, croissants avec l'âge) | OCDE modifiée (Insee) | `consumption_scales/oecd-modified.json` |
+| Surcoût des familles monoparentales (environ +0,5 UC selon la DREES) | non porté | idem |
+
+### Candidats suivants
+
+Ils restent hors de portée tant qu'une donnée validée manque ou que le choix
+n'est pas fait :
+
+- pension alimentaire versée ou reçue, et déduction pour un enfant majeur ;
+- rattachement d'un enfant majeur au foyer fiscal (moins de 21 ans, ou moins de 25 ans s'il étudie) ;
+- Denormandie et Loc'Avantages (réductions d'impôt) ;
+- location meublée (LMNP) ;
+- crédits d'impôt travaux ;
+- réintégration des amortissements Jeanbrun à la revente, avec la revente du bien ;
+- « Et si… » : scénarios historiques à calibrer.
 
 ## 4. Écarts volontaires avec le R, pour les modèles de projets
 
