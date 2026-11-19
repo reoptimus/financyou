@@ -518,6 +518,12 @@ def page_budget():
                  "dépenses, de son arrivée jusqu'à l'âge de fin de charge ci-dessus. "
                  "Un enfant déjà né se saisit par son âge.",
         )
+        childcare = col2.number_input(
+            "Frais de garde annuels d'un enfant de moins de 6 ans (€, vide si aucun)",
+            0.0, None, saved.get('childcare_cost'), 100.0,
+            help="Crèche, assistante maternelle, garderie : ils ouvrent un crédit d'impôt "
+                 "pour chaque enfant de moins de 6 ans, aujourd'hui ou à venir.",
+        )
         col2.caption(
             "Les dépenses suivent la composition du foyer, selon l'échelle de l'Insee : "
             "1 unité pour le premier adulte, 0,5 pour toute autre personne de 14 ans ou "
@@ -558,7 +564,8 @@ def page_budget():
         st.session_state.budget = {
             'earners': earners, 'rent': rent, 'home': home, 'dependent_years': years,
             'children_ages': ages, 'children_end_age': end_age,
-            'future_children': coming, 'expenses_follow_income': follow,
+            'future_children': coming, 'childcare_cost': childcare,
+            'expenses_follow_income': follow,
         }
         st.session_state.results = None
         st.success("✅ Budget enregistré.")

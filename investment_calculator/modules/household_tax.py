@@ -55,6 +55,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "KNOWN_GAPS",
     "HouseholdShares",
+    "child_tax_advantages",
     "household_shares",
     "income_tax_by_year",
     "marginal_rate",
@@ -237,6 +238,66 @@ def rental_taxable_income(
         )
     taxable: np.ndarray = rents.sum(axis=0) * (1 - float(micro["allowance_rate"]))
     return taxable
+
+
+def child_tax_advantages(
+    regime: TaxRegime, child_ages: Sequence[int], *, end_age: int | None, horizon: int,
+    childcare_cost: float = 0.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Avantages fiscaux liés à l'âge des enfants à charge, années 0 à ``horizon``
+    (``income_tax.child_tax_advantages`` du régime).
+
+    Args:
+        child_ages: âge de chaque enfant aujourd'hui ; un âge négatif est une
+            arrivée à venir. Un enfant est à charge de 0 an à ``end_age``.
+        end_age: âge de fin de charge, saisi par l'utilisateur.
+        childcare_cost: frais de garde annuels de chaque enfant d'âge à
+            ouvrir le crédit, saisis par l'utilisateur (0 si aucun).
+
+    Returns:
+        ``(reduction, credit)`` : réductions d'impôt, qui ne peuvent que
+        l'annuler, et crédits d'impôt, restitués au-delà de l'impôt dû, selon
+        le champ ``refundable`` du régime (en France : frais de scolarisation
+        en réduction, frais de garde en crédit).
+
+    Raises:
+        NotImplementedError: le régime ne décrit pas ces avantages alors que
+            des enfants sont saisis.
+    """
+    reduction = np.zeros(horizon + 1)
+    credit = np.zeros(horizon + 1)
+    if not child_ages:
+        return reduction, credit
+    if end_age is None:
+        raise ValueError(
+            "Enfants saisis sans âge de fin de charge : indiquez à quel âge ils "
+            "cesseront d'être à votre charge."
+        )
+    advantages = regime.document["income_tax"].get("child_tax_advantages")
+    if advantages is None:
+        raise NotImplementedError(
+            f"Le régime {regime.id} ne décrit pas les avantages fiscaux liés à l'âge des "
+            "enfants. Ajoutez income_tax.child_tax_advantages au régime."
+        )
+    care = advantages.get("childcare_credit")
+    stages = sorted(advantages.get("schooling_reduction", {}).get("stages", []),
+                    key=lambda stage: int(stage["from_age"]))
+    for age_now in child_ages:
+        for year in range(horizon + 1):
+            age = age_now + year
+            if not 0 <= age < end_age:
+                continue
+            if care and age < int(care["age_below"]):
+                cost = min(float(childcare_cost), float(care["expense_cap_per_child"]))
+                target = credit if care["refundable"] else reduction
+                target[year] += cost * float(care["rate"])
+            reached = [stage for stage in stages if age >= int(stage["from_age"])]
+            if reached:
+                school = advantages["schooling_reduction"]
+                target = credit if school["refundable"] else reduction
+                target[year] += float(reached[-1]["amount"])
+    return reduction, credit
 
 
 def real_regime_rental_income(

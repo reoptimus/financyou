@@ -199,3 +199,16 @@ def test_units_of_the_wrong_length_are_refused() -> None:
     with pytest.raises(ValueError, match="une valeur positive par année"):
         household_budget(FR, _couple(), horizon=3, current_savings=0.0, rent=0.0,
                          consumption_units=[1.5, 1.5], expenses_follow_income=False)
+
+
+def test_childcare_credit_is_refunded_and_schooling_only_cancels_tax() -> None:
+    low = [Earner(14_000.0, 0.0)]
+    kwargs = dict(horizon=2, current_savings=0.0, rent=0.0, expenses_follow_income=False)
+    without = household_budget(FR, low, dependent_years=[10], **kwargs)
+    ours = household_budget(FR, low, dependent_years=[10], child_ages=[4], child_end_age=14,
+                            childcare_cost=4_000.0, **kwargs)
+    # Crédit restitué même sans impôt dû : 50 % de 3 500 €.
+    assert without["income_tax"].iloc[0] == pytest.approx(0.0)
+    assert ours["income_tax"].iloc[0] == pytest.approx(-1_750.0)
+    # L'année 0 reste celle déclarée : le crédit est déjà dans l'épargne actuelle.
+    assert ours["free_savings"].iloc[0] == pytest.approx(0.0)

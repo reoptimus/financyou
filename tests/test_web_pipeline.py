@@ -307,13 +307,14 @@ def test_budget_saisi_dans_l_application() -> None:
     app.radio(key='home_status').set_value('tenant').run()
     app.number_input(key='home_rent').set_value(0.0)
     budget_fields = app.number_input[4:]
-    values = (40_000.0, 1.0, 12, 60.0, 25_000.0, 0.0, None, None, 15)
+    values = (40_000.0, 1.0, 12, 60.0, 25_000.0, 0.0, None, None, 15, 2_000.0)
     for field, value in zip(budget_fields, values, strict=True):
         field.set_value(value)
     app.text_input[1].set_value('10')
     app.text_input[2].set_value('3')
     _click(app, 'Enregistrer le budget')
     assert not app.error
+    assert app.session_state['budget']['childcare_cost'] == pytest.approx(2_000.0)
     # Une naissance dans 3 ans, à charge jusqu'à 15 ans.
     assert app.session_state['budget']['future_children'] == [
         {'arrival_year': 3, 'dependent_years': 15}

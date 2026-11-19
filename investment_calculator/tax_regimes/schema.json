@@ -159,6 +159,49 @@
             }
           }
         },
+        "child_tax_advantages": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Avantages fiscaux qui dépendent de l'âge des enfants à charge, en plus des parts du quotient familial.",
+          "properties": {
+            "childcare_credit": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["age_below", "rate", "expense_cap_per_child", "refundable"],
+              "description": "Crédit d'impôt pour frais de garde des jeunes enfants.",
+              "properties": {
+                "age_below": { "type": "integer", "minimum": 0, "description": "L'enfant doit avoir moins de cet âge au 1er janvier de l'année d'imposition." },
+                "rate": { "$ref": "#/$defs/rate" },
+                "expense_cap_per_child": { "type": "number", "minimum": 0 },
+                "refundable": { "type": "boolean", "description": "Crédit restitué au-delà de l'impôt dû." },
+                "reference": { "type": "string" }
+              }
+            },
+            "schooling_reduction": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["stages", "refundable"],
+              "description": "Réduction d'impôt forfaitaire par enfant scolarisé, selon le niveau d'études.",
+              "properties": {
+                "stages": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["label", "from_age", "amount"],
+                    "properties": {
+                      "label": { "type": "string" },
+                      "from_age": { "type": "integer", "minimum": 0, "description": "Âge usuel d'entrée dans ce niveau : une approximation, la loi retient la scolarisation au 31 décembre." },
+                      "amount": { "type": "number", "minimum": 0 }
+                    }
+                  }
+                },
+                "refundable": { "type": "boolean" },
+                "reference": { "type": "string" }
+              }
+            }
+          }
+        },
         "surtaxes": {
           "type": "array",
           "description": "Contributions additionnelles assises sur le revenu (par exemple contribution sur les hauts revenus).",

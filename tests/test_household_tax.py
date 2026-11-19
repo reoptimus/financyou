@@ -11,6 +11,7 @@ import pytest
 
 from investment_calculator.modules.household_tax import (
     HouseholdShares,
+    child_tax_advantages,
     household_shares,
     income_tax_by_year,
     marginal_rate,
@@ -133,3 +134,22 @@ def test_a_carried_deficit_expires() -> None:
     base, _ = real_regime_rental_income(FR, rents[:-2] + [1_000.0], [0.0] * keep + [0.0],
                                         interest[:-1])
     assert base[-1] == pytest.approx(500.0)
+
+
+def test_child_tax_advantages_by_age() -> None:
+    care = FR.document["income_tax"]["child_tax_advantages"]["childcare_credit"]
+    stages = FR.document["income_tax"]["child_tax_advantages"]["schooling_reduction"]["stages"]
+    amount = {s["label"]: s["amount"] for s in stages}
+    # Un enfant de 4 ans, à charge jusqu'à 20 ans, 5 000 € de garde par an.
+    reduction, credit = child_tax_advantages(FR, [4], end_age=20, horizon=16,
+                                             childcare_cost=5_000.0)
+    capped = min(5_000.0, care["expense_cap_per_child"]) * care["rate"]
+    np.testing.assert_allclose(credit, [capped, capped] + [0.0] * 15)
+    assert reduction[0] == 0.0 and reduction[6] == 0.0          # 4 et 10 ans
+    assert reduction[7] == pytest.approx(amount["collège"])     # 11 ans
+    assert reduction[11] == pytest.approx(amount["lycée"])      # 15 ans
+    assert reduction[14] == pytest.approx(amount["enseignement supérieur"])  # 18 ans
+    assert reduction[16] == 0.0                                 # 20 ans : sorti
+    # Un enfant à venir n'ouvre rien avant sa naissance.
+    _, credit = child_tax_advantages(FR, [-2], end_age=20, horizon=3, childcare_cost=1_000.0)
+    np.testing.assert_allclose(credit, [0.0, 0.0, 500.0, 500.0])
