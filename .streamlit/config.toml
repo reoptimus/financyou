@@ -1,0 +1,23 @@
+# Thème de l'interface FinancYou : clair, aéré, accent indigo.
+# Streamlit lit ce fichier depuis la racine du dépôt, en local comme sur
+# Streamlit Community Cloud. La typographie et les détails de mise en page sont
+# dans web_ui/theme.py.
+
+[theme]
+base = "light"
+primaryColor = "#3B4FD8"
+backgroundColor = "#F7F8FC"
+secondaryBackgroundColor = "#F0F2F8"
+textColor = "#0E1525"
+font = "sans serif"
+
+[theme.sidebar]
+# Réglages du calcul : panneau blanc, repliable (replié d'office sur téléphone).
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F4F8"
+textColor = "#0E1525"
+primaryColor = "#3B4FD8"
+
+[client]
+# Masque le bouton « Deploy » et le menu développeur dans l'application.
+toolbarMode = "minimal"
