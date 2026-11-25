@@ -746,11 +746,32 @@ def display_results(results):
     portfolio = optimization['optimal_portfolio']
     statistics = optimization['simulation_results']['statistics']
 
+    horizon = portfolio['horizon']
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Rendement annualisé attendu", f"{portfolio['expected_return']:.2%}")
-    col2.metric("Volatilité", f"{portfolio['expected_volatility']:.2%}")
+    # L'écart-type est pris entre scénarios sur le rendement annualisé à H ans : il
+    # vaut environ σ_annuel / √H et ne se compare pas à une volatilité annuelle.
+    col2.metric(
+        f"Dispersion du rendement annualisé à {horizon} ans",
+        f"{portfolio['expected_volatility']:.2%}",
+        help=(
+            f"Écart-type, entre scénarios, du rendement net annualisé sur {horizon} ans. "
+            "Ce n'est pas une volatilité annuelle : sur un long horizon, les bonnes et "
+            f"mauvaises années se compensent, et ce chiffre est environ √{horizon} fois "
+            "plus petit que la volatilité annuelle du même portefeuille."
+        ),
+    )
     if portfolio['sharpe_ratio'] is not None:
-        col3.metric("Ratio de Sharpe", f"{portfolio['sharpe_ratio']:.2f}")
+        col3.metric(
+            f"Ratio de Sharpe à {horizon} ans",
+            f"{portfolio['sharpe_ratio']:.2f}",
+            help=(
+                "Rendement annualisé en excès du placement de référence, divisé par la "
+                f"dispersion à {horizon} ans. Calculé sur cette dispersion et non sur la "
+                "volatilité annuelle, il ne se compare pas aux ratios de Sharpe usuels, "
+                f"environ √{horizon} fois plus faibles."
+            ),
+        )
     col4.metric(
         f"Patrimoine net médian à {portfolio['horizon']} ans",
         f"{statistics['median_terminal_wealth']:,.0f} €",
@@ -821,7 +842,10 @@ def display_results(results):
         st.markdown("### Frontière efficiente")
         fig = px.scatter(
             frontier, x='volatility', y='return',
-            labels={'volatility': 'Volatilité', 'return': 'Rendement attendu'},
+            labels={
+                'volatility': f"Dispersion du rendement annualisé à {portfolio['horizon']} ans",
+                'return': 'Rendement attendu',
+            },
         )
         st.plotly_chart(fig, use_container_width=True)
 
