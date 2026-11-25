@@ -800,15 +800,36 @@ def display_results(results):
     portfolio = optimization['optimal_portfolio']
     statistics = optimization['simulation_results']['statistics']
 
+    horizon = portfolio['horizon']
     col1, col2, col3, col4 = st.columns(4)
     col1.metric(
-        f"Patrimoine net médian à {portfolio['horizon']} ans",
+        f"Patrimoine net médian à {horizon} ans",
         fr_euros(statistics['median_terminal_wealth']),
     )
     col2.metric("Rendement annualisé attendu", fr_percent(portfolio['expected_return']))
-    col3.metric("Volatilité", fr_percent(portfolio['expected_volatility']))
+    # L'écart-type est pris entre scénarios sur le rendement annualisé à H ans : il
+    # vaut environ σ_annuel / √H et ne se compare pas à une volatilité annuelle.
+    col3.metric(
+        f"Dispersion du rendement annualisé à {horizon} ans",
+        fr_percent(portfolio['expected_volatility']),
+        help=(
+            f"Écart-type, entre scénarios, du rendement net annualisé sur {horizon} ans. "
+            "Ce n'est pas une volatilité annuelle : sur un long horizon, les bonnes et "
+            f"mauvaises années se compensent, et ce chiffre est environ √{horizon} fois "
+            "plus petit que la volatilité annuelle du même portefeuille."
+        ),
+    )
     if portfolio['sharpe_ratio'] is not None:
-        col4.metric("Ratio de Sharpe", fr_amount(portfolio['sharpe_ratio'], 2))
+        col4.metric(
+            f"Ratio de Sharpe à {horizon} ans",
+            fr_amount(portfolio['sharpe_ratio'], 2),
+            help=(
+                "Rendement annualisé en excès du placement de référence, divisé par la "
+                f"dispersion à {horizon} ans. Calculé sur cette dispersion et non sur la "
+                "volatilité annuelle, il ne se compare pas aux ratios de Sharpe usuels, "
+                f"environ √{horizon} fois plus faibles."
+            ),
+        )
     envelope = portfolio.get('envelope_value')
     if envelope is not None and envelope['value'] is not None:
         col1.metric(
@@ -880,7 +901,10 @@ def display_results(results):
         st.markdown("### Frontière efficiente")
         fig = px.scatter(
             frontier, x='volatility', y='return',
-            labels={'volatility': 'Volatilité', 'return': 'Rendement attendu'},
+            labels={
+                'volatility': f"Dispersion du rendement annualisé à {portfolio['horizon']} ans",
+                'return': 'Rendement attendu',
+            },
         )
         fig.update_traces(marker={'color': PRIMARY, 'size': 8})
         fig.update_layout(xaxis_tickformat='.1%', yaxis_tickformat='.1%')
