@@ -146,6 +146,32 @@ def test_parcours_complet_dans_l_application() -> None:
     assert any('Du capital de départ' in m.value for m in app.markdown)
 
 
+def test_les_indicateurs_de_risque_nomment_leur_horizon() -> None:
+    """La « volatilité » restituée est l'écart-type, entre scénarios, du rendement
+    annualisé à H ans : environ σ_annuel / √H. Affichée sous le seul nom de
+    volatilité, elle se lirait comme une volatilité annuelle et le ratio de Sharpe
+    qui en découle paraîtrait √H fois meilleur qu'un Sharpe usuel."""
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file('../web_ui/app_enhanced.py', default_timeout=60).run()
+    app.session_state['page'] = 'Profile'
+    app.run()
+    for field, value in zip(app.number_input, (40, 50, 50_000.0, None, 300.0, 0.0), strict=True):
+        field.set_value(value)
+    _click(app, 'Enregistrer')
+    app.session_state['page'] = 'Projection'
+    app.run()
+    _click(app, 'Lancer')
+    assert not app.exception and not app.error
+    labels = [m.label for m in app.metric]
+    assert 'Volatilité' not in labels and 'Ratio de Sharpe' not in labels
+    dispersion = next(m for m in app.metric if m.label.startswith('Dispersion'))
+    sharpe = next(m for m in app.metric if m.label.startswith('Ratio de Sharpe'))
+    for metric in (dispersion, sharpe):
+        assert '10 ans' in metric.label
+        assert metric.help and 'volatilité annuelle' in metric.help
+
+
 # --- Projets du foyer et plan par tranches ---------------------------------------
 
 PROJECT_ROWS = [
