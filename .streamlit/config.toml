@@ -21,3 +21,15 @@ primaryColor = "#3B4FD8"
 [client]
 # Masque le bouton « Deploy » et le menu développeur dans l'application.
 toolbarMode = "minimal"
+
+[server]
+# Repris de l'ancien web_ui/.streamlit/config.toml, supprimé : Streamlit lisait
+# aussi ce fichier, à côté du script, et son ancien thème bleu écrasait celui-ci
+# dans la page principale (curseurs #1f77b4, texte #262730).
+headless = true
+port = 8501
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false

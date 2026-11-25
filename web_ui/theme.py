@@ -162,7 +162,26 @@ h1.fy-title { font-weight: 500 !important; }
     font-size: 1.8rem; font-weight: 500; color: %(ink)s; letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
 }
+/* Une valeur ne se tronque jamais : « +68 pb par… » cachait l'unité sur un écran
+   de 1366 px. Elle passe à la ligne entre deux mots, jamais au milieu d'un nombre. */
+[data-testid="stMetricValue"], [data-testid="stMetricValue"] div,
+[data-testid="stMetricValue"] p {
+    white-space: normal; overflow: visible; text-overflow: clip;
+}
 [data-testid="stForm"] { padding: 1.5rem; }
+
+/* Rechargement d'une saisie : Streamlit écrit ces textes en anglais, sans option
+   de traduction. Le texte d'origine est masqué et remplacé, sans changer le bouton. */
+[data-testid="stFileUploaderDropzone"] button [data-testid="stMarkdownContainer"] p {
+    font-size: 0;
+}
+[data-testid="stFileUploaderDropzone"] button [data-testid="stMarkdownContainer"] p::after {
+    content: "Choisir un fichier"; font-size: 0.875rem;
+}
+[data-testid="stFileUploaderDropzoneInstructions"] span { font-size: 0; }
+[data-testid="stFileUploaderDropzoneInstructions"] span::after {
+    content: "Fichier JSON"; font-size: 0.8rem;
+}
 [data-testid="stDataFrame"], [data-testid="stTable"] {
     background: #FFFFFF; border: 1px solid %(line)s; border-radius: 12px; overflow: hidden;
 }

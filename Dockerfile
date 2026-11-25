@@ -76,6 +76,8 @@ WORKDIR /app
 # COPY selectif : uniquement ce qui est necessaire a l'execution de l'UI.
 # Ni .git, ni legacy/, ni outputs/, ni tests/ (voir .dockerignore).
 COPY --chown=financyou:financyou web_ui/ ./web_ui/
+# Thème et réglages Streamlit : un seul fichier, à la racine, lu depuis /app.
+COPY --chown=financyou:financyou .streamlit/ ./.streamlit/
 COPY --chown=financyou:financyou examples/input_files/ ./examples/input_files/
 
 # Repertoire de sortie inscriptible par l'utilisateur non-root.
