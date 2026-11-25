@@ -67,13 +67,16 @@ h1.fy-title { font-weight: 500 !important; }
 
 /* En-tête : marque et navigation en pastilles, collé en haut au défilement. */
 .st-key-fy_header {
-    position: sticky; top: 0; z-index: 990; gap: 0.5rem;
+    position: sticky; top: 0; z-index: 990; gap: 0.9rem !important;
     background: rgba(247,248,252,0.85); backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
-    margin: 0 -1rem; padding: 0.75rem 1rem 0.6rem 1rem;
+    margin: 0 -1rem; padding: 1rem 1rem 0.75rem 1rem;
     border-bottom: 1px solid %(line)s;
 }
-.fy-brand { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.02em; color: %(ink)s; }
+.fy-brand {
+    font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em; color: %(ink)s;
+    line-height: 1.3; padding: 0.15rem 0 0.9rem 0.85rem;
+}
 .fy-brand span { color: %(primary)s; }
 .st-key-fy_nav {
     flex-wrap: nowrap !important; overflow-x: auto; overflow-y: hidden; gap: 0.25rem !important;
@@ -179,6 +182,8 @@ button[kind="primary"]:hover, button[kind="primaryFormSubmit"]:hover {
         padding-left: 1rem; padding-right: 1rem; padding-top: 0.25rem;
     }
     .fy-header { margin: 1.25rem 0 1rem 0; }
+    /* Laisse la place au bouton du panneau latéral, au-dessus de la marque. */
+    .st-key-fy_header { padding-top: 2.6rem; }
     .fy-title { font-size: 1.8rem; }
     .fy-hero { margin: 1.75rem auto 1.5rem auto; }
     .fy-hero .fy-title { font-size: 2.1rem; }
