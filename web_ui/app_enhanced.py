@@ -34,22 +34,36 @@ from web_ui.pipeline import (
 )
 from web_ui.project_templates import FIELD_KINDS, TEMPLATES, project_row
 from web_ui.saved_inputs import dump_inputs, load_inputs
+from web_ui.theme import (
+    ACCENT,
+    BAND_COLORS,
+    NAVY,
+    NEGATIVE,
+    POSITIVE,
+    SCENARIO_BAND_COLORS,
+    TRANCHE_SCALE,
+    apply_theme,
+    fr_amount,
+    fr_euros,
+    fr_percent,
+    page_header,
+)
 
 st.set_page_config(
     page_title="FinancYou",
-    page_icon="💰",
+    page_icon=":material/account_balance:",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 PAGES = {
-    "🏠 Accueil": "Home",
-    "👤 Profil et versements": "Profile",
-    "💼 Épargne existante": "Holdings",
-    "🎯 Projets": "Projects",
-    "🏡 Budget du foyer": "Budget",
-    "🏢 Investissement locatif": "Rentals",
-    "📊 Projection": "Projection",
+    "Accueil": "Home",
+    "Profil et versements": "Profile",
+    "Épargne existante": "Holdings",
+    "Projets": "Projects",
+    "Budget du foyer": "Budget",
+    "Investissement locatif": "Rentals",
+    "Projection": "Projection",
 }
 
 RENTAL_LABELS = {
@@ -77,14 +91,19 @@ def init_session_state():
 def render_sidebar():
     """Navigation et réglages du calcul."""
     with st.sidebar:
-        st.markdown("## 💰 FinancYou")
+        st.markdown(
+            '<div class="fy-brand"><div class="fy-brand-name">FinancYou</div>'
+            '<div class="fy-brand-tag">Projection patrimoniale</div></div>',
+            unsafe_allow_html=True,
+        )
+        current = st.session_state.get('page', 'Home')
         for label, page in PAGES.items():
-            if st.button(label, use_container_width=True, key=f"nav_{page}"):
+            if st.button(label, use_container_width=True, key=f"nav_{page}",
+                         type="primary" if page == current else "secondary"):
                 st.session_state.page = page
                 st.rerun()
 
-        st.markdown("---")
-        st.markdown("### ⚙️ Réglages")
+        st.markdown("### Réglages du calcul")
         # Les catalogues proposés se déduisent des fichiers livrés ; chacun
         # porte le régime fiscal de son pays et de son millésime (ADR 0002).
         st.session_state.catalog_id = st.selectbox(
@@ -109,8 +128,7 @@ def render_sidebar():
 
 def render_saved_inputs():
     """Télécharger la saisie dans un fichier, ou la recharger."""
-    st.markdown("---")
-    st.markdown("### 💾 Votre saisie")
+    st.markdown("### Votre saisie")
     st.download_button(
         "Télécharger ma saisie", dump_inputs(st.session_state),
         file_name="financyou-saisie.json", mime="application/json",
@@ -129,33 +147,45 @@ def render_saved_inputs():
             del st.session_state[key]
         st.session_state.update(inputs)
         st.session_state.results = None
-        st.success("✅ Saisie rechargée.")
+        st.success("Saisie rechargée.")
     st.caption("Rien n'est conservé par FinancYou : gardez ce fichier pour reprendre plus tard.")
 
 
 def page_home():
     """Présentation et étapes."""
-    st.markdown("# 💰 FinancYou")
-    st.markdown(
-        "Projection du patrimoine après frais et impôts, sur des scénarios "
-        "économiques simulés, et répartition des versements entre les placements "
-        "du catalogue."
+    page_header(
+        "Votre patrimoine, projeté après frais et impôts",
+        eyebrow="FinancYou",
+        lead="Sur des scénarios économiques simulés, FinancYou répartit vos versements "
+             "entre les placements du catalogue et projette votre patrimoine, net de "
+             "frais et d'impôts.",
     )
+    steps = [
+        ("Profil et versements", "Âge, horizon, revenus, épargne mensuelle."),
+        ("Épargne existante", "Ce que vous détenez déjà, laissé en place."),
+        ("Projets", "Facultatif : les dépenses prévues, pour placer chaque euro "
+                    "jusqu'au projet qui l'utilisera."),
+        ("Projection", "Répartition des nouveaux versements et patrimoine projeté."),
+    ]
     st.markdown(
-        "1. **Profil et versements** : âge, horizon, revenus, épargne mensuelle.\n"
-        "2. **Épargne existante** : ce que vous détenez déjà, laissé en place.\n"
-        "3. **Projets** (facultatif) : les dépenses prévues, pour placer chaque euro "
-        "jusqu'au projet qui l'utilisera.\n"
-        "4. **Projection** : répartition des nouveaux versements et patrimoine projeté."
+        '<div class="fy-steps">' + "".join(
+            f'<div class="fy-step"><div class="fy-step-num">{k:02d}</div>'
+            f'<div class="fy-step-title">{title}</div>'
+            f'<div class="fy-step-text">{text}</div></div>'
+            for k, (title, text) in enumerate(steps, start=1)
+        ) + '</div>',
+        unsafe_allow_html=True,
     )
-    if st.button("📝 Commencer", type="primary"):
+    if st.button("Commencer", type="primary"):
         st.session_state.page = "Profile"
         st.rerun()
 
 
 def page_profile():
     """Saisie du profil et des versements."""
-    st.markdown("# 👤 Profil et versements")
+    page_header("Profil et versements", eyebrow="Votre situation",
+                lead="Âge, horizon, revenus et épargne mensuelle. Aucun champ n'est "
+                     "prérempli : ce qui n'est pas saisi n'est pas supposé.")
     saved = st.session_state.form or {}
 
     with st.form("profile"):
@@ -217,7 +247,7 @@ def page_profile():
             "Le fonds en euros compte pour sa part d'actions et d'obligations ; "
             "le Livret A ne compte ni comme action ni comme obligation."
         )
-        submitted = st.form_submit_button("💾 Enregistrer", type="primary")
+        submitted = st.form_submit_button("Enregistrer", type="primary")
 
     if submitted:
         required = {
@@ -241,16 +271,16 @@ def page_profile():
             'min_bond': min_bond / 100 if floor_bond else None,
         }
         st.session_state.results = None
-        st.success("✅ Profil enregistré.")
+        st.success("Profil enregistré.")
 
 
 def page_holdings():
     """Saisie de l'épargne existante, laissée dans ses placements."""
-    st.markdown("# 💼 Épargne existante")
-    st.markdown(
-        "Ce que vous détenez déjà reste dans son placement : il n'est pas réalloué, "
-        "s'ajoute au patrimoine projeté, donne son ancienneté à son enveloppe et "
-        "s'impute sur les plafonds de versement."
+    page_header(
+        "Épargne existante", eyebrow="Votre patrimoine",
+        lead="Ce que vous détenez déjà reste dans son placement : il n'est pas réalloué, "
+             "s'ajoute au patrimoine projeté, donne son ancienneté à son enveloppe et "
+             "s'impute sur les plafonds de versement.",
     )
     catalog = load_placement_catalog(st.session_state.catalog_id)
     labels = {pid: catalog.placement(pid)['label'] for pid in catalog.placement_ids}
@@ -266,9 +296,9 @@ def page_holdings():
         to_remove = st.selectbox(
             "Retirer un avoir", range(len(holdings)),
             format_func=lambda k: f"{labels.get(holdings[k]['placement'])} "
-                                  f"({holdings[k]['value']:,.0f} €)",
+                                  f"({fr_euros(holdings[k]['value'])})",
         )
-        if st.button("🗑️ Retirer"):
+        if st.button("Retirer"):
             holdings.pop(to_remove)
             st.session_state.results = None
             st.rerun()
@@ -285,7 +315,7 @@ def page_holdings():
         years_held = st.number_input(
             "Ancienneté de l'enveloppe (années)", 0.0, 100.0, None, 1.0
         )
-        if st.form_submit_button("➕ Ajouter"):
+        if st.form_submit_button("Ajouter", type="primary"):
             if None in (value, contributions, years_held):
                 st.error("Renseignez la valeur, les versements et l'ancienneté.")
             else:
@@ -297,12 +327,12 @@ def page_holdings():
 
 def page_projects():
     """Saisie des projets du foyer, au format du R : début, versements, durée, revente."""
-    st.markdown("# 🎯 Projets")
-    st.markdown(
-        "Un projet est une dépense datée : un versement initial l'année de début, "
-        "puis un versement chaque année pendant la durée, et une éventuelle revente "
-        "en fin de projet, qui s'ajoute au dernier versement. L'argent d'un projet "
-        "proche est placé à court terme, l'épargne de long terme à long terme."
+    page_header(
+        "Projets", eyebrow="Vos projets · Facultatif",
+        lead="Un projet est une dépense datée : un versement initial l'année de début, "
+             "puis un versement chaque année pendant la durée, et une éventuelle revente "
+             "en fin de projet, qui s'ajoute au dernier versement. L'argent d'un projet "
+             "proche est placé à court terme, l'épargne de long terme à long terme.",
     )
     projects = st.session_state.projects
     if projects:
@@ -316,7 +346,7 @@ def page_projects():
             "Retirer un projet", range(len(projects)),
             format_func=lambda k: projects[k]['name'],
         )
-        if st.button("🗑️ Retirer le projet"):
+        if st.button("Retirer le projet"):
             projects.pop(to_remove)
             st.session_state.results = None
             st.rerun()
@@ -357,7 +387,7 @@ def page_projects():
                     None, int(step) if whole else step,
                     key=f"project_{template_id}_{field.key}",
                 )
-        if st.form_submit_button("➕ Ajouter le projet"):
+        if st.form_submit_button("Ajouter le projet", type="primary"):
             try:
                 row = project_row(template_id, name, values)
                 build_projects([row])
@@ -385,7 +415,7 @@ def render_work_changes():
             'name': 'Projet', 'earner': 'Adulte', 'start_year': 'Début (dans n ans)',
             'years': 'Durée (ans)', 'worked_share': 'Part travaillée (%)',
         }), use_container_width=True)
-        if st.button("🗑️ Retirer le dernier temps partiel ou congé"):
+        if st.button("Retirer le dernier temps partiel ou congé"):
             changes.pop()
             st.session_state.results = None
             st.rerun()
@@ -407,7 +437,7 @@ def render_work_changes():
             "Part travaillée (%)", 0.0, 100.0, None, 10.0, key="work_share",
             help="80 pour un temps partiel à 80 %, 0 pour un congé sans solde.",
         )
-        if st.form_submit_button("➕ Ajouter le temps partiel ou le congé"):
+        if st.form_submit_button("Ajouter le temps partiel ou le congé", type="primary"):
             if not name.strip() or None in (start, years, share):
                 st.error("Renseignez le nom, le début, la durée et la part travaillée.")
                 return
@@ -433,10 +463,10 @@ def _as_percent(value):
 
 def page_budget():
     """Budget du foyer, facultatif : son épargne libre remplace les versements du profil."""
-    st.markdown("# 🏡 Budget du foyer")
+    page_header("Budget du foyer", eyebrow="Votre foyer · Facultatif")
     form = st.session_state.form
     if form is None:
-        st.warning("⚠️ Enregistrez d'abord votre profil : l'épargne actuelle en vient.")
+        st.warning("Enregistrez d'abord votre profil : l'épargne actuelle en vient.")
         return
     st.markdown(
         "Revenus, retraite, impôt, loyer et crédits, année par année. Les dépenses "
@@ -449,7 +479,7 @@ def page_budget():
             'name': 'Crédit', 'annual_payment': 'Annuité (€)', 'rate': 'Taux',
             'years_left': 'Années restantes',
         }), use_container_width=True)
-        if st.button("🗑️ Retirer le dernier crédit"):
+        if st.button("Retirer le dernier crédit"):
             loans.pop()
             st.session_state.results = None
             st.rerun()
@@ -460,7 +490,7 @@ def page_budget():
         payment = st.number_input("Annuité (€)", 0.0, None, None, 500.0)
         rate = st.number_input("Taux annuel (%)", 0.0, 30.0, None, 0.1)
         years_left = st.number_input("Annuités restantes", 0, 50, None, 1)
-        if st.form_submit_button("➕ Ajouter le crédit"):
+        if st.form_submit_button("Ajouter le crédit", type="primary"):
             if not name.strip() or None in (payment, rate, years_left):
                 st.error("Renseignez le nom, l'annuité, le taux et la durée restante.")
             else:
@@ -536,7 +566,7 @@ def page_budget():
             help="Votre niveau de vie, donc votre consommation, suivra-t-il l'évolution "
                  "de vos revenus ?",
         )
-        submitted = st.form_submit_button("💾 Enregistrer le budget", type="primary")
+        submitted = st.form_submit_button("Enregistrer le budget", type="primary")
     if submitted:
         if any(e['taxable_income'] is None or e['annual_growth'] is None for e in earners):
             st.error("Renseignez le revenu et son évolution pour chaque adulte.")
@@ -569,7 +599,7 @@ def page_budget():
             'expenses_follow_income': follow,
         }
         st.session_state.results = None
-        st.success("✅ Budget enregistré.")
+        st.success("Budget enregistré.")
     if st.session_state.budget and st.button("Ne plus utiliser le budget"):
         st.session_state.budget = None
         st.session_state.results = None
@@ -633,12 +663,12 @@ def render_home_questions(home, rent):
 
 def page_rentals():
     """Biens achetés à crédit pour être loués nus ; ils entrent dans le budget du foyer."""
-    st.markdown("# 🏢 Investissement locatif")
-    st.markdown(
-        "Un bien acheté à crédit et loué nu : l'apport, les annuités, les loyers, les "
-        "charges et l'impôt entrent dans le budget du foyer. Les "
-        "hypothèses du bien sont les vôtres, sans valeur par défaut ; sa valeur suit "
-        "ensuite les scénarios immobiliers du GSE."
+    page_header(
+        "Investissement locatif", eyebrow="Immobilier · Facultatif",
+        lead="Un bien acheté à crédit et loué nu : l'apport, les annuités, les loyers, les "
+             "charges et l'impôt entrent dans le budget du foyer. Les "
+             "hypothèses du bien sont les vôtres, sans valeur par défaut ; sa valeur suit "
+             "ensuite les scénarios immobiliers du GSE.",
     )
     if st.session_state.budget is None:
         st.info("Ces biens ne comptent qu'avec un budget du foyer enregistré.")
@@ -658,7 +688,7 @@ def page_rentals():
     if properties:
         st.dataframe(pd.DataFrame(properties).rename(columns=RENTAL_LABELS),
                      use_container_width=True)
-        if st.button("🗑️ Retirer le dernier bien"):
+        if st.button("Retirer le dernier bien"):
             properties.pop()
             st.session_state.results = None
             st.rerun()
@@ -696,7 +726,7 @@ def page_rentals():
             "Type de logement", ['new', 'renovated_old'], key="housing_type",
             format_func={'new': "Neuf", 'renovated_old': "Ancien rénové (travaux ≥ 30 %)"}.get,
         )
-        submitted = st.form_submit_button("➕ Ajouter le bien")
+        submitted = st.form_submit_button("Ajouter le bien", type="primary")
     if submitted:
         values = (price, market_value, down, rate, years, purchase, gross_yield, collected,
                   charges, rent_growth)
@@ -723,16 +753,20 @@ def page_rentals():
 
 def page_projection():
     """Calcul et résultats."""
-    st.markdown("# 📊 Projection")
+    page_header(
+        "Projection", eyebrow="Résultats",
+        lead="Répartition optimale des nouveaux versements et patrimoine projeté, après "
+             "frais et impôts, sur les scénarios économiques simulés.",
+    )
     form = st.session_state.form
     if form is None:
-        st.warning("⚠️ Enregistrez d'abord votre profil.")
+        st.warning("Enregistrez d'abord votre profil.")
         if st.button("Aller au profil"):
             st.session_state.page = "Profile"
             st.rerun()
         return
 
-    if st.button("🚀 Lancer la projection", type="primary"):
+    if st.button("Lancer la projection", type="primary"):
         with st.spinner("Calcul en cours..."):
             st.session_state.results = run_analysis(form)
 
@@ -747,17 +781,17 @@ def display_results(results):
     statistics = optimization['simulation_results']['statistics']
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Rendement annualisé attendu", f"{portfolio['expected_return']:.2%}")
-    col2.metric("Volatilité", f"{portfolio['expected_volatility']:.2%}")
-    if portfolio['sharpe_ratio'] is not None:
-        col3.metric("Ratio de Sharpe", f"{portfolio['sharpe_ratio']:.2f}")
-    col4.metric(
+    col1.metric(
         f"Patrimoine net médian à {portfolio['horizon']} ans",
-        f"{statistics['median_terminal_wealth']:,.0f} €",
+        fr_euros(statistics['median_terminal_wealth']),
     )
+    col2.metric("Rendement annualisé attendu", fr_percent(portfolio['expected_return']))
+    col3.metric("Volatilité", fr_percent(portfolio['expected_volatility']))
+    if portfolio['sharpe_ratio'] is not None:
+        col4.metric("Ratio de Sharpe", fr_amount(portfolio['sharpe_ratio'], 2))
     envelope = portfolio.get('envelope_value')
     if envelope is not None and envelope['value'] is not None:
-        st.metric(
+        col1.metric(
             "Valeur des enveloppes",
             f"{envelope['value'] * 1e4:+.0f} pb par an",
             help=(
@@ -779,9 +813,9 @@ def display_results(results):
     st.markdown("### Patrimoine par niveau de probabilité, hors projets")
     bands = results.get('wealth_bands')
     if bands is not None:
-        st.line_chart(bands.rename(columns={
+        st.plotly_chart(band_chart(bands.rename(columns={
             'p5': '5 %', 'p10': '10 %', 'p50': 'Médiane', 'p90': '90 %', 'p95': '95 %',
-        }))
+        }), BAND_COLORS), use_container_width=True)
         st.caption(
             "La courbe 10 % se lit : une chance sur dix d'être en dessous. Patrimoine "
             "avant impôt de sortie, épargne existante comprise, sans vos projets ; "
@@ -794,7 +828,8 @@ def display_results(results):
         'Placement': [catalog.placement(p)['label'] for p in portfolio['weights']],
         'Part': list(portfolio['weights'].values()),
     })
-    st.dataframe(weights.style.format({'Part': '{:.1%}'}), use_container_width=True)
+    st.dataframe(weights.style.format({'Part': lambda v: fr_percent(v, 1)}),
+                 use_container_width=True, hide_index=True)
     st.caption(optimization['constraints_explanation'])
     for placement_id, reason in optimization.get('excluded_placements', {}).items():
         st.info(f"{catalog.placement(placement_id)['label']} : {reason} "
@@ -808,6 +843,10 @@ def display_results(results):
             x=[label for label, _ in steps] + ["Patrimoine net"],
             y=[amount for _, amount in steps] + [waterfall.net_wealth],
             measure=["relative"] * len(steps) + ["total"],
+            increasing={'marker': {'color': POSITIVE}},
+            decreasing={'marker': {'color': NEGATIVE}},
+            totals={'marker': {'color': NAVY}},
+            connector={'line': {'color': "#C5CDD8", 'width': 1}},
         ))
         fig.update_layout(yaxis_title="€, moyenne sur les scénarios", showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
@@ -823,6 +862,8 @@ def display_results(results):
             frontier, x='volatility', y='return',
             labels={'volatility': 'Volatilité', 'return': 'Rendement attendu'},
         )
+        fig.update_traces(marker={'color': NAVY, 'size': 8})
+        fig.update_layout(xaxis_tickformat='.1%', yaxis_tickformat='.1%')
         st.plotly_chart(fig, use_container_width=True)
 
     with st.expander("Limites connues du catalogue"):
@@ -834,6 +875,25 @@ def display_results(results):
 
     if 'tranche_plan' in results:
         display_tranche_plan(results['tranche_plan'], catalog)
+
+
+def band_chart(bands, colors):
+    """
+    Courbes par niveau de probabilité, une couleur par courbe : les bornes
+    extrêmes en clair, la médiane en trait plein marine.
+    """
+    palette = colors if isinstance(colors, dict) else dict(zip(bands.columns, colors, strict=True))
+    fig = go.Figure()
+    for column in bands.columns:
+        median = column == 'Médiane'
+        fig.add_scatter(
+            x=bands.index, y=bands[column], name=column, mode='lines',
+            line={'color': palette[column], 'width': 2.5 if median else 1.5,
+                  'dash': None if median else 'dot'},
+            hovertemplate="%{y:,.0f} €<extra>" + column + "</extra>",
+        )
+    fig.update_layout(xaxis_title="Année", yaxis_title="€", hovermode='x unified')
+    return fig
 
 
 def display_capital_timeline(timeline, available_savings):
@@ -854,16 +914,16 @@ def display_capital_timeline(timeline, available_savings):
             # foncé pour le long terme ; une entrée de légende par durée.
             group = (f"Placée {tranche.duration} an(s)" if tranche.duration > 0
                      else "Arrive à l'horizon, non placée")
-            color = sample_colorscale('Viridis', 1 - tranche.duration / longest)[0]
+            color = sample_colorscale(TRANCHE_SCALE, 1 - tranche.duration / longest)[0]
             fig.add_bar(x=capital.index, y=layers[k], name=group, legendgroup=group,
                         showlegend=group not in shown, marker_color=color,
                         legendrank=longest - tranche.duration,
                         hovertemplate="%{y:,.0f} €<extra>" + tranche_label(tranche) + "</extra>")
             shown.add(group)
     fig.add_scatter(x=capital.index, y=capital, mode='lines+markers', name="Capital constitué",
-                    line={'color': '#d62728', 'width': 3})
+                    line={'color': ACCENT, 'width': 2.5}, marker={'size': 5})
     fig.update_layout(barmode='stack', bargap=0.05, xaxis_title="Année",
-                      yaxis_title="€", legend={'orientation': 'h', 'y': -0.25})
+                      yaxis_title="€", height=560)
     st.plotly_chart(fig, use_container_width=True)
     start = ("l'épargne déjà disponible saisie" if available_savings is not None
              else "0 € d'épargne déjà disponible (non saisie, page Projets)")
@@ -890,18 +950,19 @@ def display_budget(budget):
     indicators = budget.get('indicators')
     if indicators is not None:
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Revenus sur l'horizon", f"{indicators['total_income']:,.0f} €")
-        col2.metric("Impôts sur l'horizon", f"{indicators['total_income_tax']:,.0f} €",
+        col1.metric("Revenus sur l'horizon", fr_euros(indicators['total_income']))
+        col2.metric("Impôts sur l'horizon", fr_euros(indicators['total_income_tax']),
                     help="Impôt sur le revenu et prélèvements sociaux sur les loyers.")
         if indicators['max_debt_ratio'] is not None:
-            col3.metric("Taux d'endettement maximal", f"{indicators['max_debt_ratio']:.1%}",
+            col3.metric("Taux d'endettement maximal",
+                        fr_percent(indicators['max_debt_ratio'], 1),
                         help="Loyer et annuités rapportés aux revenus d'activité et pensions.")
         else:
             col3.caption(f"Taux d'endettement non calculé : {indicators['debt_ratio_reason']}.")
-        col4.metric("Épargne libre minimale", f"{indicators['min_free_savings']:,.0f} €",
+        col4.metric("Épargne libre minimale", fr_euros(indicators['min_free_savings']),
                     help=f"Atteinte l'année {indicators['min_free_savings_year']}. "
                          "Négative, le foyer puise dans son capital.")
-    st.line_chart(table['Épargne libre'])
+    st.line_chart(table['Épargne libre'], color=NAVY)
     st.caption(
         "L'épargne libre est la part de vos revenus que vous mettez de côté chaque "
         "année, une fois payés l'impôt, le loyer, les crédits et les dépenses courantes. "
@@ -911,16 +972,16 @@ def display_budget(budget):
     if 'property_equity' in budget:
         st.markdown("Valeur nette des biens loués selon les scénarios immobiliers : valeur "
                     "moins capital restant dû, avant frais et impôt de revente")
-        st.line_chart(budget['property_equity'].rename(columns={
+        st.plotly_chart(band_chart(budget['property_equity'].rename(columns={
             'p5': '5 % des scénarios', 'median': 'Médiane', 'p95': '95 % des scénarios',
-        }))
+        }), SCENARIO_BAND_COLORS), use_container_width=True)
     if 'home_equity' in budget:
         st.markdown("Valeur nette de votre résidence principale selon les scénarios "
                     "immobiliers : valeur moins capital restant dû, avant frais de revente")
-        st.line_chart(budget['home_equity'].rename(columns={
+        st.plotly_chart(band_chart(budget['home_equity'].rename(columns={
             'p5': '5 % des scénarios', 'median': 'Médiane', 'p95': '95 % des scénarios',
-        }))
-    st.dataframe(table.style.format('{:,.0f}'), use_container_width=True)
+        }), SCENARIO_BAND_COLORS), use_container_width=True)
+    st.dataframe(table.style.format(fr_amount), use_container_width=True)
     with st.expander("Limites connues du budget"):
         for gap in budget['known_gaps']:
             st.markdown(f"- {gap}")
@@ -939,17 +1000,17 @@ def display_tranche_plan(plan, catalog):
     st.plotly_chart(fig, use_container_width=True)
     if plan['unplaced'].any():
         st.caption(
-            f"{plan['unplaced'].max():,.0f} € n'arrivent qu'à l'horizon et ne sont pas placés."
+            f"{fr_euros(plan['unplaced'].max())} n'arrivent qu'à l'horizon et ne sont pas placés."
         )
     capital = plan['capital']
     low = min(range(len(capital)), key=capital.__getitem__)
     st.caption(
         f"Épargne cumulée avec vos projets, hors rendement : au plus bas, "
-        f"{capital[low]:,.0f} € l'année {low}."
+        f"{fr_euros(capital[low])} l'année {low}."
     )
     st.markdown("Répartition optimale selon la durée de placement (années)")
     weights = plan['weights_by_horizon'].rename(index=labels)
-    st.dataframe(weights.style.format('{:.1%}'), use_container_width=True)
+    st.dataframe(weights.style.format(lambda v: fr_percent(v, 1)), use_container_width=True)
     with st.expander("Limites connues du plan par tranches"):
         for gap in plan['known_gaps']:
             st.markdown(f"- {gap}")
@@ -989,6 +1050,7 @@ def run_analysis(form):
 def main():
     """Point d'entrée de l'application."""
     init_session_state()
+    apply_theme()
     render_sidebar()
     page = st.session_state.get('page', 'Home')
     if page == 'Profile':
