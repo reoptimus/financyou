@@ -55,7 +55,7 @@ dependencies = [
 [project.optional-dependencies]
 # Interface web Streamlit.
 web = [
-    "streamlit>=1.46,<2",
+    "streamlit>=1.48,<2",
     "plotly>=5.17,<7",
 ]
 # Outillage de test et de qualite.

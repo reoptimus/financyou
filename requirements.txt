@@ -18,5 +18,5 @@ matplotlib>=3.8,<4
 jsonschema>=4.20,<5
 
 # --- Interface web Streamlit ---
-streamlit>=1.46,<2
+streamlit>=1.48,<2
 plotly>=5.17,<7

@@ -13,6 +13,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 from plotly.colors import sample_colorscale
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -35,12 +36,13 @@ from web_ui.pipeline import (
 from web_ui.project_templates import FIELD_KINDS, TEMPLATES, project_row
 from web_ui.saved_inputs import dump_inputs, load_inputs
 from web_ui.theme import (
-    ACCENT,
     BAND_COLORS,
-    NAVY,
     NEGATIVE,
+    PLOTLY_CONFIG,
     POSITIVE,
+    PRIMARY,
     SCENARIO_BAND_COLORS,
+    TIMELINE_LINE,
     TRANCHE_SCALE,
     apply_theme,
     fr_amount,
@@ -53,7 +55,7 @@ st.set_page_config(
     page_title="FinancYou",
     page_icon=":material/account_balance:",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 
 PAGES = {
@@ -88,21 +90,26 @@ def init_session_state():
             st.session_state[key] = value
 
 
-def render_sidebar():
-    """Navigation et réglages du calcul."""
-    with st.sidebar:
-        st.markdown(
-            '<div class="fy-brand"><div class="fy-brand-name">FinancYou</div>'
-            '<div class="fy-brand-tag">Projection patrimoniale</div></div>',
-            unsafe_allow_html=True,
-        )
-        current = st.session_state.get('page', 'Home')
-        for label, page in PAGES.items():
-            if st.button(label, use_container_width=True, key=f"nav_{page}",
-                         type="primary" if page == current else "secondary"):
-                st.session_state.page = page
-                st.rerun()
+def render_navigation():
+    """
+    En-tête collé en haut de page : la marque, puis les pages en pastilles sur
+    une seule ligne, qui défile horizontalement sur un écran étroit.
+    """
+    current = st.session_state.get('page', 'Home')
+    with st.container(key="fy_header"):
+        st.markdown('<div class="fy-brand">Financ<span>You</span></div>',
+                    unsafe_allow_html=True)
+        with st.container(key="fy_nav", horizontal=True):
+            for label, page in PAGES.items():
+                if st.button(label, key=f"nav_{page}",
+                             type="primary" if page == current else "tertiary"):
+                    st.session_state.page = page
+                    st.rerun()
 
+
+def render_sidebar():
+    """Réglages du calcul et sauvegarde de la saisie, dans le panneau latéral."""
+    with st.sidebar:
         st.markdown("### Réglages du calcul")
         # Les catalogues proposés se déduisent des fichiers livrés ; chacun
         # porte le régime fiscal de son pays et de son millésime (ADR 0002).
@@ -124,6 +131,16 @@ def render_sidebar():
             "Nombre de scénarios", 10, 500, 100, 10, key="scenarios_slider"
         )
         render_saved_inputs()
+        # Sur un écran étroit, amène la page en cours dans la partie visible de la
+        # navigation, qui défile horizontalement.
+        components.html(
+            "<script>const b = window.parent.document.querySelector("
+            "'.st-key-fy_nav button[kind=\"primary\"]');"
+            "if (b) b.scrollIntoView({inline: 'center', block: 'nearest'});</script>"
+            # Le nom de la page change le contenu, donc relance le script.
+            f"<!-- {st.session_state.get('page', 'Home')} -->",
+            height=0,
+        )
 
 
 def render_saved_inputs():
@@ -155,10 +172,11 @@ def page_home():
     """Présentation et étapes."""
     page_header(
         "Votre patrimoine, projeté après frais et impôts",
-        eyebrow="FinancYou",
+        eyebrow="Projection patrimoniale",
         lead="Sur des scénarios économiques simulés, FinancYou répartit vos versements "
              "entre les placements du catalogue et projette votre patrimoine, net de "
              "frais et d'impôts.",
+        hero=True,
     )
     steps = [
         ("Profil et versements", "Âge, horizon, revenus, épargne mensuelle."),
@@ -169,14 +187,16 @@ def page_home():
     ]
     st.markdown(
         '<div class="fy-steps">' + "".join(
-            f'<div class="fy-step"><div class="fy-step-num">{k:02d}</div>'
+            f'<div class="fy-step"><div class="fy-step-num">{k}</div>'
             f'<div class="fy-step-title">{title}</div>'
             f'<div class="fy-step-text">{text}</div></div>'
             for k, (title, text) in enumerate(steps, start=1)
         ) + '</div>',
         unsafe_allow_html=True,
     )
-    if st.button("Commencer", type="primary"):
+    with st.container(key="fy_start"):
+        start = st.button("Commencer", type="primary")
+    if start:
         st.session_state.page = "Profile"
         st.rerun()
 
@@ -815,7 +835,7 @@ def display_results(results):
     if bands is not None:
         st.plotly_chart(band_chart(bands.rename(columns={
             'p5': '5 %', 'p10': '10 %', 'p50': 'Médiane', 'p90': '90 %', 'p95': '95 %',
-        }), BAND_COLORS), use_container_width=True)
+        }), BAND_COLORS), use_container_width=True, config=PLOTLY_CONFIG)
         st.caption(
             "La courbe 10 % se lit : une chance sur dix d'être en dessous. Patrimoine "
             "avant impôt de sortie, épargne existante comprise, sans vos projets ; "
@@ -845,11 +865,11 @@ def display_results(results):
             measure=["relative"] * len(steps) + ["total"],
             increasing={'marker': {'color': POSITIVE}},
             decreasing={'marker': {'color': NEGATIVE}},
-            totals={'marker': {'color': NAVY}},
+            totals={'marker': {'color': PRIMARY}},
             connector={'line': {'color': "#C5CDD8", 'width': 1}},
         ))
         fig.update_layout(yaxis_title="€, moyenne sur les scénarios", showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
         st.caption(
             "Chaque coût est l'écart entre deux projections, avec et sans lui : il "
             "compte aussi ce que l'argent prélevé aurait rapporté jusqu'à l'horizon."
@@ -862,9 +882,9 @@ def display_results(results):
             frontier, x='volatility', y='return',
             labels={'volatility': 'Volatilité', 'return': 'Rendement attendu'},
         )
-        fig.update_traces(marker={'color': NAVY, 'size': 8})
+        fig.update_traces(marker={'color': PRIMARY, 'size': 8})
         fig.update_layout(xaxis_tickformat='.1%', yaxis_tickformat='.1%')
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
     with st.expander("Limites connues du catalogue"):
         for gap in optimization['known_gaps']:
@@ -908,30 +928,27 @@ def display_capital_timeline(timeline, available_savings):
     layers = timeline['layers']
     if layers is not None:
         longest = max(1, max(t.duration for t in timeline['tranches']))
-        shown = set()
         for k, tranche in enumerate(timeline['tranches']):
             # Une couleur par durée de placement : clair pour le court terme,
-            # foncé pour le long terme ; une entrée de légende par durée.
+            # foncé pour le long terme ; la durée s'affiche au survol.
             group = (f"Placée {tranche.duration} an(s)" if tranche.duration > 0
                      else "Arrive à l'horizon, non placée")
             color = sample_colorscale(TRANCHE_SCALE, 1 - tranche.duration / longest)[0]
-            fig.add_bar(x=capital.index, y=layers[k], name=group, legendgroup=group,
-                        showlegend=group not in shown, marker_color=color,
-                        legendrank=longest - tranche.duration,
+            fig.add_bar(x=capital.index, y=layers[k], name=group, showlegend=False,
+                        marker_color=color,
                         hovertemplate="%{y:,.0f} €<extra>" + tranche_label(tranche) + "</extra>")
-            shown.add(group)
     fig.add_scatter(x=capital.index, y=capital, mode='lines+markers', name="Capital constitué",
-                    line={'color': ACCENT, 'width': 2.5}, marker={'size': 5})
-    fig.update_layout(barmode='stack', bargap=0.05, xaxis_title="Année",
-                      yaxis_title="€", height=560)
-    st.plotly_chart(fig, use_container_width=True)
+                    line={'color': TIMELINE_LINE, 'width': 2.5}, marker={'size': 5})
+    fig.update_layout(barmode='stack', bargap=0.05, xaxis_title="Année", yaxis_title="€")
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
     start = ("l'épargne déjà disponible saisie" if available_savings is not None
              else "0 € d'épargne déjà disponible (non saisie, page Projets)")
     st.caption(
         "Évolution certaine des flux, en euros : l'épargne versée chaque année s'ajoute, "
         "les projets payés se retranchent, sans rendement ni scénario économique. Chaque "
         "bande est une tranche de cette courbe, découpée horizontalement : elle est placée "
-        f"à l'horizon de sa durée. La courbe part de {start}."
+        f"à l'horizon de sa durée : foncée si elle est placée longtemps, claire si elle "
+        f"l'est peu de temps (survolez une bande pour sa durée). La courbe part de {start}."
     )
     if timeline['reason'] is not None:
         st.warning(f"La courbe ne se découpe pas en tranches : {timeline['reason']}")
@@ -962,7 +979,7 @@ def display_budget(budget):
         col4.metric("Épargne libre minimale", fr_euros(indicators['min_free_savings']),
                     help=f"Atteinte l'année {indicators['min_free_savings_year']}. "
                          "Négative, le foyer puise dans son capital.")
-    st.line_chart(table['Épargne libre'], color=NAVY)
+    st.line_chart(table['Épargne libre'], color=PRIMARY)
     st.caption(
         "L'épargne libre est la part de vos revenus que vous mettez de côté chaque "
         "année, une fois payés l'impôt, le loyer, les crédits et les dépenses courantes. "
@@ -974,13 +991,13 @@ def display_budget(budget):
                     "moins capital restant dû, avant frais et impôt de revente")
         st.plotly_chart(band_chart(budget['property_equity'].rename(columns={
             'p5': '5 % des scénarios', 'median': 'Médiane', 'p95': '95 % des scénarios',
-        }), SCENARIO_BAND_COLORS), use_container_width=True)
+        }), SCENARIO_BAND_COLORS), use_container_width=True, config=PLOTLY_CONFIG)
     if 'home_equity' in budget:
         st.markdown("Valeur nette de votre résidence principale selon les scénarios "
                     "immobiliers : valeur moins capital restant dû, avant frais de revente")
         st.plotly_chart(band_chart(budget['home_equity'].rename(columns={
             'p5': '5 % des scénarios', 'median': 'Médiane', 'p95': '95 % des scénarios',
-        }), SCENARIO_BAND_COLORS), use_container_width=True)
+        }), SCENARIO_BAND_COLORS), use_container_width=True, config=PLOTLY_CONFIG)
     st.dataframe(table.style.format(fr_amount), use_container_width=True)
     with st.expander("Limites connues du budget"):
         for gap in budget['known_gaps']:
@@ -997,7 +1014,7 @@ def display_tranche_plan(plan, catalog):
     )
     fig = px.area(long_form, x='year', y='Montant (€)', color='Placement',
                   labels={'year': 'Année'})
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
     if plan['unplaced'].any():
         st.caption(
             f"{fr_euros(plan['unplaced'].max())} n'arrivent qu'à l'horizon et ne sont pas placés."
@@ -1051,6 +1068,7 @@ def main():
     """Point d'entrée de l'application."""
     init_session_state()
     apply_theme()
+    render_navigation()
     render_sidebar()
     page = st.session_state.get('page', 'Home')
     if page == 'Profile':
